@@ -57,6 +57,19 @@ def ja_nej(value):
     return "✅" if value else "❌"
 
 
+def format_innehavstid(dagar):
+    if dagar is None:
+        return "—"
+    return f"{dagar} dagar" if dagar < 90 else f"{dagar / 365:.1f} år"
+
+
+def nya_pa_listan(log, typ, dagar=7):
+    """Tickers som fått en '{typ}'-loggpost de senaste `dagar` dagarna."""
+    from datetime import date, timedelta
+    cutoff = (date.today() - timedelta(days=dagar)).isoformat()
+    return {e["ticker"] for e in log if e["typ"] == typ and e["datum"] >= cutoff}
+
+
 # ----------------------------------------------------------------------
 # Sidopanel
 # ----------------------------------------------------------------------
@@ -173,12 +186,16 @@ with tab_rang:
 # --- Konsensus ---
 with tab_konsensus:
     st.subheader(f"Konsensusaktier — innehav i minst {ea.MIN_PORTFOLIOS} av {len(data['profiler'])} portföljer")
+    log = data.get("historik", [])
+    innehav = data.get("innehav", {})
+    nya_kons = nya_pa_listan(log, "IN I KONSENSUS")
     rows = []
     for tk in consensus_order:
         a = analyses.get(tk, {})
         c = claude.get(tk, {})
+        h = innehav.get(tk, {})
         rows.append({
-            "Aktie": tk,
+            "Aktie": f"🆕 {tk}" if tk in nya_kons else tk,
             "Stigande trend": trend_label(a),
             "Portföljer": consensus[tk]["count"],
             "Snittvikt (%)": round(consensus[tk]["avg_weight"], 2),
@@ -187,12 +204,16 @@ with tab_konsensus:
             "Analytiker": a.get("rekommendation"),
             "Riktkurs": a.get("riktkurs"),
             "Uppsida (%)": a.get("uppsida_%"),
+            "Ägd längst": format_innehavstid(h.get("längst_dagar")),
+            "Inv. vinst (%)": h.get("snitt_vinst_pct", "—"),
             "Claude": c.get("rekommendation", "—"),
         })
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
     st.caption(
-        "Stigande trend = priset över MA200 **och** MA200 stigande. "
-        "Aktier utan stigande trend kan aldrig få KÖP av Claude."
+        "Stigande trend = priset över MA200 **och** MA200 stigande — utan den kan Claude aldrig ge KÖP. "
+        "🆕 = ny på listan senaste 7 dagarna. "
+        "**Ägd längst** = äldsta öppna positionen bland investerarna; **Inv. vinst** = deras "
+        "genomsnittliga upparbetade vinst — lång tid + hög vinst = risk för vinsthemtagning."
     )
 
     # Nära konsensus — en portfölj från att kvala in
@@ -201,12 +222,38 @@ with tab_konsensus:
         st.divider()
         st.subheader(f"🔍 Nära konsensus — i {ea.MIN_PORTFOLIOS - 1} av {len(data['profiler'])} portföljer")
         st.caption("Bevakningslista: köper en investerare till någon av dessa kvalar den in i konsensus.")
-        near_rows = [{
-            "Aktie": tk,
-            "Snittvikt (%)": round(info["avg_weight"], 2),
-            "Ägs av": ", ".join(info.get("holders", [])),
-        } for tk, info in sorted(near.items(), key=lambda x: -x[1]["avg_weight"])]
+        nya_nara = nya_pa_listan(log, "IN I NÄRA KONSENSUS")
+        near_rows = []
+        for tk, info in sorted(near.items(), key=lambda x: -x[1]["avg_weight"]):
+            h = innehav.get(tk, {})
+            near_rows.append({
+                "Aktie": f"🆕 {tk}" if tk in nya_nara else tk,
+                "Snittvikt (%)": round(info["avg_weight"], 2),
+                "Ägs av": ", ".join(info.get("holders", [])),
+                "Ägd längst": format_innehavstid(h.get("längst_dagar")),
+                "Inv. vinst (%)": h.get("snitt_vinst_pct", "—"),
+            })
         st.dataframe(pd.DataFrame(near_rows), use_container_width=True, hide_index=True)
+
+    # Lämnat listorna — när investerarna kliver av
+    from datetime import date as _date, timedelta as _timedelta
+    lamnat_cutoff = (_date.today() - _timedelta(days=30)).isoformat()
+    lamnat = [e for e in log
+              if e["typ"] in ("UT UR KONSENSUS", "UT UR NÄRA KONSENSUS")
+              and e["datum"] >= lamnat_cutoff]
+    st.divider()
+    st.subheader("📤 Lämnat listorna — senaste 30 dagarna")
+    if not lamnat:
+        st.caption("Ingen aktie har lämnat konsensus eller nära konsensus den senaste månaden.")
+    else:
+        lamnat_rows = [{
+            "Datum": e["datum"],
+            "Aktie": e["ticker"],
+            "Lämnade": "Konsensus" if e["typ"] == "UT UR KONSENSUS" else "Nära konsensus",
+            "Detalj": e["detalj"],
+        } for e in lamnat]
+        st.dataframe(pd.DataFrame(lamnat_rows), use_container_width=True, hide_index=True)
+        st.caption("När investerare kliver av ett värdepapper kan det vara en tidig säljsignal.")
 
 # --- Claudes analys ---
 with tab_analys:
@@ -232,6 +279,15 @@ with tab_analys:
             i2.markdown(f"MACD över signal: {ja_nej(a.get('MACD_över_signal'))}")
             i3.markdown(f"1 mån: {a.get('avkastning_1m_%', '—')} %  ·  3 mån: {a.get('avkastning_3m_%', '—')} %")
             i4.markdown(f"Från 52v-toppen: {a.get('avstånd_52v_högsta_%', '—')} %")
+
+            h = innehav.get(tk, {})
+            if h:
+                vinst = h.get("snitt_vinst_pct")
+                st.markdown(
+                    f"💼 Ägd längst: **{format_innehavstid(h.get('längst_dagar'))}** "
+                    f"(av {h.get('längst_profil', '?')}) · "
+                    f"Investerarnas upparbetade snittvinst: **{vinst if vinst is not None else '—'} %**"
+                )
 
             if c:
                 st.markdown("---")

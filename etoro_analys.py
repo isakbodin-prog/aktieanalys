@@ -106,37 +106,62 @@ def resolve_instruments(instrument_ids):
 
 
 def get_portfolio(username):
-    """Hämta en användares live-portfölj. Returnerar dict {ticker: vikt%} eller None."""
+    """Hämta en användares live-portfölj.
+
+    Returnerar (weights, meta) där weights = {ticker: vikt%} och
+    meta = {ticker: {"öppnad": "ÅÅÅÅ-MM-DD", "vinst_pct": x}} — äldsta öppna
+    positionens datum och investeringsviktad vinst. Eller (None, None).
+    """
     print(f"\nHämtar portfölj för: {username}")
     data = api_get(f"/user-info/people/{username}/portfolio/live")
     if not data:
         print(f"  Kunde inte hämta portfölj för '{username}'.")
-        return None
+        return None, None
 
-    # Aggregera investmentPct per instrumentId (en användare kan ha flera positioner i samma instrument)
-    weights = {}
-    for p in data.get("positions") or []:
+    # Aggregera per instrumentId (en användare kan ha flera positioner i samma instrument)
+    weights = {}     # iid -> summerad investmentPct
+    first_open = {}  # iid -> äldsta openTimestamp
+    profit_acc = {}  # iid -> (summa pct*netProfit, summa pct)
+
+    def add_position(p):
         iid = p.get("instrumentId")
-        pct = p.get("investmentPct") or 0
-        if iid is not None:
-            weights[iid] = weights.get(iid, 0) + float(pct)
+        pct = float(p.get("investmentPct") or 0)
+        if iid is None:
+            return
+        weights[iid] = weights.get(iid, 0) + pct
+        ts = p.get("openTimestamp")
+        if ts and (iid not in first_open or ts < first_open[iid]):
+            first_open[iid] = ts
+        profit = p.get("netProfit")
+        if profit is not None and pct:
+            s, w = profit_acc.get(iid, (0.0, 0.0))
+            profit_acc[iid] = (s + pct * float(profit), w + pct)
 
+    for p in data.get("positions") or []:
+        add_position(p)
     # Positioner inuti social trades (kopierade portföljer) räknas också
     for st in data.get("socialTrades") or []:
         for p in st.get("positions") or []:
-            iid = p.get("instrumentId")
-            pct = p.get("investmentPct") or 0
-            if iid is not None:
-                weights[iid] = weights.get(iid, 0) + float(pct)
+            add_position(p)
 
     if not weights:
         print(f"  Portföljen för '{username}' verkar vara tom eller dold.")
-        return None
+        return None, None
 
     id_to_ticker = resolve_instruments(list(weights.keys()))
     out = {id_to_ticker[iid]: round(pct, 2) for iid, pct in weights.items()}
+    meta = {}
+    for iid in weights:
+        ticker = id_to_ticker[iid]
+        m = {}
+        if iid in first_open:
+            m["öppnad"] = first_open[iid][:10]
+        if iid in profit_acc and profit_acc[iid][1]:
+            m["vinst_pct"] = round(profit_acc[iid][0] / profit_acc[iid][1], 1)
+        if m:
+            meta[ticker] = m
     print(f"  {len(out)} innehav hämtade.")
-    return out
+    return out, meta
 
 
 # ----------------------------------------------------------------------
@@ -432,6 +457,12 @@ def claude_analysis(analyses):
         "— högst AVVAKTA, och ange då tydligt vilken nivå som måste återtas för att "
         "trendkriteriet ska vara uppfyllt. Är trendkriteriet uppfyllt, bedöm övriga "
         "indikatorer som vanligt.\n\n"
+        "VINSTHEMTAGNINGSRISK: fälten investerarnas_innehavstid_dagar_* och "
+        "investerarnas_upparbetade_vinst_pct_snitt visar hur länge eToro-investerarna "
+        "ägt aktien och deras upparbetade vinst. Lång innehavstid i kombination med "
+        "hög upparbetad vinst ökar risken att de börjar sälja och ta hem vinsten — "
+        "väg in det i bedömningen och kommentera det uttryckligen när risken är "
+        "förhöjd.\n\n"
         "Svara EXAKT i detta format:\n"
         "REKOMMENDATION: <KÖP | AVVAKTA | SÄLJ>\n"
         "<själva analysen>"
@@ -537,11 +568,12 @@ def gist_push():
         print(f"  OBS: gist-sparning misslyckades ({e}).")
 
 
-def update_history(portfolios, consensus_tickers):
+def update_history(portfolios, consensus_tickers, near_tickers=None):
     """Jämför med förra körningen, logga ändringar och spara ny ögonblicksbild.
 
     Returnerar hela ändringsloggen (nyaste först).
     """
+    near_tickers = near_tickers or []
     from datetime import date
     today = date.today().isoformat()
 
@@ -577,10 +609,25 @@ def update_history(portfolios, consensus_tickers):
 
         old_cons = set(prev.get("consensus", []))
         new_cons = set(consensus_tickers)
+        old_near = set(prev.get("near_consensus") or [])
+        new_near = set(near_tickers)
+
         for tk in sorted(new_cons - old_cons):
-            log("IN I KONSENSUS", "", tk, "finns nu i ≥3 portföljer")
+            detalj = ("upp från nära konsensus" if tk in old_near
+                      else "finns nu i ≥3 portföljer")
+            log("IN I KONSENSUS", "", tk, detalj)
         for tk in sorted(old_cons - new_cons):
-            log("UT UR KONSENSUS", "", tk, "finns i <3 portföljer")
+            detalj = ("ner till nära konsensus (2 portföljer)" if tk in new_near
+                      else "färre än 2 portföljer kvar")
+            log("UT UR KONSENSUS", "", tk, detalj)
+
+        # Nära konsensus-övergångar (bara om förra ögonblicksbilden har listan,
+        # annars skulle första körningen efter uppgraderingen spamma loggen)
+        if "near_consensus" in prev:
+            for tk in sorted(new_near - old_near - old_cons):
+                log("IN I NÄRA KONSENSUS", "", tk, "finns nu i 2 portföljer")
+            for tk in sorted(old_near - new_near - new_cons):
+                log("UT UR NÄRA KONSENSUS", "", tk, "färre än 2 portföljer kvar")
 
         if entries:
             print(f"  {len(entries)} ändringar sedan {prev.get('datum', 'förra körningen')}.")
@@ -590,7 +637,8 @@ def update_history(portfolios, consensus_tickers):
         print("  Första körningen — skapar utgångsläge för historiken.")
 
     state["senaste"] = {"datum": today, "portfolios": portfolios,
-                        "consensus": sorted(consensus_tickers)}
+                        "consensus": sorted(consensus_tickers),
+                        "near_consensus": sorted(near_tickers)}
     state["logg"] = entries + state.get("logg", [])
     with open(HISTORY_FILE, "w") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
@@ -602,9 +650,17 @@ def update_history(portfolios, consensus_tickers):
 # Steg 6: Excel-rapport
 # ----------------------------------------------------------------------
 def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
-                ranking=None, near_consensus=None):
+                ranking=None, near_consensus=None, holding_info=None):
+    from datetime import date, timedelta
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
+
+    holding_info = holding_info or {}
+    nyhets_cutoff = (date.today() - timedelta(days=7)).isoformat()
+
+    def is_new(ticker, typ):
+        return any(e["ticker"] == ticker and e["typ"] == typ and e["datum"] >= nyhets_cutoff
+                   for e in history_log or [])
 
     wb = Workbook()
     hfont = Font(bold=True, color="FFFFFF")
@@ -642,34 +698,58 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
     green = PatternFill("solid", start_color="C6EFCE")
     red = PatternFill("solid", start_color="FFC7CE")
     ws = wb.create_sheet("Konsensus & Analys", 1)
-    ws.append(["Instrument", "Stigande trend", "Antal portföljer", "Snittvikt (%)", "Pris", "RSI14",
-               "Över MA200", "Rekommendation", "Riktkurs", "Uppsida (%)", "Antal analytiker"])
+    ws.append(["Instrument", "Ny", "Stigande trend", "Antal portföljer", "Snittvikt (%)", "Pris", "RSI14",
+               "Över MA200", "Rekommendation", "Riktkurs", "Uppsida (%)", "Antal analytiker",
+               "Ägd längst (dagar)", "Investerarnas snittvinst (%)"])
     style_header(ws)
     consensus_order = sorted(consensus.items(), key=lambda x: (-x[1]["count"], -x[1]["avg_weight"]))
     for ticker, info in consensus_order:
         a = analyses.get(ticker, {})
+        h = holding_info.get(ticker, {})
         trend = a.get("stigande_trend")
         ws.append([
-            ticker, "JA" if trend else ("NEJ" if trend is not None else "?"),
+            ticker, "NY" if is_new(ticker, "IN I KONSENSUS") else "",
+            "JA" if trend else ("NEJ" if trend is not None else "?"),
             info["count"], round(info["avg_weight"], 2),
             a.get("pris"), a.get("RSI14"), a.get("över_MA200"),
             a.get("rekommendation"), a.get("riktkurs"), a.get("uppsida_%"), a.get("antal_analytiker"),
+            h.get("längst_dagar"), h.get("snitt_vinst_pct"),
         ])
         if trend is not None:
-            ws.cell(row=ws.max_row, column=2).fill = green if trend else red
+            ws.cell(row=ws.max_row, column=3).fill = green if trend else red
 
     # Nära konsensus — en portfölj från att kvala in
     if near_consensus:
         ws.append([])
         ws.append([f"NÄRA KONSENSUS — i {MIN_PORTFOLIOS - 1} av {len(portfolios)} portföljer"])
         ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
-        ws.append(["Instrument", "Antal portföljer", "Snittvikt (%)", "Ägs av"])
+        ws.append(["Instrument", "Ny", "Antal portföljer", "Snittvikt (%)", "Ägs av",
+                   "Ägd längst (dagar)", "Investerarnas snittvinst (%)"])
         for c in ws[ws.max_row]:
             if c.value:
                 c.font, c.fill = hfont, hfill
         for ticker, info in sorted(near_consensus.items(), key=lambda x: -x[1]["avg_weight"]):
-            ws.append([ticker, info["count"], round(info["avg_weight"], 2),
-                       ", ".join(info.get("holders", []))])
+            h = holding_info.get(ticker, {})
+            ws.append([ticker, "NY" if is_new(ticker, "IN I NÄRA KONSENSUS") else "",
+                       info["count"], round(info["avg_weight"], 2),
+                       ", ".join(info.get("holders", [])),
+                       h.get("längst_dagar"), h.get("snitt_vinst_pct")])
+
+    # Lämnat listorna nyligen (senaste 30 dagarna)
+    lamnat_cutoff = (date.today() - timedelta(days=30)).isoformat()
+    lamnat = [e for e in history_log or []
+              if e["typ"] in ("UT UR KONSENSUS", "UT UR NÄRA KONSENSUS")
+              and e["datum"] >= lamnat_cutoff]
+    if lamnat:
+        ws.append([])
+        ws.append(["LÄMNAT LISTORNA (senaste 30 dagarna)"])
+        ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
+        ws.append(["Datum", "Instrument", "Typ", "Detalj"])
+        for c in ws[ws.max_row]:
+            if c.value:
+                c.font, c.fill = hfont, hfill
+        for e in lamnat:
+            ws.append([e["datum"], e["ticker"], e["typ"], e["detalj"]])
 
     # Teknisk analys (indikatorer + Claudes text)
     ws = wb.create_sheet("Teknisk analys", 2)
@@ -745,10 +825,12 @@ def run_analysis(with_claude=True, force_claude=False):
     print("Anslutning OK!")
 
     portfolios = {}
+    port_meta = {}
     for username in PROFILES:
-        p = get_portfolio(username)
+        p, meta = get_portfolio(username)
         if p:
             portfolios[username] = p
+            port_meta[username] = meta or {}
 
     if not portfolios:
         raise RuntimeError("Inga portföljer kunde hämtas via eToro-API:et.")
@@ -809,6 +891,37 @@ def run_analysis(with_claude=True, force_claude=False):
                 a["uppsida_%"] = round((pa["riktkurs"] / a["pris"] - 1) * 100, 1)
             print(f"    {ticker}: analytikerdata återanvänd från {prev.get('tidpunkt', 'förra körningen')[:10]}")
 
+    # Innehavstid + investerarnas upparbetade vinst (från positionernas
+    # openTimestamp/netProfit) för konsensus- och nära konsensus-aktier
+    holding_info = {}
+    today_d = date.today()
+    for ticker in list(consensus) + list(near_consensus):
+        per_profil = {}
+        for prof, meta in port_meta.items():
+            m = meta.get(ticker) or {}
+            if m.get("öppnad"):
+                dagar = (today_d - date.fromisoformat(m["öppnad"])).days
+                per_profil[prof] = {"dagar": dagar, "vinst_pct": m.get("vinst_pct")}
+        if not per_profil:
+            continue
+        längst_prof, längst = max(per_profil.items(), key=lambda x: x[1]["dagar"])
+        vinster = [v["vinst_pct"] for v in per_profil.values() if v["vinst_pct"] is not None]
+        holding_info[ticker] = {
+            "längst_dagar": längst["dagar"],
+            "längst_profil": längst_prof,
+            "snitt_dagar": round(sum(v["dagar"] for v in per_profil.values()) / len(per_profil)),
+            "snitt_vinst_pct": round(sum(vinster) / len(vinster), 1) if vinster else None,
+            "per_profil": per_profil,
+        }
+
+    # Ge Claude innehavskontexten (för "ta hem vinsten"-bedömningen)
+    for ticker, a in analyses.items():
+        h = holding_info.get(ticker)
+        if h and "error" not in a:
+            a["investerarnas_innehavstid_dagar_längst"] = h["längst_dagar"]
+            a["investerarnas_innehavstid_dagar_snitt"] = h["snitt_dagar"]
+            a["investerarnas_upparbetade_vinst_pct_snitt"] = h["snitt_vinst_pct"]
+
     # Claude skriver en gedigen teknisk analys per konsensusaktie
     # (max en gång per dag — återanvänd dagens texter om de finns)
     prev_claude = prev.get("claude") or {}
@@ -845,7 +958,7 @@ def run_analysis(with_claude=True, force_claude=False):
 
     # Ändringshistorik mot förra körningen
     print("\nUppdaterar ändringshistorik...")
-    history_log = update_history(portfolios, list(consensus.keys()))
+    history_log = update_history(portfolios, list(consensus.keys()), list(near_consensus.keys()))
 
     result = {
         "tidpunkt": datetime.now().isoformat(timespec="minutes"),
@@ -858,11 +971,13 @@ def run_analysis(with_claude=True, force_claude=False):
         "claude_datum": claude_datum,
         "ranking": ranking,
         "historik": history_log,
+        "innehav": holding_info,
     }
     with open(RESULTS_FILE, "w") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
 
-    write_excel(portfolios, consensus, analyses, claude_texts, history_log, ranking, near_consensus)
+    write_excel(portfolios, consensus, analyses, claude_texts, history_log, ranking,
+                near_consensus, holding_info)
 
     # Spara beständig historik till gisten
     gist_push()
