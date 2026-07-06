@@ -48,7 +48,14 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek
    — dagsspärren gör att det inte drar credits.
 6. Historik: jämför med förra körningen (portfolj_historik.json) och
    loggar NYTT INNEHAV / SÅLT INNEHAV / VIKTÄNDRING (≥1 procentenhet) /
-   IN I KONSENSUS / UT UR KONSENSUS. Loggen ackumuleras över tid.
+   IN/UT UR KONSENSUS / IN/UT UR NÄRA KONSENSUS (med övergångsdetalj,
+   t.ex. "upp från nära konsensus"). Loggen ackumuleras över tid.
+   Appen visar 🆕-badge (ny på lista ≤7 dagar) och "Lämnat listorna"
+   (≤30 dagar) längst ner på Konsensus-fliken.
+6b. Innehavstid: positionernas openTimestamp/netProfit aggregeras per
+   aktie (äldsta öppning, snittdagar, investeringsviktad vinst) →
+   result["innehav"]. Visas i app/Excel och skickas till Claude som
+   underlag för vinsthemtagningsrisk (lång tid + hög vinst = varning).
 7. Skriv portfolj_analys.xlsx: Konsensus & Analys, Teknisk analys
    (indikatorer + Claudes text), Historik, en flik per profil
 
