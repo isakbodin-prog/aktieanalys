@@ -207,6 +207,8 @@ with tab_konsensus:
             "Aktie": f"🆕 {tk}" if tk in nya_kons else tk,
             "Stigande trend": trend_label(a),
             "Portföljer": consensus[tk]["count"],
+            "Total vikt (%)": consensus[tk].get("total_weight")
+                or round(consensus[tk]["avg_weight"] * consensus[tk]["count"], 2),
             "Snittvikt (%)": round(consensus[tk]["avg_weight"], 2),
             "Pris": a.get("pris"),
             "RSI14": a.get("RSI14"),
@@ -233,17 +235,23 @@ with tab_konsensus:
         st.subheader(f"🔍 Nära konsensus — i {ea.MIN_PORTFOLIOS - 1} av {len(data['profiler'])} portföljer")
         st.caption("Bevakningslista: köper en investerare till någon av dessa kvalar den in i konsensus.")
         nya_nara = nya_pa_listan(log, "IN I NÄRA KONSENSUS")
+
+        def total_vikt(info):
+            return info.get("total_weight") or round(info["avg_weight"] * info["count"], 2)
+
         near_rows = []
-        for tk, info in sorted(near.items(), key=lambda x: -x[1]["avg_weight"]):
+        for tk, info in sorted(near.items(), key=lambda x: -total_vikt(x[1])):
             h = innehav.get(tk, {})
             near_rows.append({
                 "Aktie": f"🆕 {tk}" if tk in nya_nara else tk,
+                "Total vikt (%)": total_vikt(info),
                 "Snittvikt (%)": round(info["avg_weight"], 2),
                 "Ägs av": ", ".join(info.get("holders", [])),
                 "Ägd längst": format_innehavstid(h.get("längst_dagar")),
                 "Inv. vinst (%)": h.get("snitt_vinst_pct", "—"),
             })
         st.dataframe(pd.DataFrame(near_rows), use_container_width=True, hide_index=True)
+        st.caption("Sorterad på total vikt — investerarnas sammanlagda portföljandel i aktien.")
 
     # Lämnat listorna — när investerarna kliver av
     from datetime import date as _date, timedelta as _timedelta

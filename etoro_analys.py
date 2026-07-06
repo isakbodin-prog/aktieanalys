@@ -723,15 +723,17 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
         ws.append([])
         ws.append([f"NÄRA KONSENSUS — i {MIN_PORTFOLIOS - 1} av {len(portfolios)} portföljer"])
         ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
-        ws.append(["Instrument", "Ny", "Antal portföljer", "Snittvikt (%)", "Ägs av",
-                   "Ägd längst (dagar)", "Investerarnas snittvinst (%)"])
+        ws.append(["Instrument", "Ny", "Antal portföljer", "Total vikt (%)", "Snittvikt (%)",
+                   "Ägs av", "Ägd längst (dagar)", "Investerarnas snittvinst (%)"])
         for c in ws[ws.max_row]:
             if c.value:
                 c.font, c.fill = hfont, hfill
-        for ticker, info in sorted(near_consensus.items(), key=lambda x: -x[1]["avg_weight"]):
+        def _total(info):
+            return info.get("total_weight") or round(info["avg_weight"] * info["count"], 2)
+        for ticker, info in sorted(near_consensus.items(), key=lambda x: -_total(x[1])):
             h = holding_info.get(ticker, {})
             ws.append([ticker, "NY" if is_new(ticker, "IN I NÄRA KONSENSUS") else "",
-                       info["count"], round(info["avg_weight"], 2),
+                       info["count"], _total(info), round(info["avg_weight"], 2),
                        ", ".join(info.get("holders", [])),
                        h.get("längst_dagar"), h.get("snitt_vinst_pct")])
 
@@ -845,6 +847,7 @@ def run_analysis(with_claude=True, force_claude=False):
         holders = {name: p[ticker] for name, p in portfolios.items() if ticker in p}
         entry = {"count": len(holders),
                  "avg_weight": sum(holders.values()) / len(holders),
+                 "total_weight": round(sum(holders.values()), 2),
                  "holders": sorted(holders)}
         if len(holders) >= MIN_PORTFOLIOS:
             consensus[ticker] = entry
