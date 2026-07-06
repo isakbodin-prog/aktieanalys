@@ -44,8 +44,10 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek
    DAGSSPÄRR: körs max 1 gång/dag (claude_datum i senaste_analys.json);
    samma dag återanvänds texterna, men NYA konsensusaktier analyseras.
    Kringgå med force_claude=True / CLI-flaggan --force-claude.
-   Webbappen hämtar färsk eToro-data automatiskt vid sidöppning (gratis)
-   — dagsspärren gör att det inte drar credits.
+   Webbappen hämtar eToro-data automatiskt vid sidöppning BARA om dagens
+   data saknas (senaste_analys.json:s tidpunkt ≠ idag); annars visas
+   befintlig data direkt. Kallstart utan lokal fil → gist_pull först.
+   "Uppdatera nu"-knappen tvingar alltid en färsk hämtning.
 6. Historik: jämför med förra körningen (portfolj_historik.json) och
    loggar NYTT INNEHAV / SÅLT INNEHAV / VIKTÄNDRING (≥1 procentenhet) /
    IN/UT UR KONSENSUS / IN/UT UR NÄRA KONSENSUS (med övergångsdetalj,

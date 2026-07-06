@@ -88,27 +88,36 @@ force_claude = st.sidebar.checkbox(
     help="Kör Claude igen även om den redan körts idag. Drar credits!",
 )
 
-if st.sidebar.button("🔄 Uppdatera nu", type="primary", use_container_width=True):
-    st.session_state.pop("auto_refreshed", None)  # tillåt omhämtning nedan
-    st.session_state["force_claude"] = force_claude
+def data_ar_fran_idag(d):
+    from datetime import date
+    return bool(d) and d.get("tidpunkt", "")[:10] == date.today().isoformat()
 
-# Hämta färsk eToro-data automatiskt när sidan öppnas (en gång per besök).
-# Claude-analysen är dagsspärrad inne i run_analysis, så detta drar inga
-# credits om den redan körts idag.
-if "auto_refreshed" not in st.session_state:
-    with st.spinner("Hämtar färsk portföljdata från eToro och räknar indikatorer..."):
+
+run_now = st.sidebar.button("🔄 Uppdatera nu", type="primary", use_container_width=True)
+
+# Vid sidöppning: hämta bara om dagens data saknas. Ingen daytrading här —
+# en körning per dag räcker, och det sparar både väntetid och API-kvoter.
+if "auto_check" not in st.session_state:
+    st.session_state["auto_check"] = True
+    befintlig = load_results()
+    if befintlig is None:
+        ea.gist_pull()          # kallstart på Render: hämta senaste från gisten
+        befintlig = load_results()
+    if not data_ar_fran_idag(befintlig):
+        run_now = True
+
+if run_now:
+    with st.spinner("Hämtar portföljdata från eToro och räknar indikatorer — tar 1–2 minuter..."):
         try:
-            ea.run_analysis(with_claude=with_claude,
-                            force_claude=st.session_state.pop("force_claude", False))
-            st.session_state["auto_refreshed"] = True
+            ea.run_analysis(with_claude=with_claude, force_claude=force_claude)
         except RuntimeError as e:
-            st.session_state["auto_refreshed"] = True
             st.sidebar.error(str(e))
 
 data = load_results()
 
 if data:
-    st.sidebar.caption(f"Portföljdata: {data['tidpunkt'].replace('T', ' kl. ')}")
+    st.sidebar.caption(f"Portföljdata: {data['tidpunkt'].replace('T', ' kl. ')} "
+                       "(hämtas automatiskt en gång per dag)")
     cd = data.get("claude_datum")
     st.sidebar.caption(f"🤖 Claude-analys från: {cd}" if cd else "🤖 Ingen Claude-analys ännu")
 
