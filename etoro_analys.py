@@ -142,8 +142,78 @@ def get_portfolio(username):
 # ----------------------------------------------------------------------
 # Steg 2 & 3: Teknisk analys + analytikerdata (yfinance)
 # ----------------------------------------------------------------------
+ALPHAVANTAGE_KEY = os.environ.get("ALPHAVANTAGE_API_KEY")
+_AV_URL = "https://www.alphavantage.co/query"
+
+
+def fetch_history_alphavantage(yticker):
+    """Reservkälla för dagskurser: Alpha Vantage (Yahoo blockerar ofta molnservrar).
+
+    Returnerar en DataFrame med kolumnerna Close/Volume (senaste året) eller None.
+    Gratisnyckel: https://www.alphavantage.co/support/#api-key (max 5 anrop/min, 25/dag).
+    """
+    import time
+    import pandas as pd
+
+    if not ALPHAVANTAGE_KEY or "." in yticker:   # bara USA-tickers utan suffix
+        return None
+    try:
+        time.sleep(13)   # gratisnivån tillåter max 5 anrop/minut
+        r = requests.get(_AV_URL, timeout=60, params={
+            "function": "TIME_SERIES_DAILY", "symbol": yticker,
+            "outputsize": "full", "apikey": ALPHAVANTAGE_KEY,
+        })
+        series = (r.json() or {}).get("Time Series (Daily)")
+        if not series:
+            return None
+        df = pd.DataFrame.from_dict(series, orient="index").astype(float)
+        df.index = pd.to_datetime(df.index)
+        df = df.sort_index().rename(columns={"4. close": "Close", "5. volume": "Volume"})
+        return df[["Close", "Volume"]].tail(252)   # ~1 handelsår
+    except Exception:
+        return None
+
+
+def fetch_overview_alphavantage(yticker):
+    """Analytikerdata från Alpha Vantage OVERVIEW, i samma format som Yahoos info-dict."""
+    import time
+
+    if not ALPHAVANTAGE_KEY or "." in yticker:
+        return {}
+    try:
+        time.sleep(13)
+        r = requests.get(_AV_URL, timeout=60, params={
+            "function": "OVERVIEW", "symbol": yticker, "apikey": ALPHAVANTAGE_KEY,
+        })
+        d = r.json() or {}
+
+        def num(key, cast=float):
+            v = d.get(key)
+            try:
+                return cast(v)
+            except (TypeError, ValueError):
+                return None
+
+        counts = {k: num(f"AnalystRating{k}", int) or 0
+                  for k in ("StrongBuy", "Buy", "Hold", "Sell", "StrongSell")}
+        n = sum(counts.values())
+        rec = "n/a"
+        if n:
+            rec = max(counts, key=counts.get)
+            rec = {"StrongBuy": "strong_buy", "Buy": "buy", "Hold": "hold",
+                   "Sell": "sell", "StrongSell": "strong_sell"}[rec]
+        return {
+            "recommendationKey": rec,
+            "targetMeanPrice": num("AnalystTargetPrice"),
+            "numberOfAnalystOpinions": n or None,
+        }
+    except Exception:
+        return {}
+
+
 def analyze_ticker(ticker):
-    """Hämta teknisk data + analytikerdata för en ticker via Yahoo Finance."""
+    """Hämta teknisk data + analytikerdata. Yahoo Finance i första hand,
+    Stooq som reserv för kursdata (Yahoo blockerar ofta molnservrars IP)."""
     import yfinance as yf
     import pandas as pd
 
@@ -151,12 +221,32 @@ def analyze_ticker(ticker):
     yahoo_map = {"RR.L": "RR.L", "IAG.L": "IAG.L", "KBC.BR": "KBC.BR", "FUR.NV": "FUR.AS", "TI5A.NV": "TI5A.AS"}
     yticker = yahoo_map.get(ticker, ticker)
 
+    hist, info, source = None, {}, "Yahoo"
     try:
         t = yf.Ticker(yticker)
         hist = t.history(period="1y")
         if hist.empty:
-            return {"ticker": ticker, "error": "ingen prisdata"}
+            hist = None
+    except Exception:
+        hist = None
 
+    if hist is not None:
+        try:
+            info = t.info or {}
+        except Exception:
+            info = {}   # kursdata funkade men inte analytikerdatan — fylls från förra körningen
+    else:
+        hist = fetch_history_alphavantage(yticker)
+        source = "Alpha Vantage"
+        if hist is not None:
+            info = fetch_overview_alphavantage(yticker)
+
+    if hist is None:
+        detail = ("varken Yahoo eller Alpha Vantage svarade" if ALPHAVANTAGE_KEY
+                  else "Yahoo blockerade och ALPHAVANTAGE_API_KEY saknas")
+        return {"ticker": ticker, "error": f"ingen prisdata ({detail})"}
+
+    try:
         close = hist["Close"]
         volume = hist["Volume"]
         price = float(close.iloc[-1])
@@ -201,7 +291,6 @@ def analyze_ticker(ticker):
         vol_90 = float(volume.tail(63).mean())
         vol_trend = (vol_20 / vol_90 - 1) * 100 if vol_90 else None
 
-        info = t.info or {}
         rec = info.get("recommendationKey", "n/a")
         target = info.get("targetMeanPrice")
         n_analysts = info.get("numberOfAnalystOpinions")
@@ -209,6 +298,7 @@ def analyze_ticker(ticker):
 
         return {
             "ticker": ticker,
+            "datakälla": source,
             "pris": round(price, 2),
             "MA50": round(ma50, 2),
             "MA200": round(ma200, 2) if ma200 else None,
@@ -682,16 +772,8 @@ def run_analysis(with_claude=True, force_claude=False):
     print(f"\nKonsensus-aktier (i minst {MIN_PORTFOLIOS} portföljer): {sorted(consensus)}")
     print(f"Nära konsensus (i {MIN_PORTFOLIOS - 1} portföljer): {len(near_consensus)} st")
 
-    # Teknisk analys + analytikerdata
-    analyses = {}
-    for ticker in consensus:
-        print(f"Analyserar {ticker}...")
-        analyses[ticker] = analyze_ticker(ticker)
-        if "error" in analyses[ticker]:
-            print(f"    FEL för {ticker}: {analyses[ticker]['error']}")
-
-    # Claude skriver en gedigen teknisk analys per konsensusaktie
-    # (max en gång per dag — återanvänd dagens texter om de finns)
+    # Förra körningens resultat (för Claude-dagsspärren och som reserv
+    # för analytikerdata när Yahoo blockerar)
     prev = {}
     if os.path.exists(RESULTS_FILE):
         try:
@@ -699,6 +781,36 @@ def run_analysis(with_claude=True, force_claude=False):
                 prev = json.load(f)
         except (json.JSONDecodeError, OSError):
             prev = {}
+
+    # Teknisk analys + analytikerdata
+    import time
+    analyses = {}
+    for ticker in consensus:
+        print(f"Analyserar {ticker}...")
+        analyses[ticker] = analyze_ticker(ticker)
+        if "error" in analyses[ticker]:
+            print(f"    FEL för {ticker}: {analyses[ticker]['error']}")
+        elif analyses[ticker].get("datakälla") != "Yahoo":
+            print(f"    (Yahoo blockerade — data från {analyses[ticker]['datakälla']})")
+        time.sleep(1.5)   # snäll paus så Yahoo inte strypmarkerar oss
+
+    # Saknas analytikerdata (Yahoo nere/blockerad)? Återanvänd förra körningens
+    # — riktkurser och rekommendationer ändras långsamt.
+    prev_analyses = prev.get("analyses") or {}
+    for ticker, a in analyses.items():
+        if "error" in a or a.get("riktkurs"):
+            continue
+        pa = prev_analyses.get(ticker) or {}
+        if pa.get("riktkurs"):
+            a["rekommendation"] = pa.get("rekommendation", "n/a")
+            a["riktkurs"] = pa["riktkurs"]
+            a["antal_analytiker"] = pa.get("antal_analytiker")
+            if a.get("pris"):
+                a["uppsida_%"] = round((pa["riktkurs"] / a["pris"] - 1) * 100, 1)
+            print(f"    {ticker}: analytikerdata återanvänd från {prev.get('tidpunkt', 'förra körningen')[:10]}")
+
+    # Claude skriver en gedigen teknisk analys per konsensusaktie
+    # (max en gång per dag — återanvänd dagens texter om de finns)
     prev_claude = prev.get("claude") or {}
     prev_datum = prev.get("claude_datum")
     today = date.today().isoformat()
