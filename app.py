@@ -205,6 +205,7 @@ with tab_konsensus:
             "Riktkurs": a.get("riktkurs"),
             "Uppsida (%)": a.get("uppsida_%"),
             "Ägd längst": format_innehavstid(h.get("längst_dagar")),
+            "Ägd snitt": format_innehavstid(h.get("snitt_dagar")),
             "Inv. vinst (%)": h.get("snitt_vinst_pct", "—"),
             "Claude": c.get("rekommendation", "—"),
         })
@@ -280,14 +281,27 @@ with tab_analys:
             i3.markdown(f"1 mån: {a.get('avkastning_1m_%', '—')} %  ·  3 mån: {a.get('avkastning_3m_%', '—')} %")
             i4.markdown(f"Från 52v-toppen: {a.get('avstånd_52v_högsta_%', '—')} %")
 
+            if a.get("datakälla") == "cache":
+                st.caption(f"⚠️ Marknadsdata från tidigare körning ({a.get('cache_datum', 'okänt')}) "
+                           "— datakällorna svarade inte just nu.")
+
             h = innehav.get(tk, {})
             if h:
                 vinst = h.get("snitt_vinst_pct")
                 st.markdown(
                     f"💼 Ägd längst: **{format_innehavstid(h.get('längst_dagar'))}** "
-                    f"(av {h.get('längst_profil', '?')}) · "
-                    f"Investerarnas upparbetade snittvinst: **{vinst if vinst is not None else '—'} %**"
+                    f"(av {h.get('längst_profil', '?')}) · snitt: "
+                    f"**{format_innehavstid(h.get('snitt_dagar'))}** · "
+                    f"upparbetad snittvinst: **{vinst if vinst is not None else '—'} %**"
                 )
+                per = h.get("per_profil", {})
+                if per:
+                    per_rows = [{
+                        "Investerare": prof,
+                        "Ägt i": format_innehavstid(v["dagar"]),
+                        "Upparbetad vinst (%)": v.get("vinst_pct", "—"),
+                    } for prof, v in sorted(per.items(), key=lambda x: -x[1]["dagar"])]
+                    st.dataframe(pd.DataFrame(per_rows), hide_index=True)
 
             if c:
                 st.markdown("---")

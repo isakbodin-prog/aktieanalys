@@ -876,9 +876,19 @@ def run_analysis(with_claude=True, force_claude=False):
             print(f"    (Yahoo blockerade — data från {analyses[ticker]['datakälla']})")
         time.sleep(1.5)   # snäll paus så Yahoo inte strypmarkerar oss
 
-    # Saknas analytikerdata (Yahoo nere/blockerad)? Återanvänd förra körningens
-    # — riktkurser och rekommendationer ändras långsamt.
+    # Fallerar båda datakällorna (t.ex. Alpha Vantages dagsgräns på 25 anrop)?
+    # Återanvänd då hela förra körningens analys i stället för en tom rad.
     prev_analyses = prev.get("analyses") or {}
+    for ticker, a in analyses.items():
+        if "error" not in a:
+            continue
+        pa = prev_analyses.get(ticker)
+        if pa and "error" not in pa:
+            cached = dict(pa)
+            cached["datakälla"] = "cache"
+            cached["cache_datum"] = (prev.get("tidpunkt") or "")[:16].replace("T", " kl. ")
+            analyses[ticker] = cached
+            print(f"    {ticker}: datakällorna svarade inte — återanvänder analysen från {cached['cache_datum']}")
     for ticker, a in analyses.items():
         if "error" in a or a.get("riktkurs"):
             continue
