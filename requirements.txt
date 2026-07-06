@@ -1,0 +1,6 @@
+requests
+yfinance
+openpyxl
+pandas
+streamlit
+anthropic

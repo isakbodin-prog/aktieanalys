@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: aktieanalys
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    envVars:
+      - key: ETORO_API_KEY
+        sync: false
+      - key: ETORO_USER_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: APP_PASSWORD
+        sync: false

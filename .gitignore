@@ -1,0 +1,14 @@
+# Hemligheter — får ALDRIG checkas in
+.env
+
+# Genererade datafiler (skapas vid körning)
+portfolj_analys.xlsx
+senaste_analys.json
+portfolj_historik.json
+
+# Lokalt
+thomaspj_portfolio.xlsx
+__pycache__/
+*.pyc
+.claude/
+.DS_Store
