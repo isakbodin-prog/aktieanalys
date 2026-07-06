@@ -687,6 +687,8 @@ def run_analysis(with_claude=True, force_claude=False):
     for ticker in consensus:
         print(f"Analyserar {ticker}...")
         analyses[ticker] = analyze_ticker(ticker)
+        if "error" in analyses[ticker]:
+            print(f"    FEL för {ticker}: {analyses[ticker]['error']}")
 
     # Claude skriver en gedigen teknisk analys per konsensusaktie
     # (max en gång per dag — återanvänd dagens texter om de finns)

@@ -98,6 +98,13 @@ if data:
     st.sidebar.caption(f"Portföljdata: {data['tidpunkt'].replace('T', ' kl. ')}")
     cd = data.get("claude_datum")
     st.sidebar.caption(f"🤖 Claude-analys från: {cd}" if cd else "🤖 Ingen Claude-analys ännu")
+
+    # Visa datafel tydligt (t.ex. om Yahoo Finance blockerar serverns anrop)
+    fel = {t: a["error"] for t, a in data.get("analyses", {}).items() if "error" in a}
+    if fel:
+        with st.sidebar.expander(f"⚠️ {len(fel)} aktier saknar marknadsdata"):
+            for t, e in fel.items():
+                st.caption(f"**{t}**: {e}")
     if os.path.exists(ea.OUTPUT_FILE):
         with open(ea.OUTPUT_FILE, "rb") as f:
             st.sidebar.download_button(
