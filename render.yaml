@@ -14,3 +14,7 @@ services:
         sync: false
       - key: APP_PASSWORD
         sync: false
+      - key: GIST_ID
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
