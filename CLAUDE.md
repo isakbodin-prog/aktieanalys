@@ -52,6 +52,19 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek
 7. Skriv portfolj_analys.xlsx: Konsensus & Analys, Teknisk analys
    (indikatorer + Claudes text), Historik, en flik per profil
 
+## Deploy (GitHub + Render)
+- Repo: https://github.com/isakbodin-prog/aktieanalys (privat) — push till
+  main triggar automatisk deploy på Render (gratisnivå, somnar efter 15 min)
+- Start command: streamlit run app.py --server.port $PORT
+  --server.address 0.0.0.0 --server.headless true
+- Miljövariabler på Render: ETORO_API_KEY, ETORO_USER_KEY,
+  ANTHROPIC_API_KEY, APP_PASSWORD (lösenordsskydd, aktivt bara när satt),
+  GIST_ID + GITHUB_TOKEN (beständig historik, se nedan)
+- Renders disk är TILLFÄLLIG → portfolj_historik.json och
+  senaste_analys.json synkas mot en privat GitHub Gist (gist_pull vid
+  körningsstart, gist_push efter körning). Utan gisten nollställs
+  historiken OCH Claude-dagsspärren vid varje omstart.
+
 ## Webbapp (Streamlit)
 - Starta: `python3 -m streamlit run app.py` → öppnas på http://localhost:8501
 - Flikar: Bästa köp (sammanvägd poäng 0–100, se compute_score),

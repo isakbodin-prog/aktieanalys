@@ -383,6 +383,69 @@ def claude_analysis(analyses):
 HISTORY_FILE = "portfolj_historik.json"
 WEIGHT_CHANGE_THRESHOLD = 1.0  # procentenheter — mindre viktändringar loggas inte
 
+# ----------------------------------------------------------------------
+# Beständig lagring i GitHub Gist (för Render, vars disk är tillfällig).
+# Aktiveras när GIST_ID och GITHUB_TOKEN är satta — annars no-op och allt
+# fungerar lokalt som vanligt.
+# ----------------------------------------------------------------------
+GIST_ID = os.environ.get("GIST_ID")
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+GIST_FILES = ("portfolj_historik.json", "senaste_analys.json")
+
+
+def _gist_headers():
+    return {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+
+def gist_pull():
+    """Hämta historik + senaste analys från gisten till lokala filer."""
+    if not (GIST_ID and GITHUB_TOKEN):
+        return
+    try:
+        r = requests.get(f"https://api.github.com/gists/{GIST_ID}",
+                         headers=_gist_headers(), timeout=30)
+        if r.status_code != 200:
+            print(f"  OBS: kunde inte läsa gisten ({r.status_code}) — kör vidare utan.")
+            return
+        for name, f in (r.json().get("files") or {}).items():
+            if name not in GIST_FILES or not f:
+                continue
+            content = f.get("content", "")
+            if f.get("truncated"):
+                content = requests.get(f["raw_url"], timeout=30).text
+            if content.strip():
+                with open(name, "w") as fh:
+                    fh.write(content)
+        print("  Historik hämtad från GitHub Gist.")
+    except requests.RequestException as e:
+        print(f"  OBS: gist-hämtning misslyckades ({e}) — kör vidare utan.")
+
+
+def gist_push():
+    """Spara historik + senaste analys till gisten."""
+    if not (GIST_ID and GITHUB_TOKEN):
+        return
+    payload = {"files": {}}
+    for name in GIST_FILES:
+        if os.path.exists(name):
+            with open(name) as fh:
+                payload["files"][name] = {"content": fh.read()}
+    if not payload["files"]:
+        return
+    try:
+        r = requests.patch(f"https://api.github.com/gists/{GIST_ID}",
+                           headers=_gist_headers(), json=payload, timeout=30)
+        if r.status_code == 200:
+            print("  Historik sparad till GitHub Gist.")
+        else:
+            print(f"  OBS: kunde inte spara till gisten ({r.status_code}).")
+    except requests.RequestException as e:
+        print(f"  OBS: gist-sparning misslyckades ({e}).")
+
 
 def update_history(portfolios, consensus_tickers):
     """Jämför med förra körningen, logga ändringar och spara ny ögonblicksbild.
@@ -582,6 +645,9 @@ def run_analysis(with_claude=True, force_claude=False):
     if not API_KEY or not USER_KEY:
         raise RuntimeError("ETORO_API_KEY och ETORO_USER_KEY saknas — lägg dem i .env-filen.")
 
+    # Hämta beständig historik (Render har tillfällig disk)
+    gist_pull()
+
     print("\nTestar API-anslutning...")
     test = api_get("/market-data/search", {"query": "Apple"})
     if test is None:
@@ -683,6 +749,9 @@ def run_analysis(with_claude=True, force_claude=False):
         json.dump(result, f, ensure_ascii=False, indent=2)
 
     write_excel(portfolios, consensus, analyses, claude_texts, history_log, ranking, near_consensus)
+
+    # Spara beständig historik till gisten
+    gist_push()
     return result
 
 
