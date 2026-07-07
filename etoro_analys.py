@@ -65,14 +65,23 @@ def headers():
     }
 
 
-def api_get(path, params=None):
-    """GET-anrop mot eToro:s publika API med felhantering."""
+def api_get(path, params=None, quiet=False, retries=3):
+    """GET-anrop mot eToro:s publika API med felhantering och 429-respekt."""
+    import time
     url = f"{API_BASE}{path}"
-    r = requests.get(url, headers=headers(), params=params, timeout=30)
-    print(f"  GET {path} -> {r.status_code}")
-    if r.status_code == 200:
-        return r.json()
-    print(f"    Svar: {r.text[:300]}")
+    for _ in range(retries):
+        r = requests.get(url, headers=headers(), params=params, timeout=30)
+        if r.status_code == 429:
+            wait = int(r.headers.get("Retry-After", 15))
+            print(f"  Rate limit — väntar {wait}s...")
+            time.sleep(wait)
+            continue
+        if not quiet:
+            print(f"  GET {path} -> {r.status_code}")
+        if r.status_code == 200:
+            return r.json()
+        print(f"    Svar ({path}): {r.text[:200]}")
+        return None
     return None
 
 
@@ -162,6 +171,113 @@ def get_portfolio(username):
             meta[ticker] = m
     print(f"  {len(out)} innehav hämtade.")
     return out, meta
+
+
+# ----------------------------------------------------------------------
+# Steg 0: Screener — bakgrundsgrupp (topp ~50 traders som referens/brusfilter)
+# ----------------------------------------------------------------------
+BG_CACHE_FILE = "bakgrund_cache.json"
+SCREENER_PARAMS = {
+    "period": "OneYearAgo",           # TwoYearsAgo finns inte i API:et
+    "sort": "-gain",                  # minusprefix = fallande
+    "pageSize": 50,
+    "gainMin": 15,                    # sållar bort förlorare och nollkonton
+    "maxMonthlyRiskScoreMax": 6,      # inga högriskchansare
+    "weeksSinceRegistrationMin": 104, # minst 2 år på plattformen
+    "copiersMin": 50,                 # sållar bort test-/spökkonton
+    # OBS: isTestAccount och popularInvestor ger 404 — finns ej i denna API-version
+}
+
+
+def load_or_fetch_background():
+    """Bakgrundsgruppens portföljer, med dagscache (BG_CACHE_FILE, synkas via gist).
+
+    Returnerar {username: {ticker: vikt%}} eller None om allt fallerar.
+    """
+    import time
+    from datetime import date
+
+    cache = {}
+    if os.path.exists(BG_CACHE_FILE):
+        try:
+            with open(BG_CACHE_FILE) as f:
+                cache = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            cache = {}
+    if cache.get("datum") == date.today().isoformat() and cache.get("portfolios"):
+        print(f"\nBakgrundsgrupp: {len(cache['portfolios'])} portföljer från dagens cache.")
+        return cache["portfolios"]
+
+    print("\nScreenar bakgrundsgrupp (topp 50 via /user-info/people/search)...")
+    data = api_get("/user-info/people/search", SCREENER_PARAMS)
+    if not data or not data.get("items"):
+        gamla = cache.get("portfolios")
+        if gamla:
+            print("  Screenern svarade inte — använder gårdagens bakgrundsgrupp.")
+        return gamla
+
+    # Håll grupperna åtskilda: signalprofilerna ingår inte i bakgrunden
+    usernames = [i["userName"] for i in data["items"] if i["userName"] not in PROFILES]
+    print(f"  {len(usernames)} profiler screenade. Hämtar portföljer (tar ~1–2 min)...")
+
+    ports = {}
+    for username in usernames:
+        pdata = api_get(f"/user-info/people/{username}/portfolio/live", quiet=True)
+        if pdata:
+            weights = {}
+            def add(p):
+                iid = p.get("instrumentId")
+                pct = float(p.get("investmentPct") or 0)
+                if iid is not None:
+                    weights[iid] = weights.get(iid, 0) + pct
+            for p in pdata.get("positions") or []:
+                add(p)
+            for st in pdata.get("socialTrades") or []:
+                for p in st.get("positions") or []:
+                    add(p)
+            if weights:
+                id_to_ticker = resolve_instruments(list(weights.keys()))
+                ports[username] = {id_to_ticker[iid]: round(w, 2) for iid, w in weights.items()}
+        time.sleep(0.5)   # snäll takt — 50 anrop i följd
+
+    if not ports:
+        return cache.get("portfolios")
+
+    print(f"  {len(ports)} bakgrundsportföljer hämtade.")
+    with open(BG_CACHE_FILE, "w") as f:
+        json.dump({"datum": date.today().isoformat(), "portfolios": ports}, f, ensure_ascii=False)
+    return ports
+
+
+def compute_divergence(consensus, portfolios, background):
+    """Divergens = andel av signalgruppen som äger aktien − andel av bakgrunden.
+
+    Hög divergens = signalgruppens unika övertygelse (mest intressant).
+    Låg/negativ = flockbeteende — 'alla' äger den redan.
+    """
+    if not background:
+        return {}
+    bg_n = len(background)
+    bg_owners, bg_weightsum = {}, {}
+    for weights in background.values():
+        for tk, w in weights.items():
+            bg_owners[tk] = bg_owners.get(tk, 0) + 1
+            bg_weightsum[tk] = bg_weightsum.get(tk, 0) + w
+
+    out = {}
+    for tk, info in consensus.items():
+        sig = info["count"] / len(portfolios)
+        bg = bg_owners.get(tk, 0) / bg_n
+        out[tk] = {
+            "signal_antal": info["count"],
+            "signal_andel_pct": round(sig * 100),
+            "bakgrund_antal": bg_owners.get(tk, 0),
+            "bakgrund_andel_pct": round(bg * 100, 1),
+            "bakgrund_snittvikt": (round(bg_weightsum[tk] / bg_owners[tk], 2)
+                                   if bg_owners.get(tk) else 0.0),
+            "divergens_pp": round((sig - bg) * 100, 1),
+        }
+    return out
 
 
 # ----------------------------------------------------------------------
@@ -463,6 +579,11 @@ def claude_analysis(analyses):
         "hög upparbetad vinst ökar risken att de börjar sälja och ta hem vinsten — "
         "väg in det i bedömningen och kommentera det uttryckligen när risken är "
         "förhöjd.\n\n"
+        "DIVERGENS: fältet ägs_av_pct_av_bakgrundsgruppen visar hur stor andel av en "
+        "bred referensgrupp (topp ~50 screenade traders) som äger aktien, och "
+        "divergens_mot_bakgrundsgruppen_pp är skillnaden mot signalgruppens andel. "
+        "Hög divergens = signalgruppens unika övertygelse (starkare signal); låg eller "
+        "negativ = flockbeteende där 'alla' redan äger aktien. Nämn det kort.\n\n"
         "Svara EXAKT i detta format:\n"
         "REKOMMENDATION: <KÖP | AVVAKTA | SÄLJ>\n"
         "<själva analysen>"
@@ -511,7 +632,7 @@ WEIGHT_CHANGE_THRESHOLD = 1.0  # procentenheter — mindre viktändringar loggas
 # ----------------------------------------------------------------------
 GIST_ID = os.environ.get("GIST_ID")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
-GIST_FILES = ("portfolj_historik.json", "senaste_analys.json")
+GIST_FILES = ("portfolj_historik.json", "senaste_analys.json", "bakgrund_cache.json")
 
 
 def _gist_headers():
@@ -650,7 +771,7 @@ def update_history(portfolios, consensus_tickers, near_tickers=None):
 # Steg 6: Excel-rapport
 # ----------------------------------------------------------------------
 def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
-                ranking=None, near_consensus=None, holding_info=None):
+                ranking=None, near_consensus=None, holding_info=None, divergence=None):
     from datetime import date, timedelta
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
@@ -697,7 +818,20 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
     # Konsensus + analys
     green = PatternFill("solid", start_color="C6EFCE")
     red = PatternFill("solid", start_color="FFC7CE")
-    ws = wb.create_sheet("Konsensus & Analys", 1)
+    # Divergens — signalgruppens unika övertygelser vs flocken
+    if divergence:
+        ws = wb.create_sheet("Divergens", 1)
+        ws.append(["Instrument", "I signalgrupp", "Signalandel (%)", "I bakgrund (antal)",
+                   "Bakgrundsandel (%)", "Divergens (pp)", "Bakgrundens snittvikt (%)",
+                   "Claudes rekommendation"])
+        style_header(ws)
+        for tk, dv in sorted(divergence.items(), key=lambda x: -x[1]["divergens_pp"]):
+            ws.append([tk, f"{dv['signal_antal']}/{len(portfolios)}", dv["signal_andel_pct"],
+                       dv["bakgrund_antal"], dv["bakgrund_andel_pct"], dv["divergens_pp"],
+                       dv["bakgrund_snittvikt"],
+                       claude_texts.get(tk, {}).get("rekommendation", "")])
+
+    ws = wb.create_sheet("Konsensus & Analys", 2)
     ws.append(["Instrument", "Ny", "Stigande trend", "Antal portföljer", "Snittvikt (%)", "Pris", "RSI14",
                "Över MA200", "Rekommendation", "Riktkurs", "Uppsida (%)", "Antal analytiker",
                "Ägd längst (dagar)", "Investerarnas snittvinst (%)"])
@@ -754,7 +888,7 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
             ws.append([e["datum"], e["ticker"], e["typ"], e["detalj"]])
 
     # Teknisk analys (indikatorer + Claudes text)
-    ws = wb.create_sheet("Teknisk analys", 2)
+    ws = wb.create_sheet("Teknisk analys", 3)
     ws.append(["Instrument", "Stigande trend", "Över MA200", "MA200 stigande",
                "Pris", "MA50", "MA200", "Golden cross", "RSI14",
                "MACD > signal", "Bollinger (%)", "Avstånd 52v-högsta (%)",
@@ -781,7 +915,7 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
             cell.alignment = Alignment(wrap_text=True, vertical="top")
 
     # Historik (ändringslogg, nyaste först)
-    ws = wb.create_sheet("Historik", 3)
+    ws = wb.create_sheet("Historik", 4)
     ws.append(["Datum", "Typ", "Profil", "Instrument", "Detalj"])
     style_header(ws)
     if history_log:
@@ -857,6 +991,16 @@ def run_analysis(with_claude=True, force_claude=False):
     print(f"\nKonsensus-aktier (i minst {MIN_PORTFOLIOS} portföljer): {sorted(consensus)}")
     print(f"Nära konsensus (i {MIN_PORTFOLIOS - 1} portföljer): {len(near_consensus)} st")
 
+    # Bakgrundsgrupp + divergens (vad äger signalgruppen som flocken INTE äger?)
+    background = load_or_fetch_background()
+    divergence = compute_divergence(consensus, portfolios, background)
+    if divergence:
+        rankad = sorted(divergence.items(), key=lambda x: -x[1]["divergens_pp"])
+        print("Divergens (signalgrupp − bakgrundsgrupp):")
+        for tk, dv in rankad:
+            print(f"  {tk:<6} signal {dv['signal_andel_pct']}% | "
+                  f"bakgrund {dv['bakgrund_andel_pct']}% | divergens {dv['divergens_pp']:+.1f} pp")
+
     # Förra körningens resultat (för Claude-dagsspärren och som reserv
     # för analytikerdata när Yahoo blockerar)
     prev = {}
@@ -928,12 +1072,17 @@ def run_analysis(with_claude=True, force_claude=False):
         }
 
     # Ge Claude innehavskontexten (för "ta hem vinsten"-bedömningen)
+    # och divergensen (unik övertygelse vs flockbeteende)
     for ticker, a in analyses.items():
         h = holding_info.get(ticker)
         if h and "error" not in a:
             a["investerarnas_innehavstid_dagar_längst"] = h["längst_dagar"]
             a["investerarnas_innehavstid_dagar_snitt"] = h["snitt_dagar"]
             a["investerarnas_upparbetade_vinst_pct_snitt"] = h["snitt_vinst_pct"]
+        dv = divergence.get(ticker)
+        if dv and "error" not in a:
+            a["ägs_av_pct_av_bakgrundsgruppen"] = dv["bakgrund_andel_pct"]
+            a["divergens_mot_bakgrundsgruppen_pp"] = dv["divergens_pp"]
 
     # Claude skriver en gedigen teknisk analys per konsensusaktie
     # (max en gång per dag — återanvänd dagens texter om de finns)
@@ -985,12 +1134,14 @@ def run_analysis(with_claude=True, force_claude=False):
         "ranking": ranking,
         "historik": history_log,
         "innehav": holding_info,
+        "divergens": divergence,
+        "bakgrund_antal": len(background) if background else 0,
     }
     with open(RESULTS_FILE, "w") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
 
     write_excel(portfolios, consensus, analyses, claude_texts, history_log, ranking,
-                near_consensus, holding_info)
+                near_consensus, holding_info, divergence)
 
     # Spara beständig historik till gisten
     gist_push()

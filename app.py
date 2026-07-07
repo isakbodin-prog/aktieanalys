@@ -149,9 +149,9 @@ analyses = data["analyses"]
 claude = data.get("claude", {})
 consensus_order = sorted(consensus, key=lambda t: (-consensus[t]["count"], -consensus[t]["avg_weight"]))
 
-tab_rang, tab_konsensus, tab_analys, tab_andringar, tab_historik, tab_portfoljer = st.tabs(
-    ["🏆 Bästa köp", "🎯 Konsensus", "🤖 Claudes analys", "🔄 Senaste ändringar",
-     "📜 Historik", "💼 Portföljer"]
+tab_rang, tab_konsensus, tab_diverg, tab_analys, tab_andringar, tab_historik, tab_portfoljer = st.tabs(
+    ["🏆 Bästa köp", "🎯 Konsensus", "🧭 Divergens", "🤖 Claudes analys",
+     "🔄 Senaste ändringar", "📜 Historik", "💼 Portföljer"]
 )
 
 # --- Rangordning ---
@@ -272,6 +272,52 @@ with tab_konsensus:
         } for e in lamnat]
         st.dataframe(pd.DataFrame(lamnat_rows), use_container_width=True, hide_index=True)
         st.caption("När investerare kliver av ett värdepapper kan det vara en tidig säljsignal.")
+
+# --- Divergens ---
+with tab_diverg:
+    st.subheader("Divergens — signalgruppens unika övertygelser")
+    divergens = data.get("divergens", {})
+    bg_antal = data.get("bakgrund_antal", 0)
+    if not divergens:
+        st.info("Ingen divergensdata ännu — den beräknas vid nästa datahämtning.")
+    else:
+        st.caption(
+            f"Jämför dina 5 utvalda investerare (signalgruppen) med en bred referens av "
+            f"**{bg_antal} screenade topptraders** (bakgrundsgruppen: minst 2 år på plattformen, "
+            f"gain ≥ 15 % senaste året, månadsrisk ≤ 6, minst 50 kopierare). "
+            f"**Hög divergens** = få i den breda gruppen äger aktien → signalgruppens egen idé. "
+            f"**Låg/negativ** = flockbeteende — 'alla' äger den redan."
+        )
+        div_rows = []
+        for tk, dv in sorted(divergens.items(), key=lambda x: -x[1]["divergens_pp"]):
+            c = claude.get(tk, {})
+            if dv["divergens_pp"] >= 40:
+                tolk = "💎 Unik övertygelse"
+            elif dv["divergens_pp"] >= 15:
+                tolk = "🔹 Viss egen idé"
+            else:
+                tolk = "🐑 Flockbeteende"
+            div_rows.append({
+                "Aktie": tk,
+                "Signalgrupp": f"{dv['signal_antal']}/{len(data['profiler'])} ({dv['signal_andel_pct']} %)",
+                "Bakgrund": f"{dv['bakgrund_antal']}/{bg_antal} ({dv['bakgrund_andel_pct']} %)",
+                "Divergens (pp)": dv["divergens_pp"],
+                "Bakgrundens snittvikt (%)": dv["bakgrund_snittvikt"],
+                "Tolkning": tolk,
+                "Claude": c.get("rekommendation", "—"),
+            })
+        st.dataframe(
+            pd.DataFrame(div_rows), use_container_width=True, hide_index=True,
+            column_config={
+                "Divergens (pp)": st.column_config.ProgressColumn(
+                    "Divergens (pp)", min_value=-100, max_value=100, format="%+.1f"
+                ),
+            },
+        )
+        st.caption(
+            "Divergens = signalgruppens ägarandel minus bakgrundsgruppens, i procentenheter. "
+            "Bakgrundsgruppen screenas om varje dag och används som brusfilter — inte som köpsignal."
+        )
 
 # --- Claudes analys ---
 with tab_analys:
