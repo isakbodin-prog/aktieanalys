@@ -97,7 +97,11 @@ force_claude = st.sidebar.checkbox(
 
 def data_ar_fran_idag(d):
     from datetime import date
-    return bool(d) and d.get("tidpunkt", "")[:10] == date.today().isoformat()
+    if not d:
+        return False
+    if date.today().weekday() in (5, 6):
+        return True   # helg: marknaden stängd, befintlig data är per definition färsk
+    return d.get("tidpunkt", "")[:10] == date.today().isoformat()
 
 
 run_now = st.sidebar.button("🔄 Uppdatera nu", type="primary", use_container_width=True)

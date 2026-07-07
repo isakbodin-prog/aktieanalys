@@ -59,6 +59,8 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek
    DAGSSPÄRR: körs max 1 gång/dag (claude_datum i senaste_analys.json);
    samma dag återanvänds texterna, men NYA konsensusaktier analyseras.
    Kringgå med force_claude=True / CLI-flaggan --force-claude.
+   HELGVILA: lördag/söndag återanvänds senaste analysen (marknaden
+   stängd) och appen hämtar ingen ny data — fredagens data är färsk.
    Webbappen hämtar eToro-data automatiskt vid sidöppning BARA om dagens
    data saknas (senaste_analys.json:s tidpunkt ≠ idag); annars visas
    befintlig data direkt. Kallstart utan lokal fil → gist_pull först.

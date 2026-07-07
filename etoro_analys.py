@@ -1193,8 +1193,14 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
 
     claude_texts = {}
     claude_datum = None
+    helg = date.today().weekday() in (5, 6)   # lördag/söndag — marknaden stängd
     if with_claude:
-        if prev_datum == today and not force_claude:
+        if helg and prev_claude and not force_claude:
+            # Helgvila: kurserna är fredagens, så senaste analysen gäller ännu
+            claude_texts = {t: c for t, c in prev_claude.items() if t in consensus}
+            claude_datum = prev_datum
+            print("\nHelg — marknaden stängd, Claude-analysen från senaste handelsdagen återanvänds.")
+        elif prev_datum == today and not force_claude:
             claude_texts = {t: c for t, c in prev_claude.items() if t in consensus}
             claude_datum = prev_datum
             missing = {t: a for t, a in analyses.items()
