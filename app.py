@@ -23,18 +23,25 @@ st.set_page_config(page_title="eToro Portföljanalys", page_icon="📈", layout=
 # ----------------------------------------------------------------------
 # Lösenordsskydd — aktivt bara när APP_PASSWORD är satt (t.ex. på Render).
 # Utan det kan vem som helst som hittar sidan trigga API-anrop.
+# Bokmärkesinloggning: spara ett bokmärke med ?nyckel=lösenordet så
+# loggas du in automatiskt vid varje besök.
 # ----------------------------------------------------------------------
 APP_PASSWORD = os.environ.get("APP_PASSWORD")
 if APP_PASSWORD and not st.session_state.get("auth_ok"):
-    st.title("🔒 eToro Portföljanalys")
-    pwd = st.text_input("Lösenord", type="password")
-    if pwd:
-        if pwd == APP_PASSWORD:
-            st.session_state["auth_ok"] = True
-            st.rerun()
-        else:
-            st.error("Fel lösenord.")
-    st.stop()
+    if st.query_params.get("nyckel") == APP_PASSWORD:
+        st.session_state["auth_ok"] = True
+    else:
+        st.title("🔒 eToro Portföljanalys")
+        pwd = st.text_input("Lösenord", type="password")
+        if pwd:
+            if pwd == APP_PASSWORD:
+                st.session_state["auth_ok"] = True
+                st.rerun()
+            else:
+                st.error("Fel lösenord.")
+        st.caption("Tips: spara ett bokmärke till adressen med `?nyckel=ditt-lösenord` "
+                   "på slutet så loggas du in automatiskt.")
+        st.stop()
 
 
 def load_results():
