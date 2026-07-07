@@ -31,6 +31,21 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek
   Enda fungerande batchmetoden är att hämta HELA listan utan parametrar.
 - Auth-test som funkar: GET /market-data/search?query=Apple → 200
 
+## Körlägen (CLI)
+- `python3 etoro_analys.py` — standardanalysen (signalgruppens 5 profiler).
+  Divergensen räknas från cachade bakgrundsportföljer, inga extra anrop.
+- `python3 etoro_analys.py --screener` — screena fram bakgrundsgruppen:
+  två perioder (OneYearAgo + LastYear, TwoYearsAgo finns ej i API:et),
+  kräver närvaro i båda, rankar på snittgain − 5×riskpoäng (ALDRIG på
+  copiers; copiersMin=50 bara som spökkontofilter). Sparar topp 50 med
+  nyckeltal till bakgrund_topp50.json (gist-synkad, kan handjusteras).
+  Kör INTE analysen.
+- `python3 etoro_analys.py --divergens` — hämtar om bakgrundsgruppens
+  portföljer (kräver att --screener körts, annars RuntimeError) till
+  bakgrund_cache.json och kör sedan hela analysen.
+- `--force-claude` — kringgår Claude-dagsspärren (kombinerbar med ovan).
+- Webbappen kör alltid standardläget; bakgrunden uppdateras bara via CLI.
+
 ## Pipeline (i skriptet)
 1. Hämta 5 portföljer → aggregera investmentPct per instrumentId
 2. Konsensus: instrument i ≥3 portföljer (MIN_PORTFOLIOS=3)

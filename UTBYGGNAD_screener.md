@@ -89,15 +89,25 @@ Divergens | Snittvikt signal | TA-sammanfattning | Analytiker | Uppsida %
    körningar samma dag hoppar över hela steget.
 4. Ticker-uppslaget löst sedan tidigare (se CLAUDE.md).
 
-## Status: IMPLEMENTERAT
-- load_or_fetch_background() + compute_divergence() i etoro_analys.py
-- Screeningkriterier i SCREENER_PARAMS (gain ≥15 %, månadsrisk ≤6,
-  ≥104 veckor registrerad, ≥50 copiers, signalprofiler exkluderas)
+## Status: IMPLEMENTERAT (omstrukturerat till tre körlägen 2026-07-07)
+- `--screener`: run_screener() — två perioder (OneYearAgo + LastYear)
+  eftersom TwoYearsAgo saknas; kräver kvalificering i båda; rankar på
+  snittgain − 5×riskpoäng, aldrig på copiers. Topp 50 + nyckeltal sparas
+  till bakgrund_topp50.json (stabil, inspekterbar, handjusterbar,
+  gist-synkad).
+- `--divergens`: load_background_portfolios(refresh=True) — läser
+  medlemsfilen, hämtar portföljerna (0,5 s paus/anrop, 429-hantering)
+  till bakgrund_cache.json, kör sedan hela analysen.
+- Default: inga bakgrundsanrop alls — divergensen räknas från cachen.
+  Verifierat 2026-07-07 att default ger samma resultat som före
+  refaktoreringen (konsensus, portföljer, Claude-texter, ranking,
+  Excel-flikar — allt identiskt).
+- compute_consensus() och get_portfolio(quiet=) delas av alla lägen.
 - Divergens visas i app-fliken "🧭 Divergens" + Excel-fliken "Divergens",
   och skickas till Claude (ägs_av_pct_av_bakgrundsgruppen,
   divergens_mot_bakgrundsgruppen_pp)
-- Första mätningen (2026-07-07): AMZN +41 pp (unik övertygelse),
-  TSM +25, NVDA +21, MU +17
+- Mätning 2026-07-07 (ny uthållighetsscreenad grupp): AMZN +35 pp,
+  NVDA/MU/TSM +21 pp vardera
 
 ## Varningar
 

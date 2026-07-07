@@ -114,15 +114,16 @@ def resolve_instruments(instrument_ids):
     return {int(i): _instrument_cache.get(int(i), str(i)) for i in instrument_ids}
 
 
-def get_portfolio(username):
+def get_portfolio(username, quiet=False):
     """Hämta en användares live-portfölj.
 
     Returnerar (weights, meta) där weights = {ticker: vikt%} och
     meta = {ticker: {"öppnad": "ÅÅÅÅ-MM-DD", "vinst_pct": x}} — äldsta öppna
     positionens datum och investeringsviktad vinst. Eller (None, None).
     """
-    print(f"\nHämtar portfölj för: {username}")
-    data = api_get(f"/user-info/people/{username}/portfolio/live")
+    if not quiet:
+        print(f"\nHämtar portfölj för: {username}")
+    data = api_get(f"/user-info/people/{username}/portfolio/live", quiet=quiet)
     if not data:
         print(f"  Kunde inte hämta portfölj för '{username}'.")
         return None, None
@@ -169,30 +170,127 @@ def get_portfolio(username):
             m["vinst_pct"] = round(profit_acc[iid][0] / profit_acc[iid][1], 1)
         if m:
             meta[ticker] = m
-    print(f"  {len(out)} innehav hämtade.")
+    if not quiet:
+        print(f"  {len(out)} innehav hämtade.")
     return out, meta
 
 
 # ----------------------------------------------------------------------
-# Steg 0: Screener — bakgrundsgrupp (topp ~50 traders som referens/brusfilter)
+# Delad konsensusberäkning (används av både signal- och ev. andra grupper)
 # ----------------------------------------------------------------------
+def compute_consensus(portfolios, min_portfolios=None):
+    """Beräkna konsensus och nära konsensus ur en uppsättning portföljer.
+
+    Returnerar (consensus, near_consensus): {ticker: {count, avg_weight,
+    total_weight, holders}} där consensus kräver >= min_portfolios ägare
+    och nära konsensus exakt en ägare färre.
+    """
+    min_portfolios = min_portfolios or MIN_PORTFOLIOS
+    consensus, near_consensus = {}, {}
+    all_tickers = set()
+    for positions in portfolios.values():
+        all_tickers.update(positions.keys())
+    for ticker in all_tickers:
+        holders = {name: p[ticker] for name, p in portfolios.items() if ticker in p}
+        entry = {"count": len(holders),
+                 "avg_weight": sum(holders.values()) / len(holders),
+                 "total_weight": round(sum(holders.values()), 2),
+                 "holders": sorted(holders)}
+        if len(holders) >= min_portfolios:
+            consensus[ticker] = entry
+        elif len(holders) == min_portfolios - 1:
+            near_consensus[ticker] = entry
+    return consensus, near_consensus
+
+
+# ----------------------------------------------------------------------
+# Steg 0: Screener — bakgrundsgrupp (topp ~50 traders som referens/brusfilter)
+#
+# Tre separata artefakter:
+#   bakgrund_topp50.json — medlemslistan från screenern (--screener).
+#     Stabil mellan körningar, kan inspekteras och handjusteras.
+#   bakgrund_cache.json  — medlemmarnas portföljer (--divergens hämtar om).
+#   Divergensen i default-läget räknas från cachen utan några extra anrop.
+# ----------------------------------------------------------------------
+BG_MEMBERS_FILE = "bakgrund_topp50.json"
 BG_CACHE_FILE = "bakgrund_cache.json"
-SCREENER_PARAMS = {
-    "period": "OneYearAgo",           # TwoYearsAgo finns inte i API:et
+BG_SIZE = 50
+SCREENER_FILTER = {
     "sort": "-gain",                  # minusprefix = fallande
-    "pageSize": 50,
+    "pageSize": 100,                  # större pool per period för snittningen
     "gainMin": 15,                    # sållar bort förlorare och nollkonton
     "maxMonthlyRiskScoreMax": 6,      # inga högriskchansare
     "weeksSinceRegistrationMin": 104, # minst 2 år på plattformen
-    "copiersMin": 50,                 # sållar bort test-/spökkonton
+    "copiersMin": 50,                 # sållar BARA bort test-/spökkonton — rankas ej på
     # OBS: isTestAccount och popularInvestor ger 404 — finns ej i denna API-version
 }
+# API:et saknar TwoYearsAgo (404). "~2 år" approximeras med snittet av två
+# perioder: rullande 12 månader + förra kalenderåret — båda måste vara bra.
+SCREENER_PERIODS = ("OneYearAgo", "LastYear")
 
 
-def load_or_fetch_background():
-    """Bakgrundsgruppens portföljer, med dagscache (BG_CACHE_FILE, synkas via gist).
+def run_screener():
+    """Screena fram bakgrundsgruppen och spara topp 50 till BG_MEMBERS_FILE.
 
-    Returnerar {username: {ticker: vikt%}} eller None om allt fallerar.
+    Rankar på snittgain över SCREENER_PERIODS + låg riskpoäng — INTE på
+    antal kopierare. Returnerar listan (eller None vid fel).
+    """
+    from datetime import date
+
+    pools = {}
+    for period in SCREENER_PERIODS:
+        print(f"Screenar period {period}...")
+        data = api_get("/user-info/people/search", {"period": period, **SCREENER_FILTER})
+        if not data or not data.get("items"):
+            print(f"  OBS: inga träffar för {period} — avbryter.")
+            return None
+        pools[period] = {i["userName"]: i for i in data["items"]
+                         if i["userName"] not in PROFILES}   # grupperna hålls åtskilda
+
+    # Kräv närvaro i båda perioderna (uthållighet, inte one-hit-wonders)
+    gemensamma = set.intersection(*(set(p) for p in pools.values()))
+    print(f"  {sum(len(p) for p in pools.values())} kandidater, "
+          f"{len(gemensamma)} klarar kraven i båda perioderna.")
+
+    def rank_score(username):
+        gains = [pools[p][username]["gain"] for p in SCREENER_PERIODS]
+        snitt_gain = sum(gains) / len(gains)
+        risk = pools[SCREENER_PERIODS[0]][username]["maxMonthlyRiskScore"]
+        return snitt_gain - risk * 5   # riskstraff: en riskpoäng kostar 5 gain-enheter
+
+    rankade = sorted(gemensamma, key=rank_score, reverse=True)[:BG_SIZE]
+    medlemmar = []
+    for username in rankade:
+        i1 = pools[SCREENER_PERIODS[0]][username]
+        medlemmar.append({
+            "userName": username,
+            "gain_1ar": round(i1["gain"], 1),
+            "gain_forra_aret": round(pools[SCREENER_PERIODS[1]][username]["gain"], 1),
+            "riskpoang": i1["maxMonthlyRiskScore"],
+            "veckor_registrerad": i1["weeksSinceRegistration"],
+            "copiers": i1["copiers"],
+        })
+
+    with open(BG_MEMBERS_FILE, "w") as f:
+        json.dump({"datum": date.today().isoformat(),
+                   "kriterier": {"perioder": list(SCREENER_PERIODS), **SCREENER_FILTER},
+                   "profiler": medlemmar}, f, ensure_ascii=False, indent=2)
+
+    print(f"\nTopp {len(medlemmar)} sparad till {BG_MEMBERS_FILE}:")
+    for i, m in enumerate(medlemmar[:10], 1):
+        print(f"  {i:>2}. {m['userName']:<22} 1 år {m['gain_1ar']:>6.1f} % | "
+              f"förra året {m['gain_forra_aret']:>6.1f} % | risk {m['riskpoang']}")
+    if len(medlemmar) > 10:
+        print(f"  ... och {len(medlemmar) - 10} till.")
+    return medlemmar
+
+
+def load_background_portfolios(refresh=False):
+    """Bakgrundsgruppens portföljer.
+
+    refresh=False (default-läget): läs bara befintlig cache — inga API-anrop.
+    refresh=True (--divergens): hämta om portföljerna för medlemmarna i
+    BG_MEMBERS_FILE och skriv ny cache.
     """
     import time
     from datetime import date
@@ -204,48 +302,38 @@ def load_or_fetch_background():
                 cache = json.load(f)
         except (json.JSONDecodeError, OSError):
             cache = {}
-    if cache.get("datum") == date.today().isoformat() and cache.get("portfolios"):
-        print(f"\nBakgrundsgrupp: {len(cache['portfolios'])} portföljer från dagens cache.")
-        return cache["portfolios"]
 
-    print("\nScreenar bakgrundsgrupp (topp 50 via /user-info/people/search)...")
-    data = api_get("/user-info/people/search", SCREENER_PARAMS)
-    if not data or not data.get("items"):
-        gamla = cache.get("portfolios")
-        if gamla:
-            print("  Screenern svarade inte — använder gårdagens bakgrundsgrupp.")
-        return gamla
+    if not refresh:
+        ports = cache.get("portfolios")
+        if ports:
+            print(f"\nBakgrundsgrupp: {len(ports)} portföljer från cache ({cache.get('datum', '?')}).")
+        return ports
 
-    # Håll grupperna åtskilda: signalprofilerna ingår inte i bakgrunden
-    usernames = [i["userName"] for i in data["items"] if i["userName"] not in PROFILES]
-    print(f"  {len(usernames)} profiler screenade. Hämtar portföljer (tar ~1–2 min)...")
+    if not os.path.exists(BG_MEMBERS_FILE):
+        raise RuntimeError(f"{BG_MEMBERS_FILE} saknas — kör 'python3 etoro_analys.py --screener' först.")
+    with open(BG_MEMBERS_FILE) as f:
+        members = json.load(f)
+    usernames = [m["userName"] for m in members.get("profiler", [])]
+    if not usernames:
+        raise RuntimeError(f"{BG_MEMBERS_FILE} innehåller inga profiler.")
 
+    print(f"\nHämtar {len(usernames)} bakgrundsportföljer (screenade {members.get('datum', '?')}, "
+          "tar ~1–2 min)...")
     ports = {}
     for username in usernames:
-        pdata = api_get(f"/user-info/people/{username}/portfolio/live", quiet=True)
-        if pdata:
-            weights = {}
-            def add(p):
-                iid = p.get("instrumentId")
-                pct = float(p.get("investmentPct") or 0)
-                if iid is not None:
-                    weights[iid] = weights.get(iid, 0) + pct
-            for p in pdata.get("positions") or []:
-                add(p)
-            for st in pdata.get("socialTrades") or []:
-                for p in st.get("positions") or []:
-                    add(p)
-            if weights:
-                id_to_ticker = resolve_instruments(list(weights.keys()))
-                ports[username] = {id_to_ticker[iid]: round(w, 2) for iid, w in weights.items()}
-        time.sleep(0.5)   # snäll takt — 50 anrop i följd
+        weights, _ = get_portfolio(username, quiet=True)
+        if weights:
+            ports[username] = weights
+        time.sleep(0.5)   # snäll takt — många anrop i följd
 
     if not ports:
+        print("  OBS: inga portföljer kunde hämtas — behåller gamla cachen.")
         return cache.get("portfolios")
 
     print(f"  {len(ports)} bakgrundsportföljer hämtade.")
     with open(BG_CACHE_FILE, "w") as f:
-        json.dump({"datum": date.today().isoformat(), "portfolios": ports}, f, ensure_ascii=False)
+        json.dump({"datum": date.today().isoformat(), "medlemslista_datum": members.get("datum"),
+                   "portfolios": ports}, f, ensure_ascii=False)
     return ports
 
 
@@ -632,7 +720,8 @@ WEIGHT_CHANGE_THRESHOLD = 1.0  # procentenheter — mindre viktändringar loggas
 # ----------------------------------------------------------------------
 GIST_ID = os.environ.get("GIST_ID")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
-GIST_FILES = ("portfolj_historik.json", "senaste_analys.json", "bakgrund_cache.json")
+GIST_FILES = ("portfolj_historik.json", "senaste_analys.json",
+              "bakgrund_topp50.json", "bakgrund_cache.json")
 
 
 def _gist_headers():
@@ -937,7 +1026,7 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
 RESULTS_FILE = "senaste_analys.json"
 
 
-def run_analysis(with_claude=True, force_claude=False):
+def run_analysis(with_claude=True, force_claude=False, refresh_background=False):
     """Kör hela pipelinen. Returnerar resultatet som dict och sparar det
     till RESULTS_FILE + portfolj_analys.xlsx. Kastar RuntimeError vid fel
     (så att webbappen kan visa felet i stället för att dö).
@@ -945,6 +1034,9 @@ def run_analysis(with_claude=True, force_claude=False):
     Claude-analysen körs max en gång per dag (kostar API-credits) — har den
     redan körts idag återanvänds texterna. Nya konsensusaktier analyseras
     dock alltid. force_claude=True kringgår dagsspärren.
+
+    refresh_background=True (--divergens) hämtar om bakgrundsgruppens
+    portföljer; annars används befintlig cache utan extra API-anrop.
     """
     from datetime import datetime, date
 
@@ -972,27 +1064,13 @@ def run_analysis(with_claude=True, force_claude=False):
         raise RuntimeError("Inga portföljer kunde hämtas via eToro-API:et.")
 
     # Konsensus + nära konsensus (en portfölj ifrån)
-    consensus = {}
-    near_consensus = {}
-    all_tickers = set()
-    for positions in portfolios.values():
-        all_tickers.update(positions.keys())
-    for ticker in all_tickers:
-        holders = {name: p[ticker] for name, p in portfolios.items() if ticker in p}
-        entry = {"count": len(holders),
-                 "avg_weight": sum(holders.values()) / len(holders),
-                 "total_weight": round(sum(holders.values()), 2),
-                 "holders": sorted(holders)}
-        if len(holders) >= MIN_PORTFOLIOS:
-            consensus[ticker] = entry
-        elif len(holders) == MIN_PORTFOLIOS - 1:
-            near_consensus[ticker] = entry
+    consensus, near_consensus = compute_consensus(portfolios)
 
     print(f"\nKonsensus-aktier (i minst {MIN_PORTFOLIOS} portföljer): {sorted(consensus)}")
     print(f"Nära konsensus (i {MIN_PORTFOLIOS - 1} portföljer): {len(near_consensus)} st")
 
     # Bakgrundsgrupp + divergens (vad äger signalgruppen som flocken INTE äger?)
-    background = load_or_fetch_background()
+    background = load_background_portfolios(refresh=refresh_background)
     divergence = compute_divergence(consensus, portfolios, background)
     if divergence:
         rankad = sorted(divergence.items(), key=lambda x: -x[1]["divergens_pp"])
@@ -1149,9 +1227,32 @@ def run_analysis(with_claude=True, force_claude=False):
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="eToro portföljanalys — konsensus, teknisk analys och divergens.",
+        epilog="Utan flaggor körs standardanalysen av signalgruppens 5 profiler "
+               "(divergensen räknas från senast cachade bakgrundsportföljer).")
+    parser.add_argument("--screener", action="store_true",
+                        help=f"screena fram bakgrundsgruppen (topp {BG_SIZE}) och spara till "
+                             f"{BG_MEMBERS_FILE} — kör inte analysen")
+    parser.add_argument("--divergens", action="store_true",
+                        help="hämta om bakgrundsgruppens portföljer (kräver att --screener "
+                             "körts någon gång) och kör sedan hela analysen")
+    parser.add_argument("--force-claude", action="store_true",
+                        help="kör Claude-analysen även om den redan körts idag (drar credits)")
+    args = parser.parse_args()
+
     print("=== eToro portföljanalys ===")
     try:
-        run_analysis(force_claude="--force-claude" in sys.argv)
+        if args.screener:
+            if not API_KEY or not USER_KEY:
+                raise RuntimeError("ETORO_API_KEY och ETORO_USER_KEY saknas — lägg dem i .env-filen.")
+            gist_pull()
+            if run_screener() is None:
+                raise RuntimeError("Screenern misslyckades — se utskriften ovan.")
+            gist_push()
+            return
+        run_analysis(force_claude=args.force_claude, refresh_background=args.divergens)
     except RuntimeError as e:
         sys.exit(f"\nFEL: {e}")
 
