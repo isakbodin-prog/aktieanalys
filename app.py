@@ -380,35 +380,99 @@ with tab_andringar:
             "en aktie dyker det upp här efter nästa körning."
         )
     else:
+        import re as _re
         senaste_datum = log[0]["datum"]
         dagens = [e for e in log if e["datum"] == senaste_datum]
         st.caption(f"Ändringar registrerade {senaste_datum}:")
 
+        STOR_ANDRING = 2.0   # procentenheter — gräns för "stor viktändring"
+
+        def _delta(e):
+            """Viktförändring i procentenheter ur en loggpost."""
+            tal = [float(x) for x in _re.findall(r"-?\d+(?:\.\d+)?", e["detalj"].replace(",", "."))]
+            if e["typ"] == "VIKTÄNDRING" and len(tal) >= 2:
+                return tal[1] - tal[0]
+            if e["typ"] == "NYTT INNEHAV" and tal:
+                return tal[0]
+            if e["typ"] == "SÅLT INNEHAV" and tal:
+                return -tal[0]
+            return None
+
+        def _pe(d):
+            return f"{d:+.1f}".replace(".", ",") + " pe"
+
+        # Alla viktrörelser per aktie (nytt innehav = ökning, sålt = minskning)
+        moves = {}
+        for e in dagens:
+            if e["typ"] in ("VIKTÄNDRING", "NYTT INNEHAV", "SÅLT INNEHAV"):
+                d = _delta(e)
+                if d is not None:
+                    moves.setdefault(e["ticker"], []).append(
+                        {"profil": e["profil"], "delta": d, "typ": e["typ"], "detalj": e["detalj"]})
+
+        agare = {tk: sum(1 for p in data["portfolios"].values() if tk in p) for tk in moves}
+
+        samman, stora, mindre = [], [], []
+        for tk, ms in sorted(moves.items()):
+            grupperade_profiler = set()
+            for riktning, verb, emoji in ((1, "ökat", "📈"), (-1, "minskat", "📉")):
+                grupp = [m for m in ms if (m["delta"] > 0) == (riktning > 0)]
+                if len(grupp) >= 2:
+                    antal = {2: "Två", 3: "Tre", 4: "Fyra", 5: "Fem"}.get(len(grupp), str(len(grupp)))
+                    vem = ", ".join(f"{m['profil']} ({_pe(m['delta'])})" for m in grupp)
+                    samman.append(f"{emoji} **{antal} portföljer har {verb} {tk}** — {vem}")
+                    grupperade_profiler |= {m["profil"] for m in grupp}
+            for m in ms:
+                if m["profil"] in grupperade_profiler or m["typ"] != "VIKTÄNDRING":
+                    continue   # in-/utsålda visas i sektionen nedan
+                if abs(m["delta"]) >= STOR_ANDRING:
+                    verb = "ökat" if m["delta"] > 0 else "minskat"
+                    emoji = "📈" if m["delta"] > 0 else "📉"
+                    stora.append(f"{emoji} **{m['profil']}** har {verb} **{tk}** "
+                                 f"{'kraftigt' if abs(m['delta']) >= 4 else 'tydligt'}: "
+                                 f"{m['detalj']} ({_pe(m['delta'])})")
+                elif agare.get(tk, 0) > 1:
+                    # små ändringar visas bara för aktier som flera portföljer äger
+                    mindre.append(f"{tk} ({m['profil']} {_pe(m['delta'])})")
+
+        if samman:
+            st.markdown("#### 🤝 Sammanfallande rörelser")
+            st.caption("Flera investerare har rört samma aktie åt samma håll — starkaste signalen.")
+            for rad in samman:
+                st.markdown(f"- {rad}")
+        if stora:
+            st.markdown("#### 💪 Stora viktändringar")
+            for rad in stora:
+                st.markdown(f"- {rad}")
+        if mindre:
+            st.markdown(f"*Mindre justeringar i gemensamt ägda aktier: {' · '.join(mindre)}*")
+        if not (samman or stora or mindre):
+            st.markdown("*Inga betydande viktrörelser sedan förra körningen.*")
+
+        st.divider()
         intag = [e for e in dagens if e["typ"] in ("NYTT INNEHAV", "IN I KONSENSUS")]
         utsalt = [e for e in dagens if e["typ"] in ("SÅLT INNEHAV", "UT UR KONSENSUS")]
-        ovrigt = [e for e in dagens if e["typ"] not in
-                  ("NYTT INNEHAV", "IN I KONSENSUS", "SÅLT INNEHAV", "UT UR KONSENSUS")]
-
         col_in, col_ut = st.columns(2)
         with col_in:
-            st.markdown("### 🟢 Intaget")
+            st.markdown("#### 🟢 Intaget")
             if not intag:
                 st.caption("Inga nya innehav.")
             for e in intag:
                 vem = f" hos **{e['profil']}**" if e["profil"] else " (konsensus)"
                 st.markdown(f"- **{e['ticker']}**{vem} — {e['detalj']}")
         with col_ut:
-            st.markdown("### 🔴 Utsålt")
+            st.markdown("#### 🔴 Utsålt")
             if not utsalt:
                 st.caption("Inga sålda innehav.")
             for e in utsalt:
                 vem = f" hos **{e['profil']}**" if e["profil"] else " (konsensus)"
                 st.markdown(f"- **{e['ticker']}**{vem} — {e['detalj']}")
 
-        if ovrigt:
-            st.markdown("### ⚖️ Viktändringar")
-            for e in ovrigt:
-                st.markdown(f"- **{e['ticker']}** hos **{e['profil']}** — {e['detalj']}")
+        with st.expander("🔍 Alla dagens ändringar i detalj"):
+            df = pd.DataFrame(dagens).rename(columns={
+                "datum": "Datum", "typ": "Typ", "profil": "Profil",
+                "ticker": "Aktie", "detalj": "Detalj"})
+            st.dataframe(df, use_container_width=True, hide_index=True)
 
         st.caption("Hela loggen över alla körningar finns under fliken **📜 Historik**.")
 
