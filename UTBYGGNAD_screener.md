@@ -71,13 +71,33 @@ Körs bara på signalgruppens konsensusaktier (inte alla 50 portföljer).
 Ny flik "Divergens": Instrument | I signalgrupp (x/5) | I bakgrund (%) |
 Divergens | Snittvikt signal | TA-sammanfattning | Analytiker | Uppsida %
 
-## Öppna frågor att testa i Code-sessionen
+## Öppna frågor — BESVARADE (byggt 2026-07-07)
 
-1. Exakta giltiga värden för `period`-parametern (testa mot API:et)
-2. Vilket fält i search-svaret som är användarnamn (username/UserName)
-3. Rate limit-budget: 55 portföljer + instrumentuppslag — mät hur lång
-   tid en full körning tar och om cache behövs redan från start
-4. Ticker-uppslaget från CLAUDE.md måste lösas först (blockerar allt)
+1. `period`-värden som ger 200: OneYearAgo, CurrYear, LastYear,
+   SixMonthsAgo, ThreeMonthsAgo, CurrMonth, CurrQuarter.
+   TwoYearsAgo ger 404 → max lookback är 1 år.
+   Sortering: `sort=-gain` (minusprefix = fallande).
+   OGILTIGA parametrar (404): isTestAccount, popularInvestor.
+   Fungerande filter: gainMin, maxMonthlyRiskScoreMax,
+   weeksSinceRegistrationMin, copiersMin.
+2. Användarnamnsfältet heter `userName`. Svaret innehåller även gain,
+   riskScore, maxMonthlyRiskScore, winRatio, profitableMonthsPct,
+   copiers, weeksSinceRegistration, drawdowns m.m.
+3. Full körning med 5 signal + 49 bakgrund: ~3 min 47 s inkl. en
+   60 s rate limit-paus (api_get hanterar 429/Retry-After). Bakgrunden
+   dagscachas i bakgrund_cache.json (gist-synkad) → efterföljande
+   körningar samma dag hoppar över hela steget.
+4. Ticker-uppslaget löst sedan tidigare (se CLAUDE.md).
+
+## Status: IMPLEMENTERAT
+- load_or_fetch_background() + compute_divergence() i etoro_analys.py
+- Screeningkriterier i SCREENER_PARAMS (gain ≥15 %, månadsrisk ≤6,
+  ≥104 veckor registrerad, ≥50 copiers, signalprofiler exkluderas)
+- Divergens visas i app-fliken "🧭 Divergens" + Excel-fliken "Divergens",
+  och skickas till Claude (ägs_av_pct_av_bakgrundsgruppen,
+  divergens_mot_bakgrundsgruppen_pp)
+- Första mätningen (2026-07-07): AMZN +41 pp (unik övertygelse),
+  TSM +25, NVDA +21, MU +17
 
 ## Varningar
 
