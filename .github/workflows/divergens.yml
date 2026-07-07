@@ -1,0 +1,25 @@
+name: Veckovis divergens
+
+on:
+  schedule:
+    - cron: "0 6 * * 6"   # lördagar 06:00 UTC = 08:00 svensk sommartid
+  workflow_dispatch: {}    # gör att den även kan köras manuellt från GitHub
+
+jobs:
+  divergens:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Uppdatera bakgrundsportföljer och kör analysen
+        run: python3 etoro_analys.py --divergens
+        env:
+          ETORO_API_KEY: ${{ secrets.ETORO_API_KEY }}
+          ETORO_USER_KEY: ${{ secrets.ETORO_USER_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GIST_ID: ${{ secrets.GIST_ID }}
+          GITHUB_TOKEN: ${{ secrets.GIST_TOKEN }}

@@ -102,6 +102,39 @@ def data_ar_fran_idag(d):
 
 run_now = st.sidebar.button("🔄 Uppdatera nu", type="primary", use_container_width=True)
 
+with st.sidebar.expander("🧭 Bakgrundsgrupp & divergens"):
+    def _fildatum(fil):
+        try:
+            with open(fil) as f:
+                return json.load(f).get("datum")
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    st.caption(f"Senast screenad: {_fildatum(ea.BG_MEMBERS_FILE) or 'aldrig'} · "
+               f"portföljer hämtade: {_fildatum(ea.BG_CACHE_FILE) or 'aldrig'}")
+    st.caption("Körs även automatiskt: screener månadsvis, divergens varje lördag.")
+
+    if st.button("🔍 Kör screener", use_container_width=True,
+                 help="Väljer om vilka 50 traders som utgör bakgrundsgruppen. Snabbt (~10 s)."):
+        with st.spinner("Screenar fram topp 50..."):
+            try:
+                if ea.run_screener():
+                    ea.gist_push()
+                    st.success("Bakgrundsgruppen är uppdaterad!")
+                else:
+                    st.error("Screenern misslyckades — försök igen senare.")
+            except Exception as e:
+                st.error(str(e))
+
+    if st.button("🧭 Uppdatera divergens", use_container_width=True,
+                 help="Hämtar bakgrundsgruppens 50 portföljer och kör om analysen. Tar 3–5 minuter."):
+        with st.spinner("Hämtar 50 bakgrundsportföljer och räknar om divergensen — tar 3–5 minuter..."):
+            try:
+                ea.run_analysis(with_claude=with_claude, refresh_background=True)
+                st.success("Divergensen är uppdaterad!")
+            except RuntimeError as e:
+                st.error(str(e))
+
 # Vid sidöppning: synka först mot gisten (fångar t.ex. --divergens-körningar
 # gjorda på datorn), kör sedan analysen bara om dagens data saknas.
 if "auto_check" not in st.session_state:

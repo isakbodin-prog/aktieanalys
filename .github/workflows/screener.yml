@@ -1,0 +1,24 @@
+name: Månatlig screener
+
+on:
+  schedule:
+    - cron: "0 5 1 * *"   # första dagen i månaden 05:00 UTC = 07:00 svensk sommartid
+  workflow_dispatch: {}    # gör att den även kan köras manuellt från GitHub
+
+jobs:
+  screener:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Screena fram ny bakgrundsgrupp (topp 50)
+        run: python3 etoro_analys.py --screener
+        env:
+          ETORO_API_KEY: ${{ secrets.ETORO_API_KEY }}
+          ETORO_USER_KEY: ${{ secrets.ETORO_USER_KEY }}
+          GIST_ID: ${{ secrets.GIST_ID }}
+          GITHUB_TOKEN: ${{ secrets.GIST_TOKEN }}
