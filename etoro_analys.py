@@ -89,6 +89,7 @@ def api_get(path, params=None, quiet=False, retries=3):
 # Steg 1: Hämta portföljer
 # ----------------------------------------------------------------------
 _instrument_cache = {}
+_industry_cache = {}   # ticker -> stocksIndustryID (1=Råvaror ... 9=Kraft, se app.py)
 
 def resolve_instruments(instrument_ids):
     """Översätt instrument-ID:n till tickers.
@@ -105,6 +106,8 @@ def resolve_instruments(instrument_ids):
             ticker = item.get("symbolFull")
             if iid is not None and ticker:
                 _instrument_cache[int(iid)] = str(ticker)
+                if item.get("stocksIndustryID") is not None:
+                    _industry_cache[str(ticker)] = item["stocksIndustryID"]
         print(f"  {len(_instrument_cache)} instrument i uppslagstabellen.")
 
     missing = [int(i) for i in instrument_ids if int(i) not in _instrument_cache]
@@ -1244,6 +1247,8 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
         "divergens": divergence,
         "divergens_nara": divergence_near,
         "bakgrund_antal": len(background) if background else 0,
+        "bransch": {tk: _industry_cache.get(tk)
+                    for tk in list(consensus) + list(near_consensus)},
     }
     with open(RESULTS_FILE, "w") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)

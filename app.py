@@ -17,8 +17,69 @@ import pandas as pd
 import streamlit as st
 
 import etoro_analys as ea
+from ikoner import IKON
 
-st.set_page_config(page_title="eToro Portföljanalys", page_icon="📈", layout="wide")
+st.set_page_config(page_title="eToro Portföljanalys",
+                   page_icon=":material/monitoring:", layout="wide")
+
+# ----------------------------------------------------------------------
+# Dämpad, redaktionell färgpalett (ol.studio-inspirerad)
+# ----------------------------------------------------------------------
+MOSS = "#5F6B4A"    # mossgrön — positivt (upp, köp, ja)
+RUST = "#9C5B41"    # dämpad rost — negativt (ner, sälj, nej)
+SAND = "#A8863B"    # sandockra — avvakta
+MUTED = "#8A8375"   # varm grå — neutralt/sekundärt
+
+REK_FARG = {"KÖP": MOSS, "AVVAKTA": SAND, "SÄLJ": RUST}
+
+
+def mark(value):
+    """✓/✗/– som dämpat färgad HTML-span (kräver unsafe_allow_html=True)."""
+    if value is None:
+        return f'<span style="color:{MUTED}">–</span>'
+    return (f'<span style="color:{MOSS}">✓</span>' if value
+            else f'<span style="color:{RUST}">✗</span>')
+
+
+def _cell_farg(v):
+    """Dämpad textfärg per cellvärde — används av stylad()."""
+    s = str(v)
+    if s.startswith("▲") or s == "KÖP" or s.endswith("· ny") or s == "Unik övertygelse":
+        return f"color: {MOSS}"
+    if s.startswith("▼") or s == "SÄLJ":
+        return f"color: {RUST}"
+    if s == "AVVAKTA":
+        return f"color: {SAND}"
+    if s in ("Flockbeteende", "–"):
+        return f"color: {MUTED}"
+    return ""
+
+
+def stylad(df, kolumner):
+    """Dämpade cellfärger på valda kolumner + max 2 decimaler på alla tal."""
+    subset = [k for k in kolumner if k in df.columns]
+    styler = df.style.format(precision=2)
+    fn = getattr(styler, "map", None) or styler.applymap
+    return fn(_cell_farg, subset=subset)
+
+
+# ----------------------------------------------------------------------
+# Branschsymboler — stocksIndustryID från eToro + egen halvledargrupp
+# ----------------------------------------------------------------------
+HALVLEDARE = {"NVDA", "TSM", "MU", "ASML", "ASML.NV", "AMD", "INTC", "KLAC",
+              "AVGO", "QCOM", "TXN", "AMAT", "LRCX", "MRVL", "ARM", "2330.TW"}
+
+BRANSCH_TEXT = ("Branschikoner: chip = halvledare · dator = teknik · bank = finans · "
+                "fabrik = industri · butik = tjänster · kasse = konsument · "
+                "hjärta = hälsovård · blixt = kraft · berg = råvaror")
+
+
+def bransch_ikon(tk, bransch_map):
+    """SVG-ikon (data-URI) för aktiens bransch — visas i tabellernas ikonkolumn."""
+    if tk in HALVLEDARE:
+        return IKON.get("halvledare")
+    return IKON.get(bransch_map.get(tk))
+
 
 # ----------------------------------------------------------------------
 # Lösenordsskydd — aktivt bara när APP_PASSWORD är satt (t.ex. på Render).
@@ -31,7 +92,7 @@ if APP_PASSWORD and not st.session_state.get("auth_ok"):
     if st.query_params.get("nyckel") == APP_PASSWORD:
         st.session_state["auth_ok"] = True
     else:
-        st.title("🔒 eToro Portföljanalys")
+        st.title("eToro Portföljanalys")
         pwd = st.text_input("Lösenord", type="password")
         if pwd:
             if pwd == APP_PASSWORD:
@@ -54,14 +115,8 @@ def load_results():
 def trend_label(a):
     t = a.get("stigande_trend")
     if t is None:
-        return "❓"
-    return "✅ JA" if t else "❌ NEJ"
-
-
-def ja_nej(value):
-    if value is None:
-        return "❓"
-    return "✅" if value else "❌"
+        return "–"
+    return "▲ Ja" if t else "▼ Nej"
 
 
 def format_innehavstid(dagar):
@@ -80,21 +135,6 @@ def nya_pa_listan(log, typ, dagar=7):
 # ----------------------------------------------------------------------
 # Sidopanel
 # ----------------------------------------------------------------------
-st.sidebar.title("📈 eToro Portföljanalys")
-st.sidebar.caption("Profiler som bevakas:")
-for p in ea.PROFILES:
-    st.sidebar.markdown(f"- {p}")
-st.sidebar.divider()
-
-with_claude = st.sidebar.checkbox(
-    "Inkludera Claude-analys", value=True,
-    help="Claude körs max en gång per dag (drar API-credits) — annars återanvänds dagens analys.",
-)
-force_claude = st.sidebar.checkbox(
-    "Tvinga om Claude-analysen", value=False,
-    help="Kör Claude igen även om den redan körts idag. Drar credits!",
-)
-
 def data_ar_fran_idag(d):
     from datetime import date
     if not d:
@@ -104,9 +144,20 @@ def data_ar_fran_idag(d):
     return d.get("tidpunkt", "")[:10] == date.today().isoformat()
 
 
-run_now = st.sidebar.button("🔄 Uppdatera nu", type="primary", use_container_width=True)
+st.sidebar.title("eToro Portföljanalys")
+run_now = st.sidebar.button(":material/refresh: Uppdatera nu", type="primary", use_container_width=True)
 
-with st.sidebar.expander("🧭 Bakgrundsgrupp & divergens"):
+with st.sidebar.expander("Inställningar"):
+    with_claude = st.checkbox(
+        "Inkludera Claude-analys", value=True,
+        help="Claude körs max en gång per dag (drar API-credits) — annars återanvänds dagens analys.",
+    )
+    force_claude = st.checkbox(
+        "Tvinga om Claude-analysen", value=False,
+        help="Kör Claude igen även om den redan körts idag. Drar credits!",
+    )
+
+with st.sidebar.expander("Bakgrundsgrupp & divergens"):
     def _fildatum(fil):
         try:
             with open(fil) as f:
@@ -118,7 +169,7 @@ with st.sidebar.expander("🧭 Bakgrundsgrupp & divergens"):
                f"portföljer hämtade: {_fildatum(ea.BG_CACHE_FILE) or 'aldrig'}")
     st.caption("Körs även automatiskt: screener månadsvis, divergens varje lördag.")
 
-    if st.button("🔍 Kör screener", use_container_width=True,
+    if st.button(":material/person_search: Kör screener", use_container_width=True,
                  help="Väljer om vilka 50 traders som utgör bakgrundsgruppen. Snabbt (~10 s)."):
         with st.spinner("Screenar fram topp 50..."):
             try:
@@ -130,7 +181,7 @@ with st.sidebar.expander("🧭 Bakgrundsgrupp & divergens"):
             except Exception as e:
                 st.error(str(e))
 
-    if st.button("🧭 Uppdatera divergens", use_container_width=True,
+    if st.button(":material/balance: Uppdatera divergens", use_container_width=True,
                  help="Hämtar bakgrundsgruppens 50 portföljer och kör om analysen. Tar 3–5 minuter."):
         with st.spinner("Hämtar 50 bakgrundsportföljer och räknar om divergensen — tar 3–5 minuter..."):
             try:
@@ -158,42 +209,45 @@ if run_now:
 data = load_results()
 
 if data:
-    st.sidebar.caption(f"Portföljdata: {data['tidpunkt'].replace('T', ' kl. ')} "
-                       "(hämtas automatiskt en gång per dag)")
     cd = data.get("claude_datum")
-    st.sidebar.caption(f"🤖 Claude-analys från: {cd}" if cd else "🤖 Ingen Claude-analys ännu")
+    st.sidebar.caption(f"Data {data['tidpunkt'].replace('T', ' kl. ')}"
+                       + (f" · Claude {cd}" if cd else ""))
 
     # Visa datafel tydligt (t.ex. om Yahoo Finance blockerar serverns anrop)
     fel = {t: a["error"] for t, a in data.get("analyses", {}).items() if "error" in a}
     if fel:
-        with st.sidebar.expander(f"⚠️ {len(fel)} aktier saknar marknadsdata"):
+        with st.sidebar.expander(f":material/warning: {len(fel)} aktier saknar marknadsdata"):
             for t, e in fel.items():
                 st.caption(f"**{t}**: {e}")
     if os.path.exists(ea.OUTPUT_FILE):
         with open(ea.OUTPUT_FILE, "rb") as f:
             st.sidebar.download_button(
-                "⬇️ Ladda ner Excel-rapport", f.read(),
+                ":material/download: Ladda ner Excel-rapport", f.read(),
                 file_name=ea.OUTPUT_FILE,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
             )
 
+st.sidebar.divider()
+st.sidebar.caption("Bevakar " + " · ".join(ea.PROFILES))
+
 # ----------------------------------------------------------------------
 # Huvudinnehåll
 # ----------------------------------------------------------------------
 if not data:
-    st.title("📈 eToro Portföljanalys")
+    st.title("eToro Portföljanalys")
     st.info("Ingen analys har körts ännu. Klicka på **Kör ny analys** i sidopanelen för att komma igång.")
     st.stop()
 
 consensus = data["consensus"]
 analyses = data["analyses"]
 claude = data.get("claude", {})
+bransch = data.get("bransch", {})
 consensus_order = sorted(consensus, key=lambda t: (-consensus[t]["count"], -consensus[t]["avg_weight"]))
 
 tab_rang, tab_konsensus, tab_diverg, tab_analys, tab_andringar, tab_historik, tab_portfoljer = st.tabs(
-    ["🏆 Bästa köp", "🎯 Konsensus", "🧭 Divergens", "🤖 Claudes analys",
-     "🔄 Senaste ändringar", "📜 Historik", "💼 Portföljer"]
+    ["I. Bästa köp", "II. Konsensus", "III. Divergens", "IV. Claudes analys",
+     "V. Senaste ändringar", "VI. Historik", "VII. Portföljer"]
 )
 
 # --- Rangordning ---
@@ -209,9 +263,10 @@ with tab_rang:
             c = claude.get(r["ticker"], {})
             rows.append({
                 "Rang": i,
+                "Bransch": bransch_ikon(r["ticker"], bransch),
                 "Aktie": r["ticker"],
                 "Poäng": r["poäng"],
-                "Stigande trend": "✅" if r["trend_ok"] else "❌",
+                "Stigande trend": "▲ Ja" if r["trend_ok"] else "▼ Nej",
                 "Trend (30)": d.get("Trend"),
                 "Momentum (25)": d.get("Momentum"),
                 "Analytiker (25)": d.get("Analytiker"),
@@ -219,8 +274,10 @@ with tab_rang:
                 "Claude": c.get("rekommendation", "—"),
             })
         st.dataframe(
-            pd.DataFrame(rows), use_container_width=True, hide_index=True,
+            stylad(pd.DataFrame(rows), ["Stigande trend", "Claude"]),
+            use_container_width=True, hide_index=True,
             column_config={
+                "Bransch": st.column_config.ImageColumn("", width=36),
                 "Poäng": st.column_config.ProgressColumn(
                     "Poäng", min_value=0, max_value=100, format="%.1f"
                 ),
@@ -246,7 +303,8 @@ with tab_konsensus:
         c = claude.get(tk, {})
         h = innehav.get(tk, {})
         rows.append({
-            "Aktie": f"🆕 {tk}" if tk in nya_kons else tk,
+            "Bransch": bransch_ikon(tk, bransch),
+            "Aktie": tk + (" · ny" if tk in nya_kons else ""),
             "Stigande trend": trend_label(a),
             "Portföljer": consensus[tk]["count"],
             "Total vikt (%)": consensus[tk].get("total_weight")
@@ -262,19 +320,22 @@ with tab_konsensus:
             "Inv. vinst (%)": h.get("snitt_vinst_pct", "—"),
             "Claude": c.get("rekommendation", "—"),
         })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.dataframe(stylad(pd.DataFrame(rows), ["Aktie", "Stigande trend", "Claude"]),
+                 use_container_width=True, hide_index=True,
+                 column_config={"Bransch": st.column_config.ImageColumn("", width=36)})
     st.caption(
         "Stigande trend = priset över MA200 **och** MA200 stigande — utan den kan Claude aldrig ge KÖP. "
-        "🆕 = ny på listan senaste 7 dagarna. "
+        "*· ny* = ny på listan senaste 7 dagarna. "
         "**Ägd längst** = äldsta öppna positionen bland investerarna; **Inv. vinst** = deras "
         "genomsnittliga upparbetade vinst — lång tid + hög vinst = risk för vinsthemtagning."
     )
+    st.caption(BRANSCH_TEXT)
 
     # Nära konsensus — en portfölj från att kvala in
     near = data.get("nara_konsensus", {})
     if near:
         st.divider()
-        st.subheader(f"🔍 Nära konsensus — i {ea.MIN_PORTFOLIOS - 1} av {len(data['profiler'])} portföljer")
+        st.subheader(f"Nära konsensus — i {ea.MIN_PORTFOLIOS - 1} av {len(data['profiler'])} portföljer")
         st.caption("Bevakningslista: köper en investerare till någon av dessa kvalar den in i konsensus.")
         nya_nara = nya_pa_listan(log, "IN I NÄRA KONSENSUS")
 
@@ -285,14 +346,17 @@ with tab_konsensus:
         for tk, info in sorted(near.items(), key=lambda x: -total_vikt(x[1])):
             h = innehav.get(tk, {})
             near_rows.append({
-                "Aktie": f"🆕 {tk}" if tk in nya_nara else tk,
+                "Bransch": bransch_ikon(tk, bransch),
+                "Aktie": tk + (" · ny" if tk in nya_nara else ""),
                 "Total vikt (%)": total_vikt(info),
                 "Snittvikt (%)": round(info["avg_weight"], 2),
                 "Ägs av": ", ".join(info.get("holders", [])),
                 "Ägd längst": format_innehavstid(h.get("längst_dagar")),
                 "Inv. vinst (%)": h.get("snitt_vinst_pct", "—"),
             })
-        st.dataframe(pd.DataFrame(near_rows), use_container_width=True, hide_index=True)
+        st.dataframe(stylad(pd.DataFrame(near_rows), ["Aktie"]),
+                     use_container_width=True, hide_index=True,
+                     column_config={"Bransch": st.column_config.ImageColumn("", width=36)})
         st.caption("Sorterad på total vikt — investerarnas sammanlagda portföljandel i aktien.")
 
     # Lämnat listorna — när investerarna kliver av
@@ -302,7 +366,7 @@ with tab_konsensus:
               if e["typ"] in ("UT UR KONSENSUS", "UT UR NÄRA KONSENSUS")
               and e["datum"] >= lamnat_cutoff]
     st.divider()
-    st.subheader("📤 Lämnat listorna — senaste 30 dagarna")
+    st.subheader("Lämnat listorna — senaste 30 dagarna")
     if not lamnat:
         st.caption("Ingen aktie har lämnat konsensus eller nära konsensus den senaste månaden.")
     else:
@@ -334,12 +398,13 @@ with tab_diverg:
         for tk, dv in sorted(divergens.items(), key=lambda x: -x[1]["divergens_pp"]):
             c = claude.get(tk, {})
             if dv["divergens_pp"] >= 40:
-                tolk = "💎 Unik övertygelse"
+                tolk = "Unik övertygelse"
             elif dv["divergens_pp"] >= 15:
-                tolk = "🔹 Viss egen idé"
+                tolk = "Viss egen idé"
             else:
-                tolk = "🐑 Flockbeteende"
+                tolk = "Flockbeteende"
             div_rows.append({
+                "Bransch": bransch_ikon(tk, bransch),
                 "Aktie": tk,
                 "Signalgrupp": f"{dv['signal_antal']}/{len(data['profiler'])} ({dv['signal_andel_pct']} %)",
                 "Bakgrund": f"{dv['bakgrund_antal']}/{bg_antal} ({dv['bakgrund_andel_pct']} %)",
@@ -349,8 +414,10 @@ with tab_diverg:
                 "Claude": c.get("rekommendation", "—"),
             })
         st.dataframe(
-            pd.DataFrame(div_rows), use_container_width=True, hide_index=True,
+            stylad(pd.DataFrame(div_rows), ["Tolkning", "Claude"]),
+            use_container_width=True, hide_index=True,
             column_config={
+                "Bransch": st.column_config.ImageColumn("", width=36),
                 "Divergens (pp)": st.column_config.ProgressColumn(
                     "Divergens (pp)", min_value=-100, max_value=100, format="%+.1f"
                 ),
@@ -368,7 +435,7 @@ with tab_diverg:
                           key=lambda x: (-x[1]["divergens_pp"],
                                          -(near.get(x[0], {}).get("total_weight") or 0)))
         st.divider()
-        st.subheader("🫧 Bubblare — nära konsensus med hög divergens")
+        st.subheader("Bubblare — nära konsensus med hög divergens")
         st.caption(
             "Aktier som ägs av 2 av dina 5 investerare men som flocken i stort sett inte äger "
             "(divergens ≥ +30 pp). Köper en tredje investerare kvalar de in i konsensus — "
@@ -382,14 +449,17 @@ with tab_diverg:
             for tk, dv in bubblare:
                 info = near.get(tk, {})
                 bubbel_rows.append({
-                    "Aktie": f"🆕 {tk}" if tk in nya_nara_b else tk,
+                    "Bransch": bransch_ikon(tk, bransch),
+                    "Aktie": tk + (" · ny" if tk in nya_nara_b else ""),
                     "Ägs av": ", ".join(info.get("holders", [])),
                     "Total vikt (%)": info.get("total_weight"),
                     "Bakgrund": f"{dv['bakgrund_antal']}/{data.get('bakgrund_antal', '?')} "
                                 f"({dv['bakgrund_andel_pct']} %)",
                     "Divergens (pp)": dv["divergens_pp"],
                 })
-            st.dataframe(pd.DataFrame(bubbel_rows), use_container_width=True, hide_index=True)
+            st.dataframe(stylad(pd.DataFrame(bubbel_rows), ["Aktie"]),
+                         use_container_width=True, hide_index=True,
+                         column_config={"Bransch": st.column_config.ImageColumn("", width=36)})
 
 # --- Claudes analys ---
 with tab_analys:
@@ -399,9 +469,8 @@ with tab_analys:
     for tk in consensus_order:
         a = analyses.get(tk, {})
         c = claude.get(tk)
-        badge = {"KÖP": "🟢", "AVVAKTA": "🟡", "SÄLJ": "🔴"}.get((c or {}).get("rekommendation", ""), "⚪")
-        with st.expander(f"{badge} **{tk}** — {(c or {}).get('rekommendation', 'ingen Claude-analys')}",
-                         expanded=False):
+        rek = (c or {}).get("rekommendation")
+        with st.expander(f"**{tk}** — {rek or 'ingen Claude-analys'}", expanded=False):
             m1, m2, m3, m4, m5 = st.columns(5)
             m1.metric("Pris", a.get("pris"))
             m2.metric("RSI14", a.get("RSI14"))
@@ -411,20 +480,20 @@ with tab_analys:
             m5.metric("Stigande trend", trend_label(a))
 
             i1, i2, i3, i4 = st.columns(4)
-            i1.markdown(f"Golden cross: {ja_nej(a.get('golden_cross'))}")
-            i2.markdown(f"MACD över signal: {ja_nej(a.get('MACD_över_signal'))}")
+            i1.markdown(f"Golden cross: {mark(a.get('golden_cross'))}", unsafe_allow_html=True)
+            i2.markdown(f"MACD över signal: {mark(a.get('MACD_över_signal'))}", unsafe_allow_html=True)
             i3.markdown(f"1 mån: {a.get('avkastning_1m_%', '—')} %  ·  3 mån: {a.get('avkastning_3m_%', '—')} %")
             i4.markdown(f"Från 52v-toppen: {a.get('avstånd_52v_högsta_%', '—')} %")
 
             if a.get("datakälla") == "cache":
-                st.caption(f"⚠️ Marknadsdata från tidigare körning ({a.get('cache_datum', 'okänt')}) "
+                st.caption(f"Obs: marknadsdata från tidigare körning ({a.get('cache_datum', 'okänt')}) "
                            "— datakällorna svarade inte just nu.")
 
             h = innehav.get(tk, {})
             if h:
                 vinst = h.get("snitt_vinst_pct")
                 st.markdown(
-                    f"💼 Ägd längst: **{format_innehavstid(h.get('längst_dagar'))}** "
+                    f"Ägd längst: **{format_innehavstid(h.get('längst_dagar'))}** "
                     f"(av {h.get('längst_profil', '?')}) · snitt: "
                     f"**{format_innehavstid(h.get('snitt_dagar'))}** · "
                     f"upparbetad snittvinst: **{vinst if vinst is not None else '—'} %**"
@@ -487,20 +556,22 @@ with tab_andringar:
         samman, stora, mindre = [], [], []
         for tk, ms in sorted(moves.items()):
             grupperade_profiler = set()
-            for riktning, verb, emoji in ((1, "ökat", "📈"), (-1, "minskat", "📉")):
+            for riktning, verb, farg in ((1, "ökat", MOSS), (-1, "minskat", RUST)):
                 grupp = [m for m in ms if (m["delta"] > 0) == (riktning > 0)]
                 if len(grupp) >= 2:
                     antal = {2: "Två", 3: "Tre", 4: "Fyra", 5: "Fem"}.get(len(grupp), str(len(grupp)))
                     vem = ", ".join(f"{m['profil']} ({_pe(m['delta'])})" for m in grupp)
-                    samman.append(f"{emoji} **{antal} portföljer har {verb} {tk}** — {vem}")
+                    pil = "▲" if riktning > 0 else "▼"
+                    samman.append(f'<span style="color:{farg}">{pil}</span> **{antal} portföljer har {verb} {tk}** — {vem}')
                     grupperade_profiler |= {m["profil"] for m in grupp}
             for m in ms:
                 if m["profil"] in grupperade_profiler or m["typ"] != "VIKTÄNDRING":
                     continue   # in-/utsålda visas i sektionen nedan
                 if abs(m["delta"]) >= STOR_ANDRING:
                     verb = "ökat" if m["delta"] > 0 else "minskat"
-                    emoji = "📈" if m["delta"] > 0 else "📉"
-                    stora.append(f"{emoji} **{m['profil']}** har {verb} **{tk}** "
+                    pil = (f'<span style="color:{MOSS}">▲</span>' if m["delta"] > 0
+                           else f'<span style="color:{RUST}">▼</span>')
+                    stora.append(f"{pil} **{m['profil']}** har {verb} **{tk}** "
                                  f"{'kraftigt' if abs(m['delta']) >= 4 else 'tydligt'}: "
                                  f"{m['detalj']} ({_pe(m['delta'])})")
                 elif agare.get(tk, 0) > 1:
@@ -508,14 +579,14 @@ with tab_andringar:
                     mindre.append(f"{tk} ({m['profil']} {_pe(m['delta'])})")
 
         if samman:
-            st.markdown("#### 🤝 Sammanfallande rörelser")
+            st.markdown("#### Sammanfallande rörelser")
             st.caption("Flera investerare har rört samma aktie åt samma håll — starkaste signalen.")
             for rad in samman:
-                st.markdown(f"- {rad}")
+                st.markdown(f"- {rad}", unsafe_allow_html=True)
         if stora:
-            st.markdown("#### 💪 Stora viktändringar")
+            st.markdown("#### Stora viktändringar")
             for rad in stora:
-                st.markdown(f"- {rad}")
+                st.markdown(f"- {rad}", unsafe_allow_html=True)
         if mindre:
             st.markdown(f"*Mindre justeringar i gemensamt ägda aktier: {' · '.join(mindre)}*")
         if not (samman or stora or mindre):
@@ -526,27 +597,27 @@ with tab_andringar:
         utsalt = [e for e in dagens if e["typ"] in ("SÅLT INNEHAV", "UT UR KONSENSUS")]
         col_in, col_ut = st.columns(2)
         with col_in:
-            st.markdown("#### 🟢 Intaget")
+            st.markdown(f'#### <span style="color:{MOSS}">▲</span> Intaget', unsafe_allow_html=True)
             if not intag:
                 st.caption("Inga nya innehav.")
             for e in intag:
                 vem = f" hos **{e['profil']}**" if e["profil"] else " (konsensus)"
                 st.markdown(f"- **{e['ticker']}**{vem} — {e['detalj']}")
         with col_ut:
-            st.markdown("#### 🔴 Utsålt")
+            st.markdown(f'#### <span style="color:{RUST}">▼</span> Utsålt', unsafe_allow_html=True)
             if not utsalt:
                 st.caption("Inga sålda innehav.")
             for e in utsalt:
                 vem = f" hos **{e['profil']}**" if e["profil"] else " (konsensus)"
                 st.markdown(f"- **{e['ticker']}**{vem} — {e['detalj']}")
 
-        with st.expander("🔍 Alla dagens ändringar i detalj"):
+        with st.expander("Alla dagens ändringar i detalj"):
             df = pd.DataFrame(dagens).rename(columns={
                 "datum": "Datum", "typ": "Typ", "profil": "Profil",
                 "ticker": "Aktie", "detalj": "Detalj"})
             st.dataframe(df, use_container_width=True, hide_index=True)
 
-        st.caption("Hela loggen över alla körningar finns under fliken **📜 Historik**.")
+        st.caption("Hela loggen över alla körningar finns under fliken **VI. Historik**.")
 
 # --- Historik ---
 with tab_historik:
@@ -578,5 +649,5 @@ with tab_portfoljer:
     with col1:
         st.dataframe(df, use_container_width=True, hide_index=True, height=500)
     with col2:
-        st.bar_chart(df.set_index("Aktie").head(15))
+        st.bar_chart(df.set_index("Aktie").head(15), color=MOSS)
         st.caption("De 15 största innehaven.")

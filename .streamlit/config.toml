@@ -1,14 +1,15 @@
-# Tema: ljust & skandinaviskt rent
+# Tema: redaktionellt & varmt — inspirerat av ol.studio
+# Varm gräddvit bas, klassisk serif i rubriker, skarp grotesk i data.
 # Ändringar här kräver omstart av Streamlit-servern.
 [theme]
 base = "light"
-primaryColor = "#0E7A5F"            # lugn grönblå accent (knappar, flikmarkering, reglage)
-backgroundColor = "#FFFFFF"         # ren vit bas
-secondaryBackgroundColor = "#F4F6F5"  # mjuk ljusgrå för sidopanel och paneler
-textColor = "#20303B"               # djup blågrå — mjukare än svart
-font = "Space Grotesk, sans-serif"  # brödtext: modernt typsnitt med tech-karaktär
-headingFont = "Bricolage Grotesque, sans-serif"  # rubriker: karaktärsfull grotesk
-headingFontWeights = [500, 500, 500, 500, 500, 500]  # tunnare rubriker (standard är fetstil)
+primaryColor = "#6B7052"            # dämpad oliv — accent för knappar/flikar/reglage
+backgroundColor = "#F2EDE3"         # varm gräddvit (ol.studio-ton)
+secondaryBackgroundColor = "#EAE4D6"  # aningen djupare cream för paneler/sidopanel
+textColor = "#433D34"               # varm mörkbrun i stället för svart
+font = "Space Grotesk, sans-serif"  # data & brödtext: behåller skärpan i tabellerna
+headingFont = "EB Garamond, serif"  # rubriker: klassisk serif, redaktionell känsla
+headingFontWeights = [500, 500, 500, 500, 500, 500]
 
 [[theme.fontFaces]]
 family = "Space Grotesk"
@@ -16,9 +17,9 @@ url = "https://fonts.gstatic.com/s/spacegrotesk/v22/V8mDoQDjQSkFtoMM3T6r8E7mPbF4
 weight = "300 700"
 
 [[theme.fontFaces]]
-family = "Bricolage Grotesque"
-url = "https://fonts.gstatic.com/s/bricolagegrotesque/v9/3y9K6as8bTXq_nANBjzKo3IeZx8z6up5BeSl9D4dj_x9PpZBMlGIInHWVyNJ.woff2"
-weight = "300 800"
+family = "EB Garamond"
+url = "https://fonts.gstatic.com/s/ebgaramond/v33/SlGUmQSNjdsmc35JDF1K5GR1SDk_YAPI.woff2"
+weight = "400 700"
 
 [browser]
 gatherUsageStats = false
