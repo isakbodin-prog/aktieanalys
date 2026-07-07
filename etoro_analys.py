@@ -860,7 +860,8 @@ def update_history(portfolios, consensus_tickers, near_tickers=None):
 # Steg 6: Excel-rapport
 # ----------------------------------------------------------------------
 def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
-                ranking=None, near_consensus=None, holding_info=None, divergence=None):
+                ranking=None, near_consensus=None, holding_info=None, divergence=None,
+                divergence_near=None):
     from datetime import date, timedelta
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
@@ -919,6 +920,25 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
                        dv["bakgrund_antal"], dv["bakgrund_andel_pct"], dv["divergens_pp"],
                        dv["bakgrund_snittvikt"],
                        claude_texts.get(tk, {}).get("rekommendation", "")])
+
+        # Bubblare: nära konsensus med hög divergens
+        bubblare = sorted(((tk, dv) for tk, dv in (divergence_near or {}).items()
+                           if dv["divergens_pp"] >= 30),
+                          key=lambda x: -x[1]["divergens_pp"])
+        if bubblare:
+            ws.append([])
+            ws.append(["BUBBLARE — nära konsensus med hög divergens (ett köp från att kvala in)"])
+            ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
+            ws.append(["Instrument", "Ägs av (signalgrupp)", "Total vikt (%)",
+                       "I bakgrund (antal)", "Bakgrundsandel (%)", "Divergens (pp)"])
+            for c in ws[ws.max_row]:
+                if c.value:
+                    c.font, c.fill = hfont, hfill
+            for tk, dv in bubblare:
+                info = (near_consensus or {}).get(tk, {})
+                ws.append([tk, ", ".join(info.get("holders", [])),
+                           info.get("total_weight"),
+                           dv["bakgrund_antal"], dv["bakgrund_andel_pct"], dv["divergens_pp"]])
 
     ws = wb.create_sheet("Konsensus & Analys", 2)
     ws.append(["Instrument", "Ny", "Stigande trend", "Antal portföljer", "Snittvikt (%)", "Pris", "RSI14",
@@ -1072,6 +1092,9 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     # Bakgrundsgrupp + divergens (vad äger signalgruppen som flocken INTE äger?)
     background = load_background_portfolios(refresh=refresh_background)
     divergence = compute_divergence(consensus, portfolios, background)
+    # Bubblare: nära konsensus-aktier med hög divergens — ett köp från att
+    # kvala in, och flocken äger dem inte
+    divergence_near = compute_divergence(near_consensus, portfolios, background)
     if divergence:
         rankad = sorted(divergence.items(), key=lambda x: -x[1]["divergens_pp"])
         print("Divergens (signalgrupp − bakgrundsgrupp):")
@@ -1213,13 +1236,14 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
         "historik": history_log,
         "innehav": holding_info,
         "divergens": divergence,
+        "divergens_nara": divergence_near,
         "bakgrund_antal": len(background) if background else 0,
     }
     with open(RESULTS_FILE, "w") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
 
     write_excel(portfolios, consensus, analyses, claude_texts, history_log, ranking,
-                near_consensus, holding_info, divergence)
+                near_consensus, holding_info, divergence, divergence_near)
 
     # Spara beständig historik till gisten
     gist_push()

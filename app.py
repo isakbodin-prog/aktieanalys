@@ -354,8 +354,38 @@ with tab_diverg:
         )
         st.caption(
             "Divergens = signalgruppens ägarandel minus bakgrundsgruppens, i procentenheter. "
-            "Bakgrundsgruppen screenas om varje dag och används som brusfilter — inte som köpsignal."
+            "Bakgrundsgruppen används som brusfilter — inte som köpsignal."
         )
+
+        # Bubblare: nära konsensus + hög divergens
+        div_nara = data.get("divergens_nara", {})
+        near = data.get("nara_konsensus", {})
+        bubblare = sorted(((tk, dv) for tk, dv in div_nara.items() if dv["divergens_pp"] >= 30),
+                          key=lambda x: (-x[1]["divergens_pp"],
+                                         -(near.get(x[0], {}).get("total_weight") or 0)))
+        st.divider()
+        st.subheader("🫧 Bubblare — nära konsensus med hög divergens")
+        st.caption(
+            "Aktier som ägs av 2 av dina 5 investerare men som flocken i stort sett inte äger "
+            "(divergens ≥ +30 pp). Köper en tredje investerare kvalar de in i konsensus — "
+            "och då är dina utvalda tidiga, inte sena."
+        )
+        if not bubblare:
+            st.caption("Inga bubblare just nu — alla nära konsensus-aktier ägs redan brett av flocken.")
+        else:
+            nya_nara_b = nya_pa_listan(data.get("historik", []), "IN I NÄRA KONSENSUS")
+            bubbel_rows = []
+            for tk, dv in bubblare:
+                info = near.get(tk, {})
+                bubbel_rows.append({
+                    "Aktie": f"🆕 {tk}" if tk in nya_nara_b else tk,
+                    "Ägs av": ", ".join(info.get("holders", [])),
+                    "Total vikt (%)": info.get("total_weight"),
+                    "Bakgrund": f"{dv['bakgrund_antal']}/{data.get('bakgrund_antal', '?')} "
+                                f"({dv['bakgrund_andel_pct']} %)",
+                    "Divergens (pp)": dv["divergens_pp"],
+                })
+            st.dataframe(pd.DataFrame(bubbel_rows), use_container_width=True, hide_index=True)
 
 # --- Claudes analys ---
 with tab_analys:
