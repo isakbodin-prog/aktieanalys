@@ -102,14 +102,12 @@ def data_ar_fran_idag(d):
 
 run_now = st.sidebar.button("🔄 Uppdatera nu", type="primary", use_container_width=True)
 
-# Vid sidöppning: hämta bara om dagens data saknas. Ingen daytrading här —
-# en körning per dag räcker, och det sparar både väntetid och API-kvoter.
+# Vid sidöppning: synka först mot gisten (fångar t.ex. --divergens-körningar
+# gjorda på datorn), kör sedan analysen bara om dagens data saknas.
 if "auto_check" not in st.session_state:
     st.session_state["auto_check"] = True
+    ea.gist_pull()              # no-op om GIST_ID/GITHUB_TOKEN saknas
     befintlig = load_results()
-    if befintlig is None:
-        ea.gist_pull()          # kallstart på Render: hämta senaste från gisten
-        befintlig = load_results()
     if not data_ar_fran_idag(befintlig):
         run_now = True
 
