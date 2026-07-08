@@ -381,7 +381,7 @@ _AV_URL = "https://www.alphavantage.co/query"
 def fetch_history_alphavantage(yticker):
     """Reservkälla för dagskurser: Alpha Vantage (Yahoo blockerar ofta molnservrar).
 
-    Returnerar en DataFrame med kolumnerna Close/Volume (senaste året) eller None.
+    Returnerar en DataFrame med Open/High/Low/Close/Volume (senaste året) eller None.
     Gratisnyckel: https://www.alphavantage.co/support/#api-key (max 5 anrop/min, 25/dag).
     """
     import time
@@ -400,8 +400,10 @@ def fetch_history_alphavantage(yticker):
             return None
         df = pd.DataFrame.from_dict(series, orient="index").astype(float)
         df.index = pd.to_datetime(df.index)
-        df = df.sort_index().rename(columns={"4. close": "Close", "5. volume": "Volume"})
-        return df[["Close", "Volume"]].tail(252)   # ~1 handelsår
+        df = df.sort_index().rename(columns={
+            "1. open": "Open", "2. high": "High", "3. low": "Low",
+            "4. close": "Close", "5. volume": "Volume"})
+        return df[["Open", "High", "Low", "Close", "Volume"]].tail(252)   # ~1 handelsår
     except Exception:
         return None
 
@@ -528,9 +530,29 @@ def analyze_ticker(ticker):
         n_analysts = info.get("numberOfAnalystOpinions")
         upside = round((target / price - 1) * 100, 1) if target else None
 
+        # Kompakt prisserie för candlestick-grafen (senaste ~90 handelsdagarna,
+        # med MA50/MA200 som överlägg). Kräver OHLC — finns hos både Yahoo och AV.
+        ohlc = []
+        if {"Open", "High", "Low"}.issubset(hist.columns):
+            ma50_s = close.rolling(50).mean()
+            ma200_s = close.rolling(200).mean()
+
+            def _num(v):
+                return None if pd.isna(v) else round(float(v), 2)
+
+            tail = hist.tail(90)
+            for ts, row in tail.iterrows():
+                ohlc.append({
+                    "d": ts.strftime("%Y-%m-%d"),
+                    "o": _num(row["Open"]), "h": _num(row["High"]),
+                    "l": _num(row["Low"]), "c": _num(row["Close"]),
+                    "ma50": _num(ma50_s.get(ts)), "ma200": _num(ma200_s.get(ts)),
+                })
+
         return {
             "ticker": ticker,
             "datakälla": source,
+            "ohlc": ohlc,
             "pris": round(price, 2),
             "MA50": round(ma50, 2),
             "MA200": round(ma200, 2) if ma200 else None,

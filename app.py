@@ -27,10 +27,51 @@ st.set_page_config(page_title="eToro Portföljanalys",
 # ----------------------------------------------------------------------
 MOSS = "#5F6B4A"    # mossgrön — positivt (upp, köp, ja)
 RUST = "#9C5B41"    # dämpad rost — negativt (ner, sälj, nej)
-SAND = "#A8863B"    # sandockra — avvakta
+SAND = "#A8863B"    # sandockra — avvakta / MA50
+OLIV = "#6B7052"    # dämpad oliv — MA200 / accent
 MUTED = "#8A8375"   # varm grå — neutralt/sekundärt
+TEXT = "#433D34"    # varm mörkbrun (samma som temat)
+HAIRLINE = "#D9D1C0"  # hårfin linje mot den varma gräddvita bakgrunden
 
 REK_FARG = {"KÖP": MOSS, "AVVAKTA": SAND, "SÄLJ": RUST}
+
+# ----------------------------------------------------------------------
+# Hårfina linjer + typografiska finjusteringar (ol.studio-känsla)
+# ----------------------------------------------------------------------
+st.markdown(f"""
+<style>
+  hr {{ margin: 1.3rem 0 !important; border: none !important;
+        border-top: 1px solid {HAIRLINE} !important; }}
+  [data-testid="stExpander"] details {{ border-color: {HAIRLINE} !important; }}
+  /* diskretare flikrad med hårlinje under */
+  [data-testid="stTabs"] [data-baseweb="tab-list"] {{
+      border-bottom: 1px solid {HAIRLINE}; gap: 1.6rem; }}
+  /* sidfoten */
+  .appfot {{ display: flex; justify-content: space-between; flex-wrap: wrap;
+      gap: .5rem 2rem; margin: 3.5rem 0 1rem; padding-top: 1rem;
+      border-top: 1px solid {HAIRLINE}; color: {MUTED};
+      font-size: .78rem; letter-spacing: .02em; }}
+  .appfot .mitt {{ text-align: center; }}
+
+  /* --- Sidopanel: mer luft, diskreta knappar --- */
+  section[data-testid="stSidebar"] > div {{ padding-top: 2.5rem; }}
+  section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {{ gap: 1.4rem; }}
+  section[data-testid="stSidebar"] h1 {{
+      font-size: 1.35rem !important; letter-spacing: .01em; margin-bottom: .4rem; }}
+  /* knappar: transparent bakgrund, hårlinjeram, mjuk hover */
+  section[data-testid="stSidebar"] button {{
+      background: transparent !important; border: 1px solid {HAIRLINE} !important;
+      color: {TEXT} !important; font-weight: 400 !important; border-radius: 3px !important; }}
+  section[data-testid="stSidebar"] button:hover {{
+      border-color: {OLIV} !important; color: {OLIV} !important; }}
+  /* expander-huvuden: ramlösa, bara text */
+  section[data-testid="stSidebar"] [data-testid="stExpander"] details {{
+      border: none !important; }}
+  section[data-testid="stSidebar"] [data-testid="stExpander"] summary {{
+      padding-left: 0 !important; color: {MUTED} !important;
+      font-size: .82rem !important; letter-spacing: .04em; text-transform: uppercase; }}
+</style>
+""", unsafe_allow_html=True)
 
 
 def mark(value):
@@ -132,6 +173,33 @@ def nya_pa_listan(log, typ, dagar=7):
     return {e["ticker"] for e in log if e["typ"] == typ and e["datum"] >= cutoff}
 
 
+def candlestick(ohlc):
+    """Candlestick-graf (senaste ~90 dagarna) med MA50/MA200, i palettens färger."""
+    import altair as alt
+
+    df = pd.DataFrame(ohlc)
+    df["d"] = pd.to_datetime(df["d"])
+    df["upp"] = df["c"] >= df["o"]
+
+    bas = alt.Chart(df).encode(
+        x=alt.X("d:T", axis=alt.Axis(title=None, format="%-d %b", tickCount=5,
+                                     grid=False, labelColor=MUTED, domainColor=HAIRLINE,
+                                     tickColor=HAIRLINE)))
+    farg = alt.condition("datum.upp", alt.value(MOSS), alt.value(RUST))
+    y = alt.Y("l:Q", scale=alt.Scale(zero=False),
+              axis=alt.Axis(title=None, grid=True, gridColor=HAIRLINE, gridOpacity=.6,
+                            labelColor=MUTED, domainColor=HAIRLINE, tickColor=HAIRLINE))
+    stapel_axel = alt.Y("o:Q", scale=alt.Scale(zero=False), axis=None)
+
+    wick = bas.mark_rule(strokeWidth=1).encode(y=y, y2="h:Q", color=farg)
+    body = bas.mark_bar(size=5).encode(y=stapel_axel, y2="c:Q", color=farg)
+    ma50 = bas.mark_line(color=SAND, strokeWidth=1.2).encode(y=alt.Y("ma50:Q", axis=None))
+    ma200 = bas.mark_line(color=OLIV, strokeWidth=1.2).encode(y=alt.Y("ma200:Q", axis=None))
+
+    return (wick + body + ma50 + ma200).properties(height=280, background="transparent").configure_view(
+        strokeWidth=0).configure_axis(labelFont="Space Grotesk", labelFontSize=11)
+
+
 # ----------------------------------------------------------------------
 # Sidopanel
 # ----------------------------------------------------------------------
@@ -145,7 +213,7 @@ def data_ar_fran_idag(d):
 
 
 st.sidebar.title("eToro Portföljanalys")
-run_now = st.sidebar.button(":material/refresh: Uppdatera nu", type="primary", use_container_width=True)
+run_now = st.sidebar.button(":material/refresh: Uppdatera nu", use_container_width=True)
 
 with st.sidebar.expander("Inställningar"):
     with_claude = st.checkbox(
@@ -489,6 +557,13 @@ with tab_analys:
                 st.caption(f"Obs: marknadsdata från tidigare körning ({a.get('cache_datum', 'okänt')}) "
                            "— datakällorna svarade inte just nu.")
 
+            ohlc = a.get("ohlc")
+            if ohlc:
+                st.altair_chart(candlestick(ohlc), use_container_width=True)
+                st.caption(f"Dagskurser senaste ~90 handelsdagarna · "
+                           f"<span style='color:{SAND}'>—</span> MA50 · "
+                           f"<span style='color:{OLIV}'>—</span> MA200", unsafe_allow_html=True)
+
             h = innehav.get(tk, {})
             if h:
                 vinst = h.get("snitt_vinst_pct")
@@ -651,3 +726,19 @@ with tab_portfoljer:
     with col2:
         st.bar_chart(df.set_index("Aktie").head(15), color=MOSS)
         st.caption("De 15 största innehaven.")
+
+# ----------------------------------------------------------------------
+# Sidfot (ol.studio-inspirerad)
+# ----------------------------------------------------------------------
+from datetime import date as _date_fot
+
+st.markdown(
+    f"""
+    <div class="appfot">
+      <span>I. Bästa köp — VII. Portföljer</span>
+      <span class="mitt">eToro Portföljanalys — All Rights Reserved © {_date_fot.today().year}</span>
+      <span>Data: eToro · Yahoo Finance &nbsp;·&nbsp; Analys: Claude</span>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
