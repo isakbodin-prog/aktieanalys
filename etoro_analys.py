@@ -1065,6 +1065,27 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
     print(f"\nKlart! Rapport sparad som: {OUTPUT_FILE}")
 
 
+def excel_from_result(result):
+    """Återskapa portfolj_analys.xlsx från ett sparat resultat (RESULTS_FILE).
+
+    Används av webbappen så att nedladdningsknappen alltid fungerar — även
+    när Excel-filen saknas (t.ex. efter att Render vaknat ur sömn utan att
+    ha kört en ny analys). All data finns redan i resultatet.
+    """
+    write_excel(
+        result.get("portfolios", {}),
+        result.get("consensus", {}),
+        result.get("analyses", {}),
+        result.get("claude", {}),
+        result.get("historik", []),
+        result.get("ranking"),
+        result.get("nara_konsensus"),
+        result.get("innehav"),
+        result.get("divergens"),
+        result.get("divergens_nara"),
+    )
+
+
 # ----------------------------------------------------------------------
 # Huvudflöde
 # ----------------------------------------------------------------------

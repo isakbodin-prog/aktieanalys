@@ -287,6 +287,17 @@ if data:
         with st.sidebar.expander(f":material/warning: {len(fel)} aktier saknar marknadsdata"):
             for t, e in fel.items():
                 st.caption(f"**{t}**: {e}")
+    # Se till att Excel-filen finns och matchar senaste analysen — återskapa
+    # den ur sparad data om den saknas eller är äldre (t.ex. efter Render-sömn).
+    behov_regen = not os.path.exists(ea.OUTPUT_FILE)
+    if not behov_regen and os.path.exists(ea.RESULTS_FILE):
+        behov_regen = os.path.getmtime(ea.OUTPUT_FILE) < os.path.getmtime(ea.RESULTS_FILE)
+    if behov_regen:
+        try:
+            ea.excel_from_result(data)
+        except Exception as e:
+            st.sidebar.caption(f"Kunde inte skapa Excel-rapporten: {e}")
+
     if os.path.exists(ea.OUTPUT_FILE):
         with open(ea.OUTPUT_FILE, "rb") as f:
             st.sidebar.download_button(
