@@ -173,6 +173,36 @@ def nya_pa_listan(log, typ, dagar=7):
     return {e["ticker"] for e in log if e["typ"] == typ and e["datum"] >= cutoff}
 
 
+def _pe(d):
+    """Formatera procentenheter, svensk decimal: +2,3 pe."""
+    return f"{d:+.1f}".replace(".", ",") + " pe"
+
+
+def _delta_pe(e):
+    """Viktförändring i procentenheter ur en loggpost (nytt=+, sålt=−)."""
+    import re
+    tal = [float(x) for x in re.findall(r"-?\d+(?:\.\d+)?", e["detalj"].replace(",", "."))]
+    if e["typ"] == "VIKTÄNDRING" and len(tal) >= 2:
+        return tal[1] - tal[0]
+    if e["typ"] == "NYTT INNEHAV" and tal:
+        return tal[0]
+    if e["typ"] == "SÅLT INNEHAV" and tal:
+        return -tal[0]
+    return None
+
+
+def rorelser_per_aktie(dagens):
+    """{ticker: [{profil, delta, typ, detalj}]} för en dags viktrörelser."""
+    moves = {}
+    for e in dagens:
+        if e["typ"] in ("VIKTÄNDRING", "NYTT INNEHAV", "SÅLT INNEHAV"):
+            d = _delta_pe(e)
+            if d is not None:
+                moves.setdefault(e["ticker"], []).append(
+                    {"profil": e["profil"], "delta": d, "typ": e["typ"], "detalj": e["detalj"]})
+    return moves
+
+
 def candlestick(ohlc):
     """Candlestick-graf (senaste ~90 dagarna) med MA50/MA200, i palettens färger."""
     import altair as alt
@@ -369,6 +399,73 @@ with tab_rang:
             "Konsensus 20 p (antal portföljer, snittvikt). "
             "Aktier utan stigande trend rankas alltid sist, oavsett poäng."
         )
+
+    # --- Senaste händelser: kondenserad översikt på förstasidan ---
+    log = data.get("historik", [])
+    if log:
+        from datetime import date as _d, timedelta as _td
+        cut30 = (_d.today() - _td(days=30)).isoformat()
+        senaste_datum = log[0]["datum"]
+        dagens = [e for e in log if e["datum"] == senaste_datum]
+
+        # Förändringar i listorna (30 dgr): in/ut konsensus + lämnat nära konsensus
+        lista_rader = []
+        for e in log:
+            if e["datum"] < cut30:
+                continue
+            if e["typ"] == "IN I KONSENSUS":
+                lista_rader.append(f'<span style="color:{MOSS}">▲</span> **{e["ticker"]}** '
+                                   f'in i konsensus — {e["detalj"]}')
+            elif e["typ"] == "UT UR KONSENSUS":
+                lista_rader.append(f'<span style="color:{RUST}">▼</span> **{e["ticker"]}** '
+                                   f'lämnade konsensus — {e["detalj"]}')
+            elif e["typ"] == "UT UR NÄRA KONSENSUS":
+                lista_rader.append(f'<span style="color:{RUST}">▼</span> **{e["ticker"]}** '
+                                   f'lämnade nära konsensus')
+
+        # Största viktändringarna (senaste ändringsdagen), rankade på storlek
+        moves = rorelser_per_aktie(dagens)
+        vikt_rader = []
+        for tk, ms in sorted(moves.items()):
+            grupperade = set()
+            for riktning, verb, farg in ((1, "ökat", MOSS), (-1, "minskat", RUST)):
+                grupp = [m for m in ms if (m["delta"] > 0) == (riktning > 0)]
+                if len(grupp) >= 2:
+                    antal = {2: "Två", 3: "Tre", 4: "Fyra", 5: "Fem"}.get(len(grupp), str(len(grupp)))
+                    pil = "▲" if riktning > 0 else "▼"
+                    storlek = max(abs(m["delta"]) for m in grupp)
+                    vikt_rader.append((storlek + 100,   # sammanfallande rörelser först
+                        f'<span style="color:{farg}">{pil}</span> {antal} portföljer har {verb} **{tk}**'))
+                    grupperade |= {m["profil"] for m in grupp}
+            for m in ms:
+                if m["profil"] in grupperade or m["typ"] != "VIKTÄNDRING" or abs(m["delta"]) < 3:
+                    continue
+                pil = (f'<span style="color:{MOSS}">▲</span>' if m["delta"] > 0
+                       else f'<span style="color:{RUST}">▼</span>')
+                verb = "ökade" if m["delta"] > 0 else "minskade"
+                vikt_rader.append((abs(m["delta"]),
+                    f'{pil} **{m["profil"]}** {verb} **{tk}** ({_pe(m["delta"])})'))
+        vikt_rader = [t for _, t in sorted(vikt_rader, key=lambda x: -x[0])][:6]
+
+        if lista_rader or vikt_rader:
+            st.divider()
+            st.subheader("Senaste händelser")
+            kol1, kol2 = st.columns(2)
+            with kol1:
+                st.markdown("**Förändringar i listorna** · senaste 30 dagarna")
+                if lista_rader:
+                    for rad in lista_rader[:6]:
+                        st.markdown(f"- {rad}", unsafe_allow_html=True)
+                else:
+                    st.caption("Inga in- eller utträden den senaste månaden.")
+            with kol2:
+                st.markdown(f"**Största viktändringarna** · {senaste_datum}")
+                if vikt_rader:
+                    for rad in vikt_rader:
+                        st.markdown(f"- {rad}", unsafe_allow_html=True)
+                else:
+                    st.caption("Inga större viktändringar senaste ändringsdagen.")
+            st.caption("Fullständiga flöden finns under **II. Konsensus** och **V. Senaste ändringar**.")
 
 # --- Konsensus ---
 with tab_konsensus:
@@ -607,36 +704,12 @@ with tab_andringar:
             "en aktie dyker det upp här efter nästa körning."
         )
     else:
-        import re as _re
         senaste_datum = log[0]["datum"]
         dagens = [e for e in log if e["datum"] == senaste_datum]
         st.caption(f"Ändringar registrerade {senaste_datum}:")
 
         STOR_ANDRING = 2.0   # procentenheter — gräns för "stor viktändring"
-
-        def _delta(e):
-            """Viktförändring i procentenheter ur en loggpost."""
-            tal = [float(x) for x in _re.findall(r"-?\d+(?:\.\d+)?", e["detalj"].replace(",", "."))]
-            if e["typ"] == "VIKTÄNDRING" and len(tal) >= 2:
-                return tal[1] - tal[0]
-            if e["typ"] == "NYTT INNEHAV" and tal:
-                return tal[0]
-            if e["typ"] == "SÅLT INNEHAV" and tal:
-                return -tal[0]
-            return None
-
-        def _pe(d):
-            return f"{d:+.1f}".replace(".", ",") + " pe"
-
-        # Alla viktrörelser per aktie (nytt innehav = ökning, sålt = minskning)
-        moves = {}
-        for e in dagens:
-            if e["typ"] in ("VIKTÄNDRING", "NYTT INNEHAV", "SÅLT INNEHAV"):
-                d = _delta(e)
-                if d is not None:
-                    moves.setdefault(e["ticker"], []).append(
-                        {"profil": e["profil"], "delta": d, "typ": e["typ"], "detalj": e["detalj"]})
-
+        moves = rorelser_per_aktie(dagens)
         agare = {tk: sum(1 for p in data["portfolios"].values() if tk in p) for tk in moves}
 
         samman, stora, mindre = [], [], []
