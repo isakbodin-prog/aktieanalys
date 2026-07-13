@@ -30,6 +30,15 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
   param (?instrumentIds=A&instrumentIds=B) ger 200 men bara SISTA ID:t.
   Enda fungerande batchmetoden är att hämta HELA listan utan parametrar.
 - Auth-test som funkar: GET /market-data/search?query=Apple → 200
+- INGEN endpoint för att slå upp gain/risk-nyckeltal för en SPECIFIK,
+  namngiven profil (sonderat 2026-07-13): /user-info/people/{user} → 404,
+  /user-info/people/{user}/stats → 404, /people/search saknar
+  username/nickName/query-parameter (alla ger 404). /search är bara en
+  bred discovery-endpoint med filter (gainMin, riskScore, etc.), ingen
+  exakt namnträff. portfolio/live:s toppnivå saknar också gain/risk.
+  → FAS 2.6 tradervikting (UTBYGGNAD_screener_v3.md §6) är därför INTE
+  implementerad — tradervikt är neutral (1.0) för alla. Försök inte
+  samma endpoints igen utan ny information.
 
 ## Körlägen (CLI)
 - `python3 etoro_analys.py` — standardanalysen (signalgruppens 5 profiler).
