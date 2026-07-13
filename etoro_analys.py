@@ -482,6 +482,25 @@ def fetch_overview_alphavantage(yticker):
         return {}
 
 
+def eps_revision_pct(t):
+    """EPS-estimatrevidering för innevarande räkenskapsår över 90 dgr (%).
+
+    Riktningen på analytikernas vinstestimat — stigande estimat stärker en
+    köpsignal, fallande är en klassisk fälla trots hög uppsida. None vid miss.
+    """
+    try:
+        et = t.eps_trend
+        if et is None or et.empty or "0y" not in et.index:
+            return None
+        rad = et.loc["0y"]
+        cur, old = float(rad["current"]), float(rad["90daysAgo"])
+        if abs(old) < 1e-9:
+            return None
+        return round((cur - old) / abs(old) * 100, 1)
+    except Exception:
+        return None
+
+
 def analyze_ticker(ticker):
     """Hämta teknisk data + analytikerdata. Yahoo Finance i första hand,
     Stooq som reserv för kursdata (Yahoo blockerar ofta molnservrars IP)."""
@@ -566,6 +585,7 @@ def analyze_ticker(ticker):
         target = info.get("targetMeanPrice")
         n_analysts = info.get("numberOfAnalystOpinions")
         upside = round((target / price - 1) * 100, 1) if target else None
+        eps_rev = eps_revision_pct(t) if source == "Yahoo" else None
 
         # Kompakt prisserie för candlestick-grafen (senaste ~90 handelsdagarna,
         # med MA50/MA200 som överlägg). Kräver OHLC — finns hos både Yahoo och AV.
@@ -613,6 +633,7 @@ def analyze_ticker(ticker):
             "riktkurs": target,
             "uppsida_%": upside,
             "antal_analytiker": n_analysts,
+            "eps_rev_90d_pct": eps_rev,
         }
     except Exception as e:
         return {"ticker": ticker, "error": str(e)}
@@ -656,7 +677,7 @@ def compute_score(a, cons):
         mom += max(0.0, min(8.0, r3 / 5))   # +40 % på 3 mån ger full poäng
     delpoang["Momentum"] = round(mom, 1)
 
-    # Analytiker (max 25)
+    # Analytiker (max 25): uppsida + antal + köprek + estimatrevidering
     ana = 0.0
     uppsida = a.get("uppsida_%")
     if uppsida is not None:
@@ -664,7 +685,10 @@ def compute_score(a, cons):
     ana += min(5.0, (a.get("antal_analytiker") or 0) / 8)   # 40 analytiker ger full poäng
     if a.get("rekommendation") in ("strong_buy", "buy"):
         ana += 5
-    delpoang["Analytiker"] = round(ana, 1)
+    eps_rev = a.get("eps_rev_90d_pct")
+    if eps_rev is not None:   # stigande estimat +, fallande − (fångar uppsidefällan)
+        ana += 10 if eps_rev > 5 else (-10 if eps_rev < -5 else 0)
+    delpoang["Analytiker"] = round(max(0.0, min(25.0, ana)), 1)
 
     # Konsensus (max 20) — hur eniga, övertygade OCH färska investerarna är
     kon = 0.0
@@ -1015,7 +1039,7 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
     ws.append(["Instrument", "Ny", "Stigande trend", "Antal portföljer", "Snittvikt (%)", "Pris", "RSI14",
                "Över MA200", "Rekommendation", "Riktkurs", "Uppsida (%)", "Antal analytiker",
                "Ägd längst (dagar)", "Investerarnas snittvinst (%)",
-               "Viktad konsensus", "Senaste köp (dagar)"])
+               "Viktad konsensus", "Senaste köp (dagar)", "EPS-rev 90d (%)"])
     style_header(ws)
     consensus_order = sorted(consensus.items(), key=lambda x: (-x[1]["count"], -x[1]["avg_weight"]))
     for ticker, info in consensus_order:
@@ -1030,6 +1054,7 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
             a.get("rekommendation"), a.get("riktkurs"), a.get("uppsida_%"), a.get("antal_analytiker"),
             h.get("längst_dagar"), h.get("snitt_vinst_pct"),
             info.get("viktad_konsensus"), info.get("senaste_köp_dagar"),
+            a.get("eps_rev_90d_pct"),
         ])
         if trend is not None:
             ws.cell(row=ws.max_row, column=3).fill = green if trend else red
@@ -1075,7 +1100,7 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
                "Pris", "MA50", "MA200", "Golden cross", "RSI14",
                "MACD > signal", "Bollinger (%)", "Avstånd 52v-högsta (%)",
                "Avkastning 1m (%)", "Avkastning 3m (%)", "Volymtrend (%)",
-               "Claudes rekommendation", "Claudes analys", "Analys genererad"])
+               "Claudes rekommendation", "Claudes analys", "Analys genererad", "EPS-rev 90d (%)"])
     style_header(ws)
     for ticker, _ in consensus_order:
         a = analyses.get(ticker, {})
@@ -1087,8 +1112,9 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
             a.get("pris"), a.get("MA50"), a.get("MA200"), a.get("golden_cross"),
             a.get("RSI14"), a.get("MACD_över_signal"), a.get("bollinger_position_%"),
             a.get("avstånd_52v_högsta_%"), a.get("avkastning_1m_%"), a.get("avkastning_3m_%"),
-            a.get("volymtrend_20d_vs_3m_%"), c.get("rekommendation"), c.get("analys"),
-            c.get("genererad"),
+            a.get("volymtrend_20d_vs_3m_%"),
+            c.get("rekommendation"), c.get("analys"), c.get("genererad"),
+            a.get("eps_rev_90d_pct"),
         ])
         if trend is not None:
             ws.cell(row=ws.max_row, column=2).fill = green if trend else red

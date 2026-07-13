@@ -665,6 +665,13 @@ with tab_analys:
             i3.markdown(f"1 mån: {a.get('avkastning_1m_%', '—')} %  ·  3 mån: {a.get('avkastning_3m_%', '—')} %")
             i4.markdown(f"Från 52v-toppen: {a.get('avstånd_52v_högsta_%', '—')} %")
 
+            epsr = a.get("eps_rev_90d_pct")
+            if epsr is not None:
+                farg = MOSS if epsr > 5 else (RUST if epsr < -5 else MUTED)
+                rikt = "stigande" if epsr > 5 else ("fallande" if epsr < -5 else "stabila")
+                st.markdown(f"EPS-estimat 90 dgr: <span style='color:{farg}'>{epsr:+.1f} % "
+                            f"({rikt})</span>", unsafe_allow_html=True)
+
             if a.get("datakälla") == "cache":
                 st.caption(f"Obs: marknadsdata från tidigare körning ({a.get('cache_datum', 'okänt')}) "
                            "— datakällorna svarade inte just nu.")
