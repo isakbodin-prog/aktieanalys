@@ -6,7 +6,7 @@ konsensusinnehav (aktier i ≥3 av 5 portföljer), och berika med teknisk
 analys + analytikerdata till en rankad Excel-rapport.
 
 ## Profiler som bevakas
-thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek
+thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
 
 ## Status just nu
 - `etoro_analys.py` FUNGERAR HELT (verifierat 2026-07-06): alla 5 portföljer

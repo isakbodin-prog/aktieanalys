@@ -29,7 +29,7 @@ import requests
 # ----------------------------------------------------------------------
 # Konfiguration
 # ----------------------------------------------------------------------
-PROFILES = ["thomaspj", "michalhla", "JeppeKirkBonde", "triangulacapital", "Smudliczek"]
+PROFILES = ["thomaspj", "michalhla", "JeppeKirkBonde", "triangulacapital", "Smudliczek", "ingruc"]
 MIN_PORTFOLIOS = 3   # Aktien ska finnas i minst så här många portföljer
 OUTPUT_FILE = "portfolj_analys.xlsx"
 
