@@ -651,6 +651,7 @@ def analyze_ticker(ticker):
             "uppsida_%": upside,
             "antal_analytiker": n_analysts,
             "eps_rev_90d_pct": eps_rev,
+            "sector": info.get("sector"),   # informativ kolumn — inte klustringsgrund (§4)
         }
     except Exception as e:
         return {"ticker": ticker, "error": str(e)}
@@ -659,11 +660,111 @@ def analyze_ticker(ticker):
 # ----------------------------------------------------------------------
 # Steg 3b: Sammanvägd poäng och rangordning
 # ----------------------------------------------------------------------
-def compute_score(a, cons):
+def compute_correlation_clusters(analyses, tickers, threshold=0.7, min_overlap=40):
+    """Korrelationsbaserad klustring av konsensusaktierna (ersätter sektorbaserad).
+
+    Sektoretiketter fångar inte samvariation mellan olika sektorer som ändå
+    delar samma tes (t.ex. AMZN/GOOG hör till samma AI-tema som chipklustret,
+    fast olika yfinance-sektor). I stället: parvis 63-dagars avkastnings-
+    korrelation (priset finns redan i 'ohlc'), greedy single-linkage-kluster
+    vid korrelation > threshold. Par med < min_overlap gemensamma dagar
+    räknas inte (pandas min_periods → NaN → ingen sammanslagning).
+
+    Returnerar {ticker: {"kluster_id": int, "klusterstorlek": int,
+    "klusterfaktor": float}}. Aktier utan (tillräcklig) prisdata hamnar
+    ensamma i sitt eget kluster (klusterfaktor 1.0 — neutral degradering).
+    """
+    import pandas as pd
+
+    serier = {}
+    for tk in tickers:
+        ohlc = (analyses.get(tk) or {}).get("ohlc")
+        if not ohlc:
+            continue
+        try:
+            s = pd.Series([p["c"] for p in ohlc],
+                         index=pd.to_datetime([p["d"] for p in ohlc]))
+            serier[tk] = s.pct_change().dropna()
+        except Exception:
+            continue
+
+    parent = {tk: tk for tk in tickers}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    if len(serier) >= 2:
+        ret_df = pd.DataFrame(serier)
+        corr = ret_df.corr(min_periods=min_overlap)
+        cols = list(corr.columns)
+        for i in range(len(cols)):
+            for j in range(i + 1, len(cols)):
+                val = corr.iloc[i, j]
+                if pd.notna(val) and val > threshold:
+                    union(cols[i], cols[j])
+
+    grupper = {}
+    for tk in tickers:
+        grupper.setdefault(find(tk), []).append(tk)
+    out = {}
+    for idx, (_, medlemmar) in enumerate(sorted(grupper.items()), start=1):
+        storlek = len(medlemmar)
+        for tk in medlemmar:
+            out[tk] = {"kluster_id": idx, "klusterstorlek": storlek,
+                       "klusterfaktor": round(1 / (storlek ** 0.5), 3)}
+    return out
+
+
+def compute_netflow_30d(history_log, tickers, dagar=30):
+    """Signalgruppens nettoviktändring per aktie senaste `dagar` dagarna (pe).
+
+    Kräver att historiken spänner över >= 7 dagar (>= 2 körningar isär) för
+    att vara meningsfull — annars {} (neutral poäng överallt).
+    """
+    import re
+    from datetime import date, timedelta
+
+    if not history_log:
+        return {}
+    datum = sorted({e["datum"] for e in history_log})
+    if len(datum) < 2:
+        return {}
+    span = (date.fromisoformat(datum[-1]) - date.fromisoformat(datum[0])).days
+    if span < 7:
+        return {}
+
+    cutoff = (date.today() - timedelta(days=dagar)).isoformat()
+    netto = {}
+    for e in history_log:
+        if e["datum"] < cutoff or e["typ"] not in ("VIKTÄNDRING", "NYTT INNEHAV", "SÅLT INNEHAV"):
+            continue
+        tal = [float(x) for x in re.findall(r"-?\d+(?:\.\d+)?", e["detalj"].replace(",", "."))]
+        d = None
+        if e["typ"] == "VIKTÄNDRING" and len(tal) >= 2:
+            d = tal[1] - tal[0]
+        elif e["typ"] == "NYTT INNEHAV" and tal:
+            d = tal[0]
+        elif e["typ"] == "SÅLT INNEHAV" and tal:
+            d = -tal[0]
+        if d is not None and e["ticker"] in tickers:
+            netto[e["ticker"]] = netto.get(e["ticker"], 0.0) + d
+    return {tk: round(v, 2) for tk, v in netto.items()}
+
+
+def compute_score(a, cons, cluster_factor=1.0, nettoflode_pe=None):
     """Sammanvägd poäng 0–100 för en aktie.
 
-    Trend 30 p + Momentum 25 p + Analytiker 25 p + Konsensus 20 p.
-    Returnerar (totalpoäng, delpoäng-dict).
+    Trend 30 p + Momentum 25 p + Analytiker 25 p + Konsensus 20 p (justerad
+    för korrelationskluster §4 och nettoflöde §5). Returnerar (totalpoäng,
+    delpoäng-dict).
     """
     delpoang = {}
 
@@ -707,32 +808,49 @@ def compute_score(a, cons):
         ana += 10 if eps_rev > 5 else (-10 if eps_rev < -5 else 0)
     delpoang["Analytiker"] = round(max(0.0, min(25.0, ana)), 1)
 
-    # Konsensus (max 20) — hur eniga, övertygade OCH färska investerarna är
+    # Konsensus (max 20, före klusterjustering) — eniga, övertygade OCH
+    # färska investerare, plus flödesriktning; delat med sqrt(klusterstorlek)
+    # om aktien samvarierar starkt med andra konsensusaktier (§4)
     kon = 0.0
     vk = cons.get("viktad_konsensus")
     if vk is None:
         vk = float(cons["count"])   # degradera snyggt om färskhetsdata saknas
     kon += min(12.0, vk * 3.0)      # vk=3 (tröskel) → 9; vk≥4 → 12; stale trio (1.5) → 4.5
     kon += min(8.0, cons["avg_weight"] * 1.6)   # ~5 % snittvikt ger full poäng
-    delpoang["Konsensus"] = round(kon, 1)
+    if nettoflode_pe is not None:
+        kon += 5 if nettoflode_pe > 1.0 else (-5 if nettoflode_pe < -1.0 else 0)
+    kon *= cluster_factor   # ensam i sitt kluster → oförändrad (faktor 1.0)
+    delpoang["Konsensus"] = round(max(0.0, kon), 1)
 
     total = round(sum(delpoang.values()), 1)
     return total, delpoang
 
 
-def build_ranking(analyses, consensus):
-    """Rangordna konsensusaktierna. Aktier utan stigande trend sist, oavsett poäng."""
+def build_ranking(analyses, consensus, history_log=None):
+    """Rangordna konsensusaktierna. Aktier utan stigande trend sist, oavsett poäng.
+
+    Beräknar korrelationskluster (§4) och nettoflöde 30d (§5) över samtliga
+    konsensusaktier och väger in dem i Konsensus-komponenten.
+    """
+    giltiga = [tk for tk in consensus if "error" not in analyses.get(tk, {})]
+    kluster = compute_correlation_clusters(analyses, giltiga)
+    netto = compute_netflow_30d(history_log or [], giltiga)
+
     ranking = []
     for ticker, cons in consensus.items():
         a = analyses.get(ticker, {})
         if "error" in a:
             continue
-        total, delpoang = compute_score(a, cons)
+        kf = kluster.get(ticker, {}).get("klusterfaktor", 1.0)
+        total, delpoang = compute_score(a, cons, cluster_factor=kf,
+                                        nettoflode_pe=netto.get(ticker))
         ranking.append({
             "ticker": ticker,
             "poäng": total,
             "trend_ok": bool(a.get("stigande_trend")),
             "delpoäng": delpoang,
+            "kluster": kluster.get(ticker),
+            "nettoflode_30d_pe": netto.get(ticker),
         })
     ranking.sort(key=lambda r: (not r["trend_ok"], -r["poäng"]))
     return ranking
@@ -981,6 +1099,7 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
 
     holding_info = holding_info or {}
     nyhets_cutoff = (date.today() - timedelta(days=7)).isoformat()
+    rank_by_ticker = {r["ticker"]: r for r in (ranking or [])}
 
     def is_new(ticker, typ):
         return any(e["ticker"] == ticker and e["typ"] == typ and e["datum"] >= nyhets_cutoff
@@ -1026,13 +1145,16 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
         ws = wb.create_sheet("Divergens", 1)
         ws.append(["Instrument", "I signalgrupp", "Signalandel (%)", "I bakgrund (antal)",
                    "Bakgrundsandel (%)", "Divergens (pp)", "Bakgrundens snittvikt (%)",
-                   "Claudes rekommendation"])
+                   "Claudes rekommendation", "Sektor", "Kluster-ID", "Klusterfaktor"])
         style_header(ws)
         for tk, dv in sorted(divergence.items(), key=lambda x: -x[1]["divergens_pp"]):
+            kluster = rank_by_ticker.get(tk, {}).get("kluster") or {}
             ws.append([tk, f"{dv['signal_antal']}/{len(portfolios)}", dv["signal_andel_pct"],
                        dv["bakgrund_antal"], dv["bakgrund_andel_pct"], dv["divergens_pp"],
                        dv["bakgrund_snittvikt"],
-                       claude_texts.get(tk, {}).get("rekommendation", "")])
+                       claude_texts.get(tk, {}).get("rekommendation", ""),
+                       analyses.get(tk, {}).get("sector"),
+                       kluster.get("kluster_id"), kluster.get("klusterfaktor")])
 
         # Bubblare: nära konsensus med hög divergens
         bubblare = sorted(((tk, dv) for tk, dv in (divergence_near or {}).items()
@@ -1057,7 +1179,7 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
     ws.append(["Instrument", "Ny", "Stigande trend", "Antal portföljer", "Snittvikt (%)", "Pris", "RSI14",
                "Över MA200", "Rekommendation", "Riktkurs", "Uppsida (%)", "Antal analytiker",
                "Ägd längst (dagar)", "Investerarnas snittvinst (%)",
-               "Viktad konsensus", "Senaste köp (dagar)", "EPS-rev 90d (%)"])
+               "Viktad konsensus", "Senaste köp (dagar)", "EPS-rev 90d (%)", "Nettoflöde 30d (pe)"])
     style_header(ws)
     consensus_order = sorted(consensus.items(), key=lambda x: (-x[1]["count"], -x[1]["avg_weight"]))
     for ticker, info in consensus_order:
@@ -1073,6 +1195,7 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
             h.get("längst_dagar"), h.get("snitt_vinst_pct"),
             info.get("viktad_konsensus"), info.get("senaste_köp_dagar"),
             a.get("eps_rev_90d_pct"),
+            rank_by_ticker.get(ticker, {}).get("nettoflode_30d_pe"),
         ])
         if trend is not None:
             ws.cell(row=ws.max_row, column=3).fill = green if trend else red
@@ -1358,15 +1481,16 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
         claude_texts = {t: c for t, c in prev_claude.items() if t in consensus}
         claude_datum = prev_datum
 
+    # Ändringshistorik mot förra körningen (görs innan rangordningen så
+    # nettoflödet §5 kan använda dagens nyloggade ändringar också)
+    print("\nUppdaterar ändringshistorik...")
+    history_log = update_history(portfolios, list(consensus.keys()), list(near_consensus.keys()))
+
     # Sammanvägd rangordning
-    ranking = build_ranking(analyses, consensus)
+    ranking = build_ranking(analyses, consensus, history_log)
     print("\nRangordning (bästa köp först):")
     for i, r in enumerate(ranking, start=1):
         print(f"  {i}. {r['ticker']}: {r['poäng']} p (trend {'OK' if r['trend_ok'] else 'EJ OK'})")
-
-    # Ändringshistorik mot förra körningen
-    print("\nUppdaterar ändringshistorik...")
-    history_log = update_history(portfolios, list(consensus.keys()), list(near_consensus.keys()))
 
     result = {
         "tidpunkt": datetime.now().isoformat(timespec="minutes"),

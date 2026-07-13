@@ -370,6 +370,7 @@ with tab_rang:
         for i, r in enumerate(ranking, start=1):
             d = r["delpoäng"]
             c = claude.get(r["ticker"], {})
+            kluster = r.get("kluster") or {}
             rows.append({
                 "Rang": i,
                 "Bransch": bransch_ikon(r["ticker"], bransch),
@@ -380,6 +381,10 @@ with tab_rang:
                 "Momentum (25)": d.get("Momentum"),
                 "Analytiker (25)": d.get("Analytiker"),
                 "Konsensus (20)": d.get("Konsensus"),
+                "Viktad kons.": consensus.get(r["ticker"], {}).get("viktad_konsensus"),
+                "Nettoflöde 30d (pe)": r.get("nettoflode_30d_pe"),
+                "Kluster": (f"#{kluster['kluster_id']} ({kluster['klusterstorlek']} st)"
+                           if kluster.get("klusterstorlek", 1) > 1 else "ensam"),
                 "Claude": c.get("rekommendation", "—"),
             })
         st.dataframe(
@@ -395,9 +400,10 @@ with tab_rang:
         st.caption(
             "**Poängmodellen:** Trend 30 p (över MA200, MA200 stigande, golden cross) · "
             "Momentum 25 p (RSI i styrkezon, MACD över signal, 3-månadersavkastning) · "
-            "Analytiker 25 p (uppsida mot riktkurs, antal analytiker, köprekommendation) · "
-            "Konsensus 20 p (antal portföljer, snittvikt). "
-            "Aktier utan stigande trend rankas alltid sist, oavsett poäng."
+            "Analytiker 25 p (uppsida, antal analytiker, köprekommendation, EPS-revidering) · "
+            "Konsensus 20 p (viktad konsensus, snittvikt, nettoflöde 30d) — delat med "
+            "√klusterstorlek om aktien samvarierar starkt (korr > 0,7) med andra "
+            "konsensusaktier. Aktier utan stigande trend rankas alltid sist, oavsett poäng."
         )
 
     # --- Senaste händelser: kondenserad översikt på förstasidan ---
