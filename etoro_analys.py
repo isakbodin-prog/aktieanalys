@@ -815,8 +815,9 @@ WEIGHT_CHANGE_THRESHOLD = 1.0  # procentenheter — mindre viktändringar loggas
 # ----------------------------------------------------------------------
 GIST_ID = os.environ.get("GIST_ID")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+FACIT_FILE = "screener_facit.json"
 GIST_FILES = ("portfolj_historik.json", "senaste_analys.json",
-              "bakgrund_topp50.json", "bakgrund_cache.json")
+              "bakgrund_topp50.json", "bakgrund_cache.json", FACIT_FILE)
 
 
 def _gist_headers():
@@ -1374,9 +1375,174 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     write_excel(portfolios, consensus, analyses, claude_texts, history_log, ranking,
                 near_consensus, holding_info, divergence, divergence_near)
 
+    # Logga facit för --utvardera (poäng vs framtida avkastning)
+    logga_facit(today, ranking, divergence, analyses, consensus)
+
     # Spara beständig historik till gisten
     gist_push()
     return result
+
+
+def logga_facit(datum, ranking, divergence, analyses, consensus):
+    """Appenda dagens poäng/divergens per konsensusaktie till FACIT_FILE.
+
+    En rad per aktie och dag (idempotent — samma dag skrivs över), för senare
+    utvärdering mot faktisk forward-avkastning via --utvardera.
+    """
+    facit = []
+    if os.path.exists(FACIT_FILE):
+        try:
+            with open(FACIT_FILE) as f:
+                facit = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            facit = []
+    facit = [r for r in facit if r.get("datum") != datum]   # ersätt dagens rader
+    for r in ranking:
+        tk = r["ticker"]
+        a = analyses.get(tk, {})
+        dv = (divergence or {}).get(tk, {})
+        facit.append({
+            "datum": datum,
+            "ticker": tk,
+            "poäng": r["poäng"],
+            "komponenter": r["delpoäng"],
+            "pris": a.get("pris"),
+            "viktad_konsensus": consensus.get(tk, {}).get("viktad_konsensus"),
+            "divergens_pp": dv.get("divergens_pp"),
+        })
+    with open(FACIT_FILE, "w") as f:
+        json.dump(facit, f, ensure_ascii=False, indent=2)
+    print(f"  Facit uppdaterat: {sum(1 for r in facit if r['datum'] == datum)} rader för {datum} "
+          f"(totalt {len(facit)}).")
+
+
+def run_utvardering():
+    """Utvärdera poängmodellen mot faktisk forward-avkastning (21/63/126 dgr).
+
+    Läser FACIT_FILE, hämtar prishistorik via yfinance och rapporterar
+    avkastning per poängkvartil, komponentkorrelationer och divergensutfall
+    till terminal + Excel-fliken 'Utvärdering' (utvardering.xlsx). Kör INTE
+    analysen — glesa datapunkter är OK, rapporten anger n.
+    """
+    import yfinance as yf
+    import pandas as pd
+
+    gist_pull()
+    if not os.path.exists(FACIT_FILE):
+        raise RuntimeError(f"{FACIT_FILE} saknas — kör analysen minst en gång först.")
+    with open(FACIT_FILE) as f:
+        facit = json.load(f)
+    if not facit:
+        raise RuntimeError("Facit är tomt — kör analysen några gånger på olika datum först.")
+
+    HORISONTER = [("21d", 21), ("63d", 63), ("126d", 126)]
+    PRIMÄR = "63d"
+    tickers = sorted({r["ticker"] for r in facit})
+    print(f"Utvärderar {len(facit)} facitrader, {len(tickers)} unika aktier...")
+
+    close_cache = {}
+    for tk in tickers:
+        try:
+            h = yf.Ticker(tk).history(period="2y")
+            if not h.empty:
+                close_cache[tk] = h["Close"]
+        except Exception:
+            pass
+
+    # Forward-avkastning per rad (närmaste handelsdag ≥ raddatumet)
+    for r in facit:
+        r["fwd"] = {}
+        close = close_cache.get(r["ticker"])
+        if close is None:
+            continue
+        d = pd.Timestamp(r["datum"])
+        if close.index.tz is not None:
+            d = d.tz_localize(close.index.tz)
+        pos = int(close.index.searchsorted(d))
+        if pos >= len(close):
+            continue
+        p0 = float(close.iloc[pos])
+        for namn, n in HORISONTER:
+            if pos + n < len(close) and p0:
+                r["fwd"][namn] = round((float(close.iloc[pos + n]) / p0 - 1) * 100, 1)
+
+    # Datamängd med primärhorisontens forward-avkastning
+    rader = [r for r in facit if r["fwd"].get(PRIMÄR) is not None]
+    n = len(rader)
+    print(f"\nDatapunkter med {PRIMÄR} forward-avkastning: {n}")
+    if n == 0:
+        print("Ännu inga färdiga forward-fönster — kom tillbaka när facit mognat.")
+        return
+    if n < 10:
+        print(f"VARNING: för tidigt för slutsatser (n={n}). Behöver ~10+ datapunkter.")
+
+    df = pd.DataFrame([{
+        "poäng": r["poäng"], "divergens_pp": r.get("divergens_pp"),
+        "fwd": r["fwd"][PRIMÄR],
+        **{f"k_{k}": v for k, v in (r.get("komponenter") or {}).items()},
+    } for r in rader])
+
+    rapport = []   # (rubrik, [(etikett, värde)])
+
+    # 1. Avkastning per poängkvartil
+    kvartil_rader = []
+    try:
+        df["kvartil"] = pd.qcut(df["poäng"], 4, labels=["Q1 (lägst)", "Q2", "Q3", "Q4 (högst)"],
+                                duplicates="drop")
+        for kv, grp in df.groupby("kvartil", observed=True):
+            kvartil_rader.append((str(kv), f"snitt {grp['fwd'].mean():+.1f} %  (n={len(grp)})"))
+    except (ValueError, IndexError):
+        kvartil_rader.append(("—", "för få unika poäng för kvartiler"))
+    rapport.append((f"Forward-avkastning ({PRIMÄR}) per poängkvartil", kvartil_rader))
+
+    # 2. Komponentkorrelation mot forward-avkastning
+    komp_rader = []
+    for kol in [c for c in df.columns if c.startswith("k_")]:
+        if df[kol].nunique() > 1:
+            korr = df[kol].corr(df["fwd"])
+            komp_rader.append((kol[2:], f"korr {korr:+.2f}"))
+    komp_rader.append(("Totalpoäng", f"korr {df['poäng'].corr(df['fwd']):+.2f}"))
+    rapport.append(("Korrelation komponentpoäng ↔ forward-avkastning", komp_rader))
+
+    # 3. Divergensutfall (hög vs låg divergens)
+    div_rader = []
+    dd = df.dropna(subset=["divergens_pp"])
+    if len(dd) >= 4:
+        median = dd["divergens_pp"].median()
+        hög = dd[dd["divergens_pp"] >= median]["fwd"].mean()
+        låg = dd[dd["divergens_pp"] < median]["fwd"].mean()
+        div_rader = [(f"Hög divergens (≥ {median:.0f} pp)", f"snitt {hög:+.1f} %"),
+                     (f"Låg divergens (< {median:.0f} pp)", f"snitt {låg:+.1f} %")]
+    else:
+        div_rader = [("—", "för få divergensdatapunkter")]
+    rapport.append(("Divergensutfall", div_rader))
+
+    # Terminalrapport
+    for rubrik, poster in rapport:
+        print(f"\n{rubrik}:")
+        for etikett, värde in poster:
+            print(f"  {etikett:<22} {värde}")
+
+    # Excel-flik
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Utvärdering"
+    ws.append([f"Utvärdering av poängmodellen — {n} datapunkter ({PRIMÄR} forward)"])
+    ws["A1"].font = Font(bold=True, size=13)
+    if n < 10:
+        ws.append([f"VARNING: för tidigt för slutsatser (n={n})"])
+    for rubrik, poster in rapport:
+        ws.append([])
+        ws.append([rubrik])
+        ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
+        for etikett, värde in poster:
+            ws.append([etikett, värde])
+    ws.column_dimensions["A"].width = 32
+    ws.column_dimensions["B"].width = 30
+    wb.save("utvardering.xlsx")
+    print("\nRapport sparad som: utvardering.xlsx")
 
 
 def main():
@@ -1393,10 +1559,16 @@ def main():
                              "körts någon gång) och kör sedan hela analysen")
     parser.add_argument("--force-claude", action="store_true",
                         help="kör Claude-analysen även om den redan körts idag (drar credits)")
+    parser.add_argument("--utvardera", action="store_true",
+                        help="utvärdera poängmodellen mot faktisk forward-avkastning "
+                             f"({FACIT_FILE}) — kör inte analysen")
     args = parser.parse_args()
 
     print("=== eToro portföljanalys ===")
     try:
+        if args.utvardera:
+            run_utvardering()
+            return
         if args.screener:
             if not API_KEY or not USER_KEY:
                 raise RuntimeError("ETORO_API_KEY och ETORO_USER_KEY saknas — lägg dem i .env-filen.")

@@ -43,6 +43,11 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
 - `python3 etoro_analys.py --divergens` — hämtar om bakgrundsgruppens
   portföljer (kräver att --screener körts, annars RuntimeError) till
   bakgrund_cache.json och kör sedan hela analysen.
+- `python3 etoro_analys.py --utvardera` — utvärderar poängmodellen mot
+  faktisk forward-avkastning (21/63/126 dgr) ur screener_facit.json
+  (loggas automatiskt vid varje analyskörning, gist-synkad). Rapport per
+  poängkvartil, komponentkorrelation och divergensutfall till terminal +
+  utvardering.xlsx. Kör INTE analysen. Varnar vid n<10.
 - `--force-claude` — kringgår Claude-dagsspärren (kombinerbar med ovan).
 - Webbappen kör alltid standardläget; bakgrunden uppdateras bara via CLI.
 
