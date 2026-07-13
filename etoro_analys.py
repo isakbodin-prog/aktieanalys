@@ -30,7 +30,15 @@ import requests
 # Konfiguration
 # ----------------------------------------------------------------------
 PROFILES = ["thomaspj", "michalhla", "JeppeKirkBonde", "triangulacapital", "Smudliczek", "ingruc"]
-MIN_PORTFOLIOS = 3   # Aktien ska finnas i minst så här många portföljer
+
+# Konsensuströsklar som ANDEL av signalgruppen (ersätter absoluta MIN_PORTFOLIOS=3)
+# med hysteres: högre krav för att komma IN på listan än för att LIGGA KVAR —
+# förhindrar flappande IN/UT-poster i historiken när en enda trader trimmar.
+# Antal ägare räknas mot ceil(andel × gruppstorlek): 6 profiler → IN 4, KVAR 3.
+KONSENSUS_ANDEL_IN = 0.60
+KONSENSUS_ANDEL_KVAR = 0.50
+KONSENSUS_REGEL = "andel_hysteres_v1"   # versionsmarkör i historiksnapshoten —
+# nivåövergångar loggas bara mellan körningar med samma regelversion
 OUTPUT_FILE = "portfolj_analys.xlsx"
 
 API_BASE = "https://public-api.etoro.com/api/v1"
@@ -186,7 +194,29 @@ def get_portfolio(username, quiet=False):
 # ----------------------------------------------------------------------
 # Delad konsensusberäkning (används av både signal- och ev. andra grupper)
 # ----------------------------------------------------------------------
-MIN_KONSENSUSVIKT = 3.0   # referensnivå för viktad konsensus (tre köp 30–180 dgr = 3.0)
+def konsensus_trosklar(antal_profiler):
+    """(in_krav, kvar_krav) i antal ägare för en grupp av given storlek.
+
+    ceil(andel × N) med epsilon-skydd mot flyttalsartefakter (0.6×6 lagras
+    som 3.5999... — ceil ger rätt 4, men ett exakt heltal som råkat hamna
+    strax ÖVER får inte rundas upp ett extra steg).
+    """
+    import math
+    in_krav = math.ceil(KONSENSUS_ANDEL_IN * antal_profiler - 1e-9)
+    kvar_krav = math.ceil(KONSENSUS_ANDEL_KVAR * antal_profiler - 1e-9)
+    return in_krav, kvar_krav
+
+
+def load_previous_consensus():
+    """Förra körningens konsensuslista (för hysteresen) ur historikfilen.
+
+    Tom mängd vid kallstart utan historik → IN-tröskeln tillämpas för alla.
+    """
+    try:
+        with open(HISTORY_FILE) as f:
+            return set((json.load(f).get("senaste") or {}).get("consensus") or [])
+    except (OSError, json.JSONDecodeError):
+        return set()
 
 
 def farskhetsvikt(dagar_sedan_senaste_kop):
@@ -210,20 +240,32 @@ def farskhetsvikt(dagar_sedan_senaste_kop):
     return 0.5       # passivt innehav
 
 
-def compute_consensus(portfolios, port_meta=None, min_portfolios=None):
-    """Beräkna konsensus och nära konsensus ur en uppsättning portföljer.
+def compute_consensus(portfolios, port_meta=None, previous_consensus=None):
+    """Beräkna konsensus, nära konsensus och bubblarnivå ur portföljerna.
 
-    Returnerar (consensus, near_consensus): {ticker: {count, avg_weight,
-    total_weight, holders, viktad_konsensus, senaste_köp_dagar}}. Medlemskap
-    avgörs av antal ägare (stabilt); viktad_konsensus (Σ farskhetsvikt) och
-    senaste_köp_dagar (min över ägarna) beskriver hur färsk signalen är och
-    väger in i poängen.
+    Procentuella trösklar med HYSTERES: en aktie kommer IN på listan vid
+    ceil(KONSENSUS_ANDEL_IN × N) ägare men LIGGER KVAR redan vid
+    ceil(KONSENSUS_ANDEL_KVAR × N) — kvarnivån tillämpas bara för aktier
+    som var konsensus i föregående körning (previous_consensus).
+
+    Dubbelvillkor (UTBYGGNAD_screener_v2 §1, skalat): antal ägare >= tröskel
+    OCH viktad_konsensus (Σ farskhetsvikt) >= samma tal. Viktkravet följer
+    alltså antalskravet i stället för hårdkodade 3.0.
+
+    Returnerar (consensus, near_consensus, bubblar_niva):
+    - consensus: klarar sin tillämpliga tröskel (in eller kvar)
+    - near_consensus: klarar kvarnivåns ANTAL men är inte konsensus
+      (ny aktie under innivån, eller fallerat viktkrav)
+    - bubblar_niva: exakt en ägare under kvarnivån (bubblar-kandidater)
+    Varje entry: {count, avg_weight, total_weight, holders,
+    viktad_konsensus, senaste_köp_dagar, tröskel, hysteres}.
     """
     from datetime import date
-    min_portfolios = min_portfolios or MIN_PORTFOLIOS
     port_meta = port_meta or {}
+    previous_consensus = previous_consensus or set()
+    in_krav, kvar_krav = konsensus_trosklar(len(portfolios))
     today = date.today()
-    consensus, near_consensus = {}, {}
+    consensus, near_consensus, bubblar_niva = {}, {}, {}
     all_tickers = set()
     for positions in portfolios.values():
         all_tickers.update(positions.keys())
@@ -236,17 +278,23 @@ def compute_consensus(portfolios, port_meta=None, min_portfolios=None):
             if dagar is not None:
                 dagar_lista.append(dagar)
             vikter.append(farskhetsvikt(dagar))
+        hysteres = ticker in previous_consensus
+        troskel = kvar_krav if hysteres else in_krav
         entry = {"count": len(holders),
                  "avg_weight": sum(holders.values()) / len(holders),
                  "total_weight": round(sum(holders.values()), 2),
                  "holders": sorted(holders),
                  "viktad_konsensus": round(sum(vikter), 2),
-                 "senaste_köp_dagar": min(dagar_lista) if dagar_lista else None}
-        if len(holders) >= min_portfolios:
+                 "senaste_köp_dagar": min(dagar_lista) if dagar_lista else None,
+                 "tröskel": troskel,
+                 "hysteres": hysteres}
+        if len(holders) >= troskel and entry["viktad_konsensus"] >= float(troskel):
             consensus[ticker] = entry
-        elif len(holders) == min_portfolios - 1:
+        elif len(holders) >= kvar_krav:
             near_consensus[ticker] = entry
-    return consensus, near_consensus
+        elif len(holders) == kvar_krav - 1:
+            bubblar_niva[ticker] = entry
+    return consensus, near_consensus, bubblar_niva
 
 
 # ----------------------------------------------------------------------
@@ -1318,22 +1366,36 @@ def update_history(portfolios, consensus_tickers, near_tickers=None):
         old_near = set(prev.get("near_consensus") or [])
         new_near = set(near_tickers)
 
+        n = len(portfolios)
+        in_krav, kvar_krav = konsensus_trosklar(n)
+        in_pct = round(KONSENSUS_ANDEL_IN * 100)
+        kvar_pct = round(KONSENSUS_ANDEL_KVAR * 100)
+
+        def agare(tk):
+            return sum(1 for p in portfolios.values() if tk in p)
+
         for tk in sorted(new_cons - old_cons):
-            detalj = ("upp från nära konsensus" if tk in old_near
-                      else "finns nu i ≥3 portföljer")
+            detalj = f"klarar {in_pct} %-innivån ({agare(tk)} av {n} portföljer)"
+            if tk in old_near:
+                detalj += " — upp från nära konsensus"
             log("IN I KONSENSUS", "", tk, detalj)
         for tk in sorted(old_cons - new_cons):
-            detalj = ("ner till nära konsensus (2 portföljer)" if tk in new_near
-                      else "färre än 2 portföljer kvar")
+            detalj = f"under {kvar_pct} %-kvarnivån ({agare(tk)} av {n} portföljer)"
+            if tk in new_near:
+                detalj += " — ner till nära konsensus"
             log("UT UR KONSENSUS", "", tk, detalj)
 
-        # Nära konsensus-övergångar (bara om förra ögonblicksbilden har listan,
-        # annars skulle första körningen efter uppgraderingen spamma loggen)
-        if "near_consensus" in prev:
+        # Nära konsensus-övergångar loggas bara om förra ögonblicksbilden
+        # skrevs under SAMMA regelversion — annars skulle en omdefinition av
+        # nivån (t.ex. bytet från "2 av 5" till kvarnivån) spamma loggen och
+        # "Lämnat listorna" med falska utträden
+        if prev.get("regel") == KONSENSUS_REGEL:
             for tk in sorted(new_near - old_near - old_cons):
-                log("IN I NÄRA KONSENSUS", "", tk, "finns nu i 2 portföljer")
+                log("IN I NÄRA KONSENSUS", "", tk,
+                    f"klarar kvarnivåns antal ({agare(tk)} av {n} portföljer)")
             for tk in sorted(old_near - new_near - new_cons):
-                log("UT UR NÄRA KONSENSUS", "", tk, "färre än 2 portföljer kvar")
+                log("UT UR NÄRA KONSENSUS", "", tk,
+                    f"under kvarnivån ({agare(tk)} av {n} portföljer)")
 
         if entries:
             print(f"  {len(entries)} ändringar sedan {prev.get('datum', 'förra körningen')}.")
@@ -1344,7 +1406,8 @@ def update_history(portfolios, consensus_tickers, near_tickers=None):
 
     state["senaste"] = {"datum": today, "portfolios": portfolios,
                         "consensus": sorted(consensus_tickers),
-                        "near_consensus": sorted(near_tickers)}
+                        "near_consensus": sorted(near_tickers),
+                        "regel": KONSENSUS_REGEL}
     state["logg"] = entries + state.get("logg", [])
     with open(HISTORY_FILE, "w") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
@@ -1357,7 +1420,7 @@ def update_history(portfolios, consensus_tickers, near_tickers=None):
 # ----------------------------------------------------------------------
 def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
                 ranking=None, near_consensus=None, holding_info=None, divergence=None,
-                divergence_near=None):
+                divergence_near=None, bubblar_niva=None):
     from datetime import date, timedelta
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
@@ -1425,13 +1488,14 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
                        analyses.get(tk, {}).get("sector"),
                        kluster.get("kluster_id"), kluster.get("klusterfaktor")])
 
-        # Bubblare: nära konsensus med hög divergens
+        # Bubblare: bubblarnivån med hög divergens
+        bubbel_kalla = bubblar_niva if bubblar_niva is not None else (near_consensus or {})
         bubblare = sorted(((tk, dv) for tk, dv in (divergence_near or {}).items()
                            if dv["divergens_pp"] >= 30),
                           key=lambda x: -x[1]["divergens_pp"])
         if bubblare:
             ws.append([])
-            ws.append(["BUBBLARE — nära konsensus med hög divergens (ett köp från att kvala in)"])
+            ws.append(["BUBBLARE — bubblarnivån med hög divergens (nära att kvala in)"])
             ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
             ws.append(["Instrument", "Ägs av (signalgrupp)", "Total vikt (%)",
                        "I bakgrund (antal)", "Bakgrundsandel (%)", "Divergens (pp)"])
@@ -1439,7 +1503,7 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
                 if c.value:
                     c.font, c.fill = hfont, hfill
             for tk, dv in bubblare:
-                info = (near_consensus or {}).get(tk, {})
+                info = bubbel_kalla.get(tk, {})
                 ws.append([tk, ", ".join(info.get("holders", [])),
                            info.get("total_weight"),
                            dv["bakgrund_antal"], dv["bakgrund_andel_pct"], dv["divergens_pp"]])
@@ -1489,7 +1553,9 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
     # Nära konsensus — en portfölj från att kvala in
     if near_consensus:
         ws.append([])
-        ws.append([f"NÄRA KONSENSUS — i {MIN_PORTFOLIOS - 1} av {len(portfolios)} portföljer"])
+        _in_krav, _kvar_krav = konsensus_trosklar(len(portfolios))
+        ws.append([f"NÄRA KONSENSUS — {_kvar_krav} av {len(portfolios)} portföljer "
+                   f"(klarar kvarnivån men inte innivån {_in_krav})"])
         ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
         ws.append(["Instrument", "Ny", "Antal portföljer", "Total vikt (%)", "Snittvikt (%)",
                    "Ägs av", "Ägd längst (dagar)", "Investerarnas snittvinst (%)"])
@@ -1585,6 +1651,7 @@ def excel_from_result(result):
         result.get("innehav"),
         result.get("divergens"),
         result.get("divergens_nara"),
+        result.get("bubblar_niva"),
     )
 
 
@@ -1631,18 +1698,23 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     if not portfolios:
         raise RuntimeError("Inga portföljer kunde hämtas via eToro-API:et.")
 
-    # Konsensus + nära konsensus (en portfölj ifrån)
-    consensus, near_consensus = compute_consensus(portfolios, port_meta)
+    # Konsensus (procentuella trösklar med hysteres) + nära konsensus + bubblarnivå
+    previous_consensus = load_previous_consensus()
+    consensus, near_consensus, bubblar_niva = compute_consensus(
+        portfolios, port_meta, previous_consensus)
 
-    print(f"\nKonsensus-aktier (i minst {MIN_PORTFOLIOS} portföljer): {sorted(consensus)}")
-    print(f"Nära konsensus (i {MIN_PORTFOLIOS - 1} portföljer): {len(near_consensus)} st")
+    in_krav, kvar_krav = konsensus_trosklar(len(portfolios))
+    print(f"\nKonsensus-aktier (in: {in_krav} av {len(portfolios)}, "
+          f"kvar: {kvar_krav} av {len(portfolios)}): {sorted(consensus)}")
+    print(f"Nära konsensus ({kvar_krav} ägare, under innivån): {len(near_consensus)} st")
+    print(f"Bubblarnivå ({kvar_krav - 1} ägare): {len(bubblar_niva)} st")
 
     # Bakgrundsgrupp + divergens (vad äger signalgruppen som flocken INTE äger?)
     background = load_background_portfolios(refresh=refresh_background)
     divergence = compute_divergence(consensus, portfolios, background)
-    # Bubblare: nära konsensus-aktier med hög divergens — ett köp från att
-    # kvala in, och flocken äger dem inte
-    divergence_near = compute_divergence(near_consensus, portfolios, background)
+    # Bubblare: bubblarnivå-aktier med hög divergens — nära att kvala in,
+    # och flocken äger dem inte
+    divergence_near = compute_divergence(bubblar_niva, portfolios, background)
     if divergence:
         rankad = sorted(divergence.items(), key=lambda x: -x[1]["divergens_pp"])
         print("Divergens (signalgrupp − bakgrundsgrupp):")
@@ -1701,7 +1773,7 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     # openTimestamp/netProfit) för konsensus- och nära konsensus-aktier
     holding_info = {}
     today_d = date.today()
-    for ticker in list(consensus) + list(near_consensus):
+    for ticker in list(consensus) + list(near_consensus) + list(bubblar_niva):
         per_profil = {}
         for prof, meta in port_meta.items():
             m = meta.get(ticker) or {}
@@ -1784,6 +1856,11 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
         "portfolios": portfolios,
         "consensus": consensus,
         "nara_konsensus": near_consensus,
+        "bubblar_niva": bubblar_niva,
+        "konsensus_trosklar": {"in": in_krav, "kvar": kvar_krav,
+                               "n": len(portfolios),
+                               "in_pct": round(KONSENSUS_ANDEL_IN * 100),
+                               "kvar_pct": round(KONSENSUS_ANDEL_KVAR * 100)},
         "analyses": analyses,
         "claude": claude_texts,
         "claude_datum": claude_datum,
@@ -1794,13 +1871,13 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
         "divergens_nara": divergence_near,
         "bakgrund_antal": len(background) if background else 0,
         "bransch": {tk: _industry_cache.get(tk)
-                    for tk in list(consensus) + list(near_consensus)},
+                    for tk in list(consensus) + list(near_consensus) + list(bubblar_niva)},
     }
     with open(RESULTS_FILE, "w") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
 
     write_excel(portfolios, consensus, analyses, claude_texts, history_log, ranking,
-                near_consensus, holding_info, divergence, divergence_near)
+                near_consensus, holding_info, divergence, divergence_near, bubblar_niva)
 
     # Logga facit för --utvardera (poäng vs framtida avkastning)
     logga_facit(today, ranking, divergence, analyses, consensus)

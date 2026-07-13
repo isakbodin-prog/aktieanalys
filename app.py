@@ -499,7 +499,14 @@ with tab_rang:
 
 # --- Konsensus ---
 with tab_konsensus:
-    st.subheader(f"Konsensusaktier — innehav i minst {ea.MIN_PORTFOLIOS} av {len(data['profiler'])} portföljer")
+    trosklar = data.get("konsensus_trosklar") or {}
+    _n = trosklar.get("n") or len(data["profiler"])
+    _in_krav, _kvar_krav = trosklar.get("in"), trosklar.get("kvar")
+    if _in_krav is None or _kvar_krav is None:
+        _in_krav, _kvar_krav = ea.konsensus_trosklar(_n)
+    st.subheader(f"Konsensusaktier — in vid {_in_krav} av {_n} portföljer "
+                 f"({trosklar.get('in_pct', 60)} %), kvar vid {_kvar_krav} "
+                 f"({trosklar.get('kvar_pct', 50)} %)")
     log = data.get("historik", [])
     innehav = data.get("innehav", {})
     nya_kons = nya_pa_listan(log, "IN I KONSENSUS")
@@ -534,7 +541,8 @@ with tab_konsensus:
     st.caption(
         "Stigande trend = priset över MA200 **och** MA200 stigande — utan den kan Claude aldrig ge KÖP. "
         "**Viktad kons.** väger varje ägare efter hur färskt köpet är (aktivt nyköp 1,5 · "
-        f"6 mån 1,0 · äldre 0,5; referens {ea.MIN_KONSENSUSVIKT}). Låg viktad konsensus = gammal, passiv signal. "
+        "6 mån 1,0 · äldre 0,5) och måste nå samma tal som antalskravet — hysteresen gäller "
+        "även den. Låg viktad konsensus = gammal, passiv signal. "
         "*· ny* = ny på listan senaste 7 dagarna. "
         "**Ägd längst** = äldsta öppna positionen bland investerarna; **Inv. vinst** = deras "
         "genomsnittliga upparbetade vinst — lång tid + hög vinst = risk för vinsthemtagning."
@@ -545,8 +553,9 @@ with tab_konsensus:
     near = data.get("nara_konsensus", {})
     if near:
         st.divider()
-        st.subheader(f"Nära konsensus — i {ea.MIN_PORTFOLIOS - 1} av {len(data['profiler'])} portföljer")
-        st.caption("Bevakningslista: köper en investerare till någon av dessa kvalar den in i konsensus.")
+        st.subheader(f"Nära konsensus — {_kvar_krav} av {_n} portföljer (under innivån {_in_krav})")
+        st.caption("Bevakningslista: klarar kvarnivåns antal men har inte kvalat in — "
+                   "en ägare till (eller färskare köp) tar dem över innivån.")
         nya_nara = nya_pa_listan(log, "IN I NÄRA KONSENSUS")
 
         def total_vikt(info):
@@ -638,26 +647,28 @@ with tab_diverg:
             "Bakgrundsgruppen används som brusfilter — inte som köpsignal."
         )
 
-        # Bubblare: nära konsensus + hög divergens
+        # Bubblare: bubblarnivån (en ägare under kvarnivån) + hög divergens
         div_nara = data.get("divergens_nara", {})
-        near = data.get("nara_konsensus", {})
+        bubbel_kalla = data.get("bubblar_niva") if "bubblar_niva" in data else data.get("nara_konsensus", {})
         bubblare = sorted(((tk, dv) for tk, dv in div_nara.items() if dv["divergens_pp"] >= 30),
                           key=lambda x: (-x[1]["divergens_pp"],
-                                         -(near.get(x[0], {}).get("total_weight") or 0)))
+                                         -(bubbel_kalla.get(x[0], {}).get("total_weight") or 0)))
         st.divider()
-        st.subheader("Bubblare — nära konsensus med hög divergens")
+        st.subheader("Bubblare — nära att kvala in, med hög divergens")
+        tr = data.get("konsensus_trosklar") or {}
         st.caption(
-            "Aktier som ägs av 2 av dina 5 investerare men som flocken i stort sett inte äger "
-            "(divergens ≥ +30 pp). Köper en tredje investerare kvalar de in i konsensus — "
-            "och då är dina utvalda tidiga, inte sena."
+            f"Aktier som ägs av {max((tr.get('kvar') or 3) - 1, 1)} av dina "
+            f"{tr.get('n', len(data.get('profiler', [])))} investerare men som flocken "
+            "i stort sett inte äger (divergens ≥ +30 pp). Fler ägare tar dem uppåt "
+            "i nivåerna — och då är dina utvalda tidiga, inte sena."
         )
         if not bubblare:
-            st.caption("Inga bubblare just nu — alla nära konsensus-aktier ägs redan brett av flocken.")
+            st.caption("Inga bubblare just nu — aktierna på bubblarnivån ägs redan brett av flocken.")
         else:
             nya_nara_b = nya_pa_listan(data.get("historik", []), "IN I NÄRA KONSENSUS")
             bubbel_rows = []
             for tk, dv in bubblare:
-                info = near.get(tk, {})
+                info = bubbel_kalla.get(tk, {})
                 bubbel_rows.append({
                     "Bransch": bransch_ikon(tk, bransch),
                     "Aktie": tk + (" · ny" if tk in nya_nara_b else ""),

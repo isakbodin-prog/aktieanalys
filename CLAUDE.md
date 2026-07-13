@@ -16,7 +16,8 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
   `symbolFull`, ID i `instrumentID` (toppnyckel: instrumentDisplayDatas).
   Skriptet hämtar listan en gång och slår upp lokalt.
 - thomaspj verifierad 15/15 mot kända innehav per 2026-07-01
-- Konsensus (≥3 portföljer): AMZN (4 st), MU, TSM, NVDA, ASML
+- Konsensus per 2026-07-13 (in 4/6, kvar 3/6): AMZN, MU, NVDA, PYPL.
+  TSM föll ur på viktkravet (3 ägare men viktad konsensus 2,5 < 3,0)
 
 ## API-detaljer (eToro Public API, lanserat feb 2026)
 - Bas-URL: https://public-api.etoro.com/api/v1
@@ -62,7 +63,20 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
 
 ## Pipeline (i skriptet)
 1. Hämta 5 portföljer → aggregera investmentPct per instrumentId
-2. Konsensus: instrument i ≥3 portföljer (MIN_PORTFOLIOS=3)
+2. Konsensus: PROCENTUELLA trösklar med HYSTERES (ersatte MIN_PORTFOLIOS=3
+   2026-07-13). KONSENSUS_ANDEL_IN=0.60 för att komma IN på listan,
+   KONSENSUS_ANDEL_KVAR=0.50 för att LIGGA KVAR (kvarnivån gäller bara
+   aktier som var konsensus förra körningen — läses ur portfolj_historik-
+   .json via load_previous_consensus()). Antal ägare mot ceil(andel×N):
+   6 profiler → IN 4, KVAR 3. DUBBELVILLKOR (skalat från §1): antal ägare
+   >= tröskeln OCH viktad_konsensus (Σ färskhetsvikt) >= samma tal — en
+   trio där någons senaste köp passerat 180 dgr (vikt 0,5) faller ur trots
+   3 ägare. Tre nivåer returneras av compute_consensus(): konsensus,
+   nära konsensus (klarar kvarnivåns antal men ej in), bubblarnivå
+   (exakt en ägare under kvarnivån — bubblare = de med divergens ≥ +30).
+   Historiksnapshoten bär regelversion (KONSENSUS_REGEL) — nivåövergångar
+   loggas bara mellan körningar med samma regel, så en omdefinition
+   spammar inte "Lämnat listorna". IN/UT-poster anger tillämpad tröskel.
 3. Teknisk analys via yfinance: RSI14, MA50/MA200, golden cross, MACD,
    Bollingerband, 52v-nivåer, 1m/3m-momentum, volymtrend
 4. Analytikerdata via yfinance: rekommendation, riktkurs, uppsida %
