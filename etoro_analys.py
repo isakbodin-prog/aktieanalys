@@ -134,6 +134,7 @@ def get_portfolio(username, quiet=False):
     # Aggregera per instrumentId (en användare kan ha flera positioner i samma instrument)
     weights = {}     # iid -> summerad investmentPct
     first_open = {}  # iid -> äldsta openTimestamp
+    last_open = {}   # iid -> yngsta openTimestamp (senaste köpet)
     profit_acc = {}  # iid -> (summa pct*netProfit, summa pct)
 
     def add_position(p):
@@ -145,6 +146,8 @@ def get_portfolio(username, quiet=False):
         ts = p.get("openTimestamp")
         if ts and (iid not in first_open or ts < first_open[iid]):
             first_open[iid] = ts
+        if ts and (iid not in last_open or ts > last_open[iid]):
+            last_open[iid] = ts
         profit = p.get("netProfit")
         if profit is not None and pct:
             s, w = profit_acc.get(iid, (0.0, 0.0))
@@ -169,6 +172,8 @@ def get_portfolio(username, quiet=False):
         m = {}
         if iid in first_open:
             m["öppnad"] = first_open[iid][:10]
+        if iid in last_open:
+            m["senaste_köp"] = last_open[iid][:10]
         if iid in profit_acc and profit_acc[iid][1]:
             m["vinst_pct"] = round(profit_acc[iid][0] / profit_acc[iid][1], 1)
         if m:
@@ -181,24 +186,56 @@ def get_portfolio(username, quiet=False):
 # ----------------------------------------------------------------------
 # Delad konsensusberäkning (används av både signal- och ev. andra grupper)
 # ----------------------------------------------------------------------
-def compute_consensus(portfolios, min_portfolios=None):
+MIN_KONSENSUSVIKT = 3.0   # referensnivå för viktad konsensus (tre köp 30–180 dgr = 3.0)
+
+
+def farskhetsvikt(dagar_sedan_senaste_kop):
+    """Hur mycket ett innehav ska väga utifrån hur färskt senaste köpet är.
+
+    Aktivt nyköp (≤30 dgr) väger mer än en gammal vinnare som ligger kvar.
+    Saknas datum → neutral 1.0 (degraderar snyggt).
+    """
+    if dagar_sedan_senaste_kop is None:
+        return 1.0
+    if dagar_sedan_senaste_kop <= 30:
+        return 1.5   # aktivt köp
+    if dagar_sedan_senaste_kop <= 180:
+        return 1.0
+    return 0.5       # passivt innehav
+
+
+def compute_consensus(portfolios, port_meta=None, min_portfolios=None):
     """Beräkna konsensus och nära konsensus ur en uppsättning portföljer.
 
     Returnerar (consensus, near_consensus): {ticker: {count, avg_weight,
-    total_weight, holders}} där consensus kräver >= min_portfolios ägare
-    och nära konsensus exakt en ägare färre.
+    total_weight, holders, viktad_konsensus, senaste_köp_dagar}}. Medlemskap
+    avgörs av antal ägare (stabilt); viktad_konsensus (Σ farskhetsvikt) och
+    senaste_köp_dagar (min över ägarna) beskriver hur färsk signalen är och
+    väger in i poängen.
     """
+    from datetime import date
     min_portfolios = min_portfolios or MIN_PORTFOLIOS
+    port_meta = port_meta or {}
+    today = date.today()
     consensus, near_consensus = {}, {}
     all_tickers = set()
     for positions in portfolios.values():
         all_tickers.update(positions.keys())
     for ticker in all_tickers:
         holders = {name: p[ticker] for name, p in portfolios.items() if ticker in p}
+        vikter, dagar_lista = [], []
+        for name in holders:
+            sk = ((port_meta.get(name) or {}).get(ticker) or {}).get("senaste_köp")
+            dagar = (today - date.fromisoformat(sk)).days if sk else None
+            if dagar is not None:
+                dagar_lista.append(dagar)
+            vikter.append(farskhetsvikt(dagar))
         entry = {"count": len(holders),
                  "avg_weight": sum(holders.values()) / len(holders),
                  "total_weight": round(sum(holders.values()), 2),
-                 "holders": sorted(holders)}
+                 "holders": sorted(holders),
+                 "viktad_konsensus": round(sum(vikter), 2),
+                 "senaste_köp_dagar": min(dagar_lista) if dagar_lista else None}
         if len(holders) >= min_portfolios:
             consensus[ticker] = entry
         elif len(holders) == min_portfolios - 1:
@@ -629,11 +666,13 @@ def compute_score(a, cons):
         ana += 5
     delpoang["Analytiker"] = round(ana, 1)
 
-    # Konsensus (max 20) — hur eniga och övertygade investerarna är
+    # Konsensus (max 20) — hur eniga, övertygade OCH färska investerarna är
     kon = 0.0
-    span = max(1, len(PROFILES) - MIN_PORTFOLIOS)
-    kon += min(10.0, (cons["count"] - MIN_PORTFOLIOS) * (10 / span) + 10 / span)
-    kon += min(10.0, cons["avg_weight"] * 2)   # 5 % snittvikt ger full poäng
+    vk = cons.get("viktad_konsensus")
+    if vk is None:
+        vk = float(cons["count"])   # degradera snyggt om färskhetsdata saknas
+    kon += min(12.0, vk * 3.0)      # vk=3 (tröskel) → 9; vk≥4 → 12; stale trio (1.5) → 4.5
+    kon += min(8.0, cons["avg_weight"] * 1.6)   # ~5 % snittvikt ger full poäng
     delpoang["Konsensus"] = round(kon, 1)
 
     total = round(sum(delpoang.values()), 1)
@@ -975,7 +1014,8 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
     ws = wb.create_sheet("Konsensus & Analys", 2)
     ws.append(["Instrument", "Ny", "Stigande trend", "Antal portföljer", "Snittvikt (%)", "Pris", "RSI14",
                "Över MA200", "Rekommendation", "Riktkurs", "Uppsida (%)", "Antal analytiker",
-               "Ägd längst (dagar)", "Investerarnas snittvinst (%)"])
+               "Ägd längst (dagar)", "Investerarnas snittvinst (%)",
+               "Viktad konsensus", "Senaste köp (dagar)"])
     style_header(ws)
     consensus_order = sorted(consensus.items(), key=lambda x: (-x[1]["count"], -x[1]["avg_weight"]))
     for ticker, info in consensus_order:
@@ -989,6 +1029,7 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
             a.get("pris"), a.get("RSI14"), a.get("över_MA200"),
             a.get("rekommendation"), a.get("riktkurs"), a.get("uppsida_%"), a.get("antal_analytiker"),
             h.get("längst_dagar"), h.get("snitt_vinst_pct"),
+            info.get("viktad_konsensus"), info.get("senaste_köp_dagar"),
         ])
         if trend is not None:
             ws.cell(row=ws.max_row, column=3).fill = green if trend else red
@@ -1138,7 +1179,7 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
         raise RuntimeError("Inga portföljer kunde hämtas via eToro-API:et.")
 
     # Konsensus + nära konsensus (en portfölj ifrån)
-    consensus, near_consensus = compute_consensus(portfolios)
+    consensus, near_consensus = compute_consensus(portfolios, port_meta)
 
     print(f"\nKonsensus-aktier (i minst {MIN_PORTFOLIOS} portföljer): {sorted(consensus)}")
     print(f"Nära konsensus (i {MIN_PORTFOLIOS - 1} portföljer): {len(near_consensus)} st")

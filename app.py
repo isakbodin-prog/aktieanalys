@@ -483,6 +483,8 @@ with tab_konsensus:
             "Aktie": tk + (" · ny" if tk in nya_kons else ""),
             "Stigande trend": trend_label(a),
             "Portföljer": consensus[tk]["count"],
+            "Viktad kons.": consensus[tk].get("viktad_konsensus"),
+            "Senaste köp (dgr)": consensus[tk].get("senaste_köp_dagar"),
             "Total vikt (%)": consensus[tk].get("total_weight")
                 or round(consensus[tk]["avg_weight"] * consensus[tk]["count"], 2),
             "Snittvikt (%)": round(consensus[tk]["avg_weight"], 2),
@@ -501,6 +503,8 @@ with tab_konsensus:
                  column_config={"Bransch": st.column_config.ImageColumn("", width=36)})
     st.caption(
         "Stigande trend = priset över MA200 **och** MA200 stigande — utan den kan Claude aldrig ge KÖP. "
+        "**Viktad kons.** väger varje ägare efter hur färskt köpet är (aktivt nyköp 1,5 · "
+        f"6 mån 1,0 · äldre 0,5; referens {ea.MIN_KONSENSUSVIKT}). Låg viktad konsensus = gammal, passiv signal. "
         "*· ny* = ny på listan senaste 7 dagarna. "
         "**Ägd längst** = äldsta öppna positionen bland investerarna; **Inv. vinst** = deras "
         "genomsnittliga upparbetade vinst — lång tid + hög vinst = risk för vinsthemtagning."
