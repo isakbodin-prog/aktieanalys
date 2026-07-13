@@ -552,6 +552,7 @@ def analyze_ticker(ticker):
         return {
             "ticker": ticker,
             "datakälla": source,
+            "valuta": info.get("currency") or ("USD" if source == "Alpha Vantage" else None),
             "ohlc": ohlc,
             "pris": round(price, 2),
             "MA50": round(ma50, 2),
@@ -697,11 +698,17 @@ def claude_analysis(analyses):
         "divergens_mot_bakgrundsgruppen_pp är skillnaden mot signalgruppens andel. "
         "Hög divergens = signalgruppens unika övertygelse (starkare signal); låg eller "
         "negativ = flockbeteende där 'alla' redan äger aktien. Nämn det kort.\n\n"
+        "VALUTA: alla priser och nivåer anges i aktiens handelsvaluta (fältet "
+        "'valuta', t.ex. USD, EUR, SEK). Använd rätt valutabeteckning — skriv "
+        "ALDRIG 'kr' på ett USD-pris. Är valutan USD, skriv priser som t.ex. "
+        "'242 USD' eller '$242', aldrig kronor.\n\n"
         "Svara EXAKT i detta format:\n"
         "REKOMMENDATION: <KÖP | AVVAKTA | SÄLJ>\n"
         "<själva analysen>"
     )
 
+    from datetime import date
+    idag = date.today().isoformat()
     results = {}
     for ticker, data in analyses.items():
         if "error" in data:
@@ -724,7 +731,7 @@ def claude_analysis(analyses):
                 first, _, rest = text.partition("\n")
                 rating = first.split(":", 1)[1].strip()
                 text = rest.strip()
-            results[ticker] = {"rekommendation": rating, "analys": text}
+            results[ticker] = {"rekommendation": rating, "analys": text, "genererad": idag}
         except anthropic.APIStatusError as e:
             print(f"    Claude-fel för {ticker}: {e.status_code} {e.message}")
         except Exception as e:
@@ -1027,7 +1034,7 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
                "Pris", "MA50", "MA200", "Golden cross", "RSI14",
                "MACD > signal", "Bollinger (%)", "Avstånd 52v-högsta (%)",
                "Avkastning 1m (%)", "Avkastning 3m (%)", "Volymtrend (%)",
-               "Claudes rekommendation", "Claudes analys"])
+               "Claudes rekommendation", "Claudes analys", "Analys genererad"])
     style_header(ws)
     for ticker, _ in consensus_order:
         a = analyses.get(ticker, {})
@@ -1040,6 +1047,7 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
             a.get("RSI14"), a.get("MACD_över_signal"), a.get("bollinger_position_%"),
             a.get("avstånd_52v_högsta_%"), a.get("avkastning_1m_%"), a.get("avkastning_3m_%"),
             a.get("volymtrend_20d_vs_3m_%"), c.get("rekommendation"), c.get("analys"),
+            c.get("genererad"),
         ])
         if trend is not None:
             ws.cell(row=ws.max_row, column=2).fill = green if trend else red

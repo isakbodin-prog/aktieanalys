@@ -693,6 +693,8 @@ with tab_analys:
             if c:
                 st.markdown("---")
                 st.markdown(c["analys"])
+                if c.get("genererad"):
+                    st.caption(f"Analys genererad: {c['genererad']}")
 
 # --- Senaste ändringar ---
 with tab_andringar:
