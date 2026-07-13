@@ -483,9 +483,52 @@ def fetch_overview_alphavantage(yticker):
             "recommendationKey": rec,
             "targetMeanPrice": num("AnalystTargetPrice"),
             "numberOfAnalystOpinions": n or None,
+            "sector": d.get("Sector") or None,
+            "industry": d.get("Industry") or None,
+            "forwardPE": num("ForwardPE"),
+            "trailingPE": num("PERatio"),
+            "pegRatio": num("PEGRatio"),
+            # AV Overview saknar high/low riktkurs och nästa rapportdatum —
+            # riktkurs_spridningskvot och nasta_rapport blir None (degraderar snyggt)
         }
     except Exception:
         return {}
+
+
+def next_earnings_date(t):
+    """Nästa kommande rapportdatum (ISO-datum) från yfinance .calendar. None vid miss.
+
+    yfinance har bytt returformat mellan versioner (dict eller DataFrame) —
+    hanteras defensivt. Endast Yahoo-källan har detta fält.
+    """
+    from datetime import date
+
+    try:
+        cal = t.calendar
+        if cal is None:
+            return None
+        if isinstance(cal, dict):
+            datum_lista = cal.get("Earnings Date")
+        else:
+            datum_lista = cal.loc["Earnings Date"].dropna().tolist()
+        if not datum_lista:
+            return None
+        if not isinstance(datum_lista, (list, tuple)):
+            datum_lista = [datum_lista]
+        kandidater = []
+        for d in datum_lista:
+            try:
+                kandidater.append(d if hasattr(d, "year") else date.fromisoformat(str(d)[:10]))
+            except Exception:
+                continue
+        if not kandidater:
+            return None
+        kandidater.sort()
+        idag = date.today()
+        framtida = [d for d in kandidater if d >= idag]
+        return (framtida[0] if framtida else kandidater[-1]).isoformat()
+    except Exception:
+        return None
 
 
 def eps_revision_pct(t):
@@ -604,6 +647,29 @@ def analyze_ticker(ticker):
         upside = round((target / price - 1) * 100, 1) if target else None
         eps_rev = eps_revision_pct(t) if source == "Yahoo" else None
 
+        # §7 Värdering: forward P/E (fallback trailing), PEG — jämförs mot
+        # sektormedian i ett efterföljande steg (build_ranking)
+        forward_pe = info.get("forwardPE") or info.get("trailingPE")
+        peg_ratio = info.get("pegRatio")
+
+        # §8 Riktkursspridning — hög osäkerhet (>0.8) halverar uppsidepoängen
+        target_high, target_low = info.get("targetHighPrice"), info.get("targetLowPrice")
+        spridningskvot = None
+        if target_high and target_low and target:
+            spridningskvot = round((target_high - target_low) / target, 2)
+
+        # §9 Nästa rapportdatum (endast Yahoo — ingen poängeffekt, bara varning)
+        nasta_rapport = next_earnings_date(t) if source == "Yahoo" else None
+
+        # §10 Industry (för sektor→ETF-mappning, halvledare→SOXX)
+        industry = info.get("industry")
+
+        # §11 Årlig volatilitet (dagsavkastning stddev × sqrt(252)) för
+        # volatilitetsjusterad positionsstorlek — inget poängeffekt
+        dagsavkastning = close.pct_change().dropna()
+        volatilitet_arlig = (round(float(dagsavkastning.std()) * (252 ** 0.5) * 100, 1)
+                             if len(dagsavkastning) >= 20 else None)
+
         # Kompakt prisserie för candlestick-grafen (senaste ~90 handelsdagarna,
         # med MA50/MA200 som överlägg). Kräver OHLC — finns hos både Yahoo och AV.
         ohlc = []
@@ -652,6 +718,13 @@ def analyze_ticker(ticker):
             "antal_analytiker": n_analysts,
             "eps_rev_90d_pct": eps_rev,
             "sector": info.get("sector"),   # informativ kolumn — inte klustringsgrund (§4)
+            "industry": industry,
+            "forward_pe": round(forward_pe, 1) if forward_pe else None,
+            "peg_ratio": round(peg_ratio, 2) if peg_ratio else None,
+            "riktkurs_hog": target_high, "riktkurs_lag": target_low,
+            "riktkurs_spridningskvot": spridningskvot,
+            "nasta_rapport": nasta_rapport,
+            "volatilitet_arlig_%": volatilitet_arlig,
         }
     except Exception as e:
         return {"ticker": ticker, "error": str(e)}
@@ -759,6 +832,108 @@ def compute_netflow_30d(history_log, tickers, dagar=30):
     return {tk: round(v, 2) for tk, v in netto.items()}
 
 
+def compute_sector_pe_medians(analyses, tickers):
+    """Grov forward P/E-median per sektor, beräknad över analyserade aktier
+    i denna körning (konsensus). Litet urval — 'grov' är avsiktligt."""
+    from statistics import median
+    grupp = {}
+    for tk in tickers:
+        a = analyses.get(tk) or {}
+        sektor, fpe = a.get("sector"), a.get("forward_pe")
+        if sektor and fpe and fpe > 0:
+            grupp.setdefault(sektor, []).append(fpe)
+    return {sektor: median(vals) for sektor, vals in grupp.items()}
+
+
+def compute_valuation_score(a, sector_medians):
+    """§7 Värderingspoäng (0–10): forward P/E mot sektormedian + PEG-bonus."""
+    varde = 0.0
+    fpe, peg = a.get("forward_pe"), a.get("peg_ratio")
+    median_val = sector_medians.get(a.get("sector"))
+    if fpe and median_val:
+        if fpe < 0.8 * median_val:
+            varde += 10
+        elif fpe > 1.5 * median_val:
+            varde -= 10
+    if peg is not None and 0 < peg < 1.5:
+        varde += 5
+    return round(max(0.0, min(10.0, varde)), 1)
+
+
+# §10 Relativ styrka mot sektor — ETF-mappning (halvledare→SOXX oavsett sektor)
+_SEKTOR_ETF = {
+    "Technology": "XLK", "Consumer Cyclical": "XLY", "Communication Services": "XLC",
+    "Financial Services": "XLF", "Financial": "XLF", "Healthcare": "XLV",
+    "Industrials": "XLI", "Energy": "XLE",
+}
+
+
+def _etf_for(sector, industry):
+    if industry and "Semiconductor" in industry:
+        return "SOXX"
+    return _SEKTOR_ETF.get(sector, "SPY")
+
+
+def _fetch_etf_return_63d(cache, etf_ticker):
+    """63-dagarsavkastning för ett index-ETF, cachead per körning (max ~9 ETF:er)."""
+    if etf_ticker in cache:
+        return cache[etf_ticker]
+    try:
+        import yfinance as yf
+        h = yf.Ticker(etf_ticker).history(period="6mo")
+        if h.empty or len(h) < 64:
+            cache[etf_ticker] = None
+        else:
+            close = h["Close"]
+            cache[etf_ticker] = round((float(close.iloc[-1]) / float(close.iloc[-63]) - 1) * 100, 1)
+    except Exception:
+        cache[etf_ticker] = None
+    return cache[etf_ticker]
+
+
+def compute_relative_strength(analyses, tickers):
+    """§10: RS = aktiens 63d-avkastning − dess sektor-ETF:s 63d-avkastning.
+
+    Returnerar {ticker: {"rs_pe": x, "etf": "XLK", "bonus": ±5}}. ETF-priser
+    hämtas högst en gång per unikt index i hela körningen (yfinance, ingen
+    AV-reserv här — degraderar till None om Yahoo blockerar).
+    """
+    cache = {}
+    out = {}
+    for tk in tickers:
+        a = analyses.get(tk) or {}
+        r3 = a.get("avkastning_3m_%")
+        etf = _etf_for(a.get("sector"), a.get("industry"))
+        etf_ret = _fetch_etf_return_63d(cache, etf)
+        if r3 is None or etf_ret is None:
+            out[tk] = {"rs_pe": None, "etf": etf, "bonus": 0}
+            continue
+        rs = round(r3 - etf_ret, 1)
+        out[tk] = {"rs_pe": rs, "etf": etf,
+                  "bonus": 5 if rs > 5 else (-5 if rs < -5 else 0)}
+    return out
+
+
+def compute_suggested_weights(analyses, tickers, malvikt=2.0, tak=3.0, golv=0.5):
+    """§11: Volatilitetsjusterad föreslagen vikt (%) — sizing, ingen poängeffekt.
+
+    raw = 1/volatilitet, normaliserad så snittförslaget blir `malvikt` %,
+    därefter clampad till [golv, tak]. Ingen poängeffekt.
+    """
+    raw = {}
+    for tk in tickers:
+        v = (analyses.get(tk) or {}).get("volatilitet_arlig_%")
+        if v and v > 0:
+            raw[tk] = 100.0 / v
+    if not raw:
+        return {}
+    medel = sum(raw.values()) / len(raw)
+    if not medel:
+        return {}
+    skala = malvikt / medel
+    return {tk: round(min(tak, max(golv, r * skala)), 2) for tk, r in raw.items()}
+
+
 def compute_score(a, cons, cluster_factor=1.0, nettoflode_pe=None):
     """Sammanvägd poäng 0–100 för en aktie.
 
@@ -826,15 +1001,96 @@ def compute_score(a, cons, cluster_factor=1.0, nettoflode_pe=None):
     return total, delpoang
 
 
+def compute_score_v2(a, cons, cluster_factor=1.0, nettoflode_pe=None,
+                     rs_bonus=0, sector_medians=None):
+    """§12 Omviktad poängmodell: Trend 25 + Momentum 20 + Analytiker 20 +
+    Konsensus 25 + Värdering 10 (vikterna är startvärden — --utvardera ska
+    på sikt kalibrera dem). Återanvänder v1:s delformler och klipper varje
+    komponent till sin nya takhöjd, plus: relativ styrka (§10) i Momentum,
+    riktkursspridning (§8) halverar uppsidan i Analytiker, Värdering (§7)
+    är helt ny. Returnerar (totalpoäng, delpoäng-dict).
+    """
+    sector_medians = sector_medians or {}
+    delpoang = {}
+
+    # Trend (tak 25, samma flaggor som v1 vars råsumma är 0..30)
+    trend_raw = 0
+    if a.get("över_MA200"):
+        trend_raw += 10
+    if a.get("MA200_stigande"):
+        trend_raw += 10
+    if a.get("golden_cross"):
+        trend_raw += 10
+    delpoang["Trend"] = min(25, trend_raw)
+
+    # Momentum (tak 20): v1:s bas (0..25) + relativ styrka mot sektor-ETF (±5)
+    mom = 0.0
+    rsi = a.get("RSI14")
+    if rsi is not None:
+        if 45 <= rsi <= 65:
+            mom += 10
+        elif 35 <= rsi < 45 or 65 < rsi <= 70:
+            mom += 6
+        elif 30 <= rsi < 35:
+            mom += 3
+    if a.get("MACD_över_signal"):
+        mom += 7
+    r3 = a.get("avkastning_3m_%")
+    if r3 is not None:
+        mom += max(0.0, min(8.0, r3 / 5))
+    mom += rs_bonus
+    delpoang["Momentum"] = round(max(0.0, min(20.0, mom)), 1)
+
+    # Analytiker (tak 20): uppsidan halveras vid hög riktkursspridning (§8)
+    ana = 0.0
+    uppsida = a.get("uppsida_%")
+    if uppsida is not None:
+        uppsida_poang = max(0.0, min(15.0, uppsida / 2))
+        if (a.get("riktkurs_spridningskvot") or 0) > 0.8:
+            uppsida_poang /= 2
+        ana += uppsida_poang
+    ana += min(5.0, (a.get("antal_analytiker") or 0) / 8)
+    if a.get("rekommendation") in ("strong_buy", "buy"):
+        ana += 5
+    eps_rev = a.get("eps_rev_90d_pct")
+    if eps_rev is not None:
+        ana += 10 if eps_rev > 5 else (-10 if eps_rev < -5 else 0)
+    delpoang["Analytiker"] = round(max(0.0, min(20.0, ana)), 1)
+
+    # Konsensus (tak 25) — identisk innehåll som v1, nya taket råkar matcha
+    # exakt (12+8+5=25) så ingen omskalning behövs
+    kon = 0.0
+    vk = cons.get("viktad_konsensus")
+    if vk is None:
+        vk = float(cons["count"])
+    kon += min(12.0, vk * 3.0)
+    kon += min(8.0, cons["avg_weight"] * 1.6)
+    if nettoflode_pe is not None:
+        kon += 5 if nettoflode_pe > 1.0 else (-5 if nettoflode_pe < -1.0 else 0)
+    kon *= cluster_factor
+    delpoang["Konsensus"] = round(max(0.0, min(25.0, kon)), 1)
+
+    # Värdering (tak 10) — helt ny komponent (§7)
+    delpoang["Värdering"] = compute_valuation_score(a, sector_medians)
+
+    total = round(sum(delpoang.values()), 1)
+    return total, delpoang
+
+
 def build_ranking(analyses, consensus, history_log=None):
     """Rangordna konsensusaktierna. Aktier utan stigande trend sist, oavsett poäng.
 
-    Beräknar korrelationskluster (§4) och nettoflöde 30d (§5) över samtliga
-    konsensusaktier och väger in dem i Konsensus-komponenten.
+    Primär poäng = §12:s omviktade modell (Trend25/Momentum20/Analytiker20/
+    Konsensus25/Värdering10). Gamla v1-poängen (Trend30/Momentum25/
+    Analytiker25/Konsensus20) sparas som poäng_v1/delpoäng_v1 för jämförelse
+    under övergångsperioden, tills --utvardera hunnit kalibrera vikterna.
     """
     giltiga = [tk for tk in consensus if "error" not in analyses.get(tk, {})]
     kluster = compute_correlation_clusters(analyses, giltiga)
     netto = compute_netflow_30d(history_log or [], giltiga)
+    sector_medians = compute_sector_pe_medians(analyses, giltiga)
+    rs = compute_relative_strength(analyses, giltiga)
+    forslagen_vikt = compute_suggested_weights(analyses, giltiga)
 
     ranking = []
     for ticker, cons in consensus.items():
@@ -842,15 +1098,24 @@ def build_ranking(analyses, consensus, history_log=None):
         if "error" in a:
             continue
         kf = kluster.get(ticker, {}).get("klusterfaktor", 1.0)
-        total, delpoang = compute_score(a, cons, cluster_factor=kf,
-                                        nettoflode_pe=netto.get(ticker))
+        nf = netto.get(ticker)
+        rs_bonus = rs.get(ticker, {}).get("bonus", 0)
+
+        total, delpoang = compute_score_v2(a, cons, cluster_factor=kf, nettoflode_pe=nf,
+                                           rs_bonus=rs_bonus, sector_medians=sector_medians)
+        total_v1, delpoang_v1 = compute_score(a, cons, cluster_factor=kf, nettoflode_pe=nf)
+
         ranking.append({
             "ticker": ticker,
             "poäng": total,
+            "poäng_v1": total_v1,
             "trend_ok": bool(a.get("stigande_trend")),
             "delpoäng": delpoang,
+            "delpoäng_v1": delpoang_v1,
             "kluster": kluster.get(ticker),
-            "nettoflode_30d_pe": netto.get(ticker),
+            "nettoflode_30d_pe": nf,
+            "relativ_styrka": rs.get(ticker),
+            "foreslagen_vikt_%": forslagen_vikt.get(ticker),
         })
     ranking.sort(key=lambda r: (not r["trend_ok"], -r["poäng"]))
     return ranking
@@ -1118,16 +1383,20 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
         green = PatternFill("solid", start_color="C6EFCE")
         red = PatternFill("solid", start_color="FFC7CE")
         ws = wb.create_sheet("Rangordning", 0)
-        ws.append(["Rang", "Instrument", "Poäng (0–100)", "Stigande trend",
-                   "Trend (30)", "Momentum (25)", "Analytiker (25)", "Konsensus (20)",
+        ws.append(["Rang", "Instrument", "Poäng (0–100)", "Poäng (v1)", "Stigande trend",
+                   "Trend (25)", "Momentum (20)", "Analytiker (20)", "Konsensus (25)",
+                   "Värdering (10)", "Relativ styrka (pe)", "Föreslagen vikt (%)",
                    "Claudes rekommendation"])
         style_header(ws)
         for i, r in enumerate(ranking, start=1):
             d = r["delpoäng"]
-            ws.append([i, r["ticker"], r["poäng"], "JA" if r["trend_ok"] else "NEJ",
+            rs = r.get("relativ_styrka") or {}
+            ws.append([i, r["ticker"], r["poäng"], r.get("poäng_v1"),
+                       "JA" if r["trend_ok"] else "NEJ",
                        d.get("Trend"), d.get("Momentum"), d.get("Analytiker"), d.get("Konsensus"),
+                       d.get("Värdering"), rs.get("rs_pe"), r.get("foreslagen_vikt_%"),
                        claude_texts.get(r["ticker"], {}).get("rekommendation", "")])
-            ws.cell(row=ws.max_row, column=4).fill = green if r["trend_ok"] else red
+            ws.cell(row=ws.max_row, column=5).fill = green if r["trend_ok"] else red
 
     # Flik per profil
     for name, positions in portfolios.items():
@@ -1179,13 +1448,26 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
     ws.append(["Instrument", "Ny", "Stigande trend", "Antal portföljer", "Snittvikt (%)", "Pris", "RSI14",
                "Över MA200", "Rekommendation", "Riktkurs", "Uppsida (%)", "Antal analytiker",
                "Ägd längst (dagar)", "Investerarnas snittvinst (%)",
-               "Viktad konsensus", "Senaste köp (dagar)", "EPS-rev 90d (%)", "Nettoflöde 30d (pe)"])
+               "Viktad konsensus", "Senaste köp (dagar)", "EPS-rev 90d (%)", "Nettoflöde 30d (pe)",
+               "P/E (forward)", "PEG", "Riktkurs spridning", "Nästa rapport"])
     style_header(ws)
+    varning_fill = PatternFill("solid", start_color="FFEB9C")
+    idag = date.today()
     consensus_order = sorted(consensus.items(), key=lambda x: (-x[1]["count"], -x[1]["avg_weight"]))
     for ticker, info in consensus_order:
         a = analyses.get(ticker, {})
         h = holding_info.get(ticker, {})
         trend = a.get("stigande_trend")
+        spridning = a.get("riktkurs_spridningskvot")
+        hog, lag = a.get("riktkurs_hog"), a.get("riktkurs_lag")
+        spridning_txt = f"{lag:g}–{hog:g}" if (hog and lag) else None
+        rapport = a.get("nasta_rapport")
+        rapport_snart = False
+        if rapport:
+            try:
+                rapport_snart = (date.fromisoformat(rapport) - idag).days <= 7
+            except ValueError:
+                pass
         ws.append([
             ticker, "NY" if is_new(ticker, "IN I KONSENSUS") else "",
             "JA" if trend else ("NEJ" if trend is not None else "?"),
@@ -1196,9 +1478,13 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
             info.get("viktad_konsensus"), info.get("senaste_köp_dagar"),
             a.get("eps_rev_90d_pct"),
             rank_by_ticker.get(ticker, {}).get("nettoflode_30d_pe"),
+            a.get("forward_pe"), a.get("peg_ratio"), spridning_txt,
+            f"⚠ {rapport}" if rapport_snart else rapport,
         ])
         if trend is not None:
             ws.cell(row=ws.max_row, column=3).fill = green if trend else red
+        if rapport_snart:
+            ws.cell(row=ws.max_row, column=ws.max_column).fill = varning_fill
 
     # Nära konsensus — en portfölj från att kvala in
     if near_consensus:

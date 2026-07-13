@@ -366,23 +366,44 @@ with tab_rang:
     if not ranking:
         st.info("Ingen rangordning i senaste körningen — kör en ny analys.")
     else:
+        # Rapport-badges: aktier med bolagsrapport inom 7 dagar
+        from datetime import date as _d_rang
+        rapport_snart = []
+        for tk in [r["ticker"] for r in ranking]:
+            rap = analyses.get(tk, {}).get("nasta_rapport")
+            if rap:
+                try:
+                    dagar_kvar = (pd.Timestamp(rap).date() - _d_rang.today()).days
+                    if 0 <= dagar_kvar <= 7:
+                        rapport_snart.append((tk, dagar_kvar))
+                except Exception:
+                    pass
+        if rapport_snart:
+            badges = " · ".join(f"**{tk}** om {d} dgr" for tk, d in sorted(rapport_snart, key=lambda x: x[1]))
+            st.caption(f":material/event_upcoming: **Rapport inom en vecka:** {badges}")
+
         rows = []
         for i, r in enumerate(ranking, start=1):
             d = r["delpoäng"]
             c = claude.get(r["ticker"], {})
             kluster = r.get("kluster") or {}
+            rs = r.get("relativ_styrka") or {}
             rows.append({
                 "Rang": i,
                 "Bransch": bransch_ikon(r["ticker"], bransch),
                 "Aktie": r["ticker"],
                 "Poäng": r["poäng"],
+                "Poäng (v1)": r.get("poäng_v1"),
                 "Stigande trend": "▲ Ja" if r["trend_ok"] else "▼ Nej",
-                "Trend (30)": d.get("Trend"),
-                "Momentum (25)": d.get("Momentum"),
-                "Analytiker (25)": d.get("Analytiker"),
-                "Konsensus (20)": d.get("Konsensus"),
+                "Trend (25)": d.get("Trend"),
+                "Momentum (20)": d.get("Momentum"),
+                "Analytiker (20)": d.get("Analytiker"),
+                "Konsensus (25)": d.get("Konsensus"),
+                "Värdering (10)": d.get("Värdering"),
                 "Viktad kons.": consensus.get(r["ticker"], {}).get("viktad_konsensus"),
                 "Nettoflöde 30d (pe)": r.get("nettoflode_30d_pe"),
+                "Rel. styrka (pe)": rs.get("rs_pe"),
+                "Föreslagen vikt (%)": r.get("foreslagen_vikt_%"),
                 "Kluster": (f"#{kluster['kluster_id']} ({kluster['klusterstorlek']} st)"
                            if kluster.get("klusterstorlek", 1) > 1 else "ensam"),
                 "Claude": c.get("rekommendation", "—"),
@@ -398,12 +419,15 @@ with tab_rang:
             },
         )
         st.caption(
-            "**Poängmodellen:** Trend 30 p (över MA200, MA200 stigande, golden cross) · "
-            "Momentum 25 p (RSI i styrkezon, MACD över signal, 3-månadersavkastning) · "
-            "Analytiker 25 p (uppsida, antal analytiker, köprekommendation, EPS-revidering) · "
-            "Konsensus 20 p (viktad konsensus, snittvikt, nettoflöde 30d) — delat med "
+            "**Poängmodellen (§12, omviktad):** Trend 25 p · Momentum 20 p (inkl. relativ "
+            "styrka mot sektor-ETF) · Analytiker 20 p (uppsida — halverad vid hög "
+            "riktkursspridning — antal analytiker, köprekommendation, EPS-revidering) · "
+            "Konsensus 25 p (viktad konsensus, snittvikt, nettoflöde 30d) — delat med "
             "√klusterstorlek om aktien samvarierar starkt (korr > 0,7) med andra "
-            "konsensusaktier. Aktier utan stigande trend rankas alltid sist, oavsett poäng."
+            "konsensusaktier · Värdering 10 p (forward P/E mot sektormedian, PEG). "
+            "**Poäng (v1)** är förra modellen (utan Värdering/RS/spridning) — kvar för "
+            "jämförelse tills --utvardera hunnit kalibrera de nya vikterna. "
+            "Aktier utan stigande trend rankas alltid sist, oavsett poäng."
         )
 
     # --- Senaste händelser: kondenserad översikt på förstasidan ---
