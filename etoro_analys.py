@@ -194,6 +194,12 @@ def farskhetsvikt(dagar_sedan_senaste_kop):
 
     Aktivt nyköp (≤30 dgr) väger mer än en gammal vinnare som ligger kvar.
     Saknas datum → neutral 1.0 (degraderar snyggt).
+
+    Caveat: "senaste köp" approximeras med yngsta öppna positionens
+    openTimestamp. Partiella stängningar lurar detta — stänger tradern sina
+    äldsta lotter och behåller ett gammalt köp ser innehavet ändå ut som det
+    yngsta kvarvarande, vilket kan visa högre färskhet än den verkliga
+    övertygelsen motiverar.
     """
     if dagar_sedan_senaste_kop is None:
         return 1.0
@@ -487,6 +493,12 @@ def eps_revision_pct(t):
 
     Riktningen på analytikernas vinstestimat — stigande estimat stärker en
     köpsignal, fallande är en klassisk fälla trots hög uppsida. None vid miss.
+
+    Robusthet (prioritetsordning, kvoten exploderar/missvisar annars):
+    1. Teckenbyte negativt→positivt: +50 (garanterat över tröskeln, ingen kvot)
+    2. Teckenbyte positivt→negativt: -50
+    3. abs(90daysAgo) < 0.05: basen för liten för en meningsfull kvot → 0
+    4. Annars: kvoten clampad till [-50, 50] innan poängsättning
     """
     try:
         et = t.eps_trend
@@ -494,11 +506,16 @@ def eps_revision_pct(t):
             return None
         rad = et.loc["0y"]
         cur, old = float(rad["current"]), float(rad["90daysAgo"])
-        if abs(old) < 1e-9:
-            return None
-        return round((cur - old) / abs(old) * 100, 1)
     except Exception:
         return None
+    if old < 0 <= cur:
+        return 50.0
+    if old > 0 >= cur:
+        return -50.0
+    if abs(old) < 0.05:
+        return 0.0
+    pct = (cur - old) / abs(old) * 100
+    return round(max(-50.0, min(50.0, pct)), 1)
 
 
 def analyze_ticker(ticker):
@@ -1438,7 +1455,14 @@ def run_utvardering():
     HORISONTER = [("21d", 21), ("63d", 63), ("126d", 126)]
     PRIMÄR = "63d"
     tickers = sorted({r["ticker"] for r in facit})
-    print(f"Utvärderar {len(facit)} facitrader, {len(tickers)} unika aktier...")
+    BLIND_FLACK = (
+        "Utvärdering av intern rangordning (mäter ej täckning) — facit "
+        "innehåller bara aktier screenern redan lyfte fram. En bra "
+        "kvartilkorrelation visar att modellen rangordnar KANDIDATERNA väl, "
+        "inte att den hittar de bästa aktierna på hela marknaden."
+    )
+    print(BLIND_FLACK)
+    print(f"\nUtvärderar {len(facit)} facitrader, {len(tickers)} unika aktier...")
 
     close_cache = {}
     for tk in tickers:
@@ -1529,8 +1553,10 @@ def run_utvardering():
     wb = Workbook()
     ws = wb.active
     ws.title = "Utvärdering"
-    ws.append([f"Utvärdering av poängmodellen — {n} datapunkter ({PRIMÄR} forward)"])
+    ws.append([f"Utvärdering av intern rangordning (mäter ej täckning) — "
+               f"{n} datapunkter ({PRIMÄR} forward)"])
     ws["A1"].font = Font(bold=True, size=13)
+    ws.append([BLIND_FLACK])
     if n < 10:
         ws.append([f"VARNING: för tidigt för slutsatser (n={n})"])
     for rubrik, poster in rapport:
