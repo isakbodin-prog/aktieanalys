@@ -391,7 +391,7 @@ with tab_rang:
         KOMP_MAX = {"Trend": 25, "Momentum": 20, "Analytiker": 20,
                     "Konsensus": 25, "Värdering": 10}
 
-        # Slimmad översikt — bara det viktigaste. Detaljer i expandrarna nedan.
+        # Slimmad översikt — klicka en rad för detaljerna (renderas under tabellen).
         rows = []
         for i, r in enumerate(ranking, start=1):
             rows.append({
@@ -403,9 +403,10 @@ with tab_rang:
                 "Föreslagen vikt (%)": r.get("foreslagen_vikt_%"),
                 "Claude": claude.get(r["ticker"], {}).get("rekommendation", "—"),
             })
-        st.dataframe(
+        val = st.dataframe(
             stylad(pd.DataFrame(rows), ["Stigande trend", "Claude"]),
             use_container_width=True, hide_index=True,
+            on_select="rerun", selection_mode="single-row", key="rang_val",
             column_config={
                 "Bransch": st.column_config.ImageColumn("", width=36),
                 "Poäng": st.column_config.ProgressColumn(
@@ -413,38 +414,41 @@ with tab_rang:
                 ),
             },
         )
-        st.caption("Fäll ut en aktie nedan för poänguppdelning och nyckeltal.")
 
-        # Detaljer per aktie — poänguppdelning + sekundära nyckeltal, utfällbart.
-        for i, r in enumerate(ranking, start=1):
+        # Detaljkort för den markerade raden — poänguppdelning + nyckeltal.
+        markerade = val.selection.rows
+        if not markerade:
+            st.caption("Klicka på en rad ovan för poänguppdelning och nyckeltal.")
+        else:
+            r = ranking[markerade[0]]
             tk = r["ticker"]
             d = r["delpoäng"]
             rs = r.get("relativ_styrka") or {}
             kluster = r.get("kluster") or {}
             crek = claude.get(tk, {}).get("rekommendation", "—")
             trend = "▲ Ja" if r["trend_ok"] else "▼ Nej"
-            with st.expander(f"**{i}. {tk}** — {r['poäng']:.1f} p · trend {trend} · Claude {crek}"):
-                m1, m2, m3, m4 = st.columns(4)
-                m1.metric("Föreslagen vikt", _num(r.get("foreslagen_vikt_%"), " %"))
-                m2.metric("Viktad kons.", _num(consensus.get(tk, {}).get("viktad_konsensus")))
-                m3.metric("Nettoflöde 30d", _num(r.get("nettoflode_30d_pe"), " pe"))
-                m4.metric("Rel. styrka", _num(rs.get("rs_pe"), " pe"))
+            st.markdown(f"#### {tk} — {r['poäng']:.1f} p · trend {trend} · Claude {crek}")
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Föreslagen vikt", _num(r.get("foreslagen_vikt_%"), " %"))
+            m2.metric("Viktad kons.", _num(consensus.get(tk, {}).get("viktad_konsensus")))
+            m3.metric("Nettoflöde 30d", _num(r.get("nettoflode_30d_pe"), " pe"))
+            m4.metric("Rel. styrka", _num(rs.get("rs_pe"), " pe"))
 
-                st.markdown("**Poänguppdelning**")
-                for namn, mx in KOMP_MAX.items():
-                    v = d.get(namn)
-                    if v is None:
-                        continue
-                    andel = min(max(v / mx, 0.0), 1.0)
-                    st.progress(andel, text=f"{namn} — {v:.1f} / {mx} p")
+            st.markdown("**Poänguppdelning**")
+            for namn, mx in KOMP_MAX.items():
+                v = d.get(namn)
+                if v is None:
+                    continue
+                andel = min(max(v / mx, 0.0), 1.0)
+                st.progress(andel, text=f"{namn} — {v:.1f} / {mx} p")
 
-                extra = [f"Poäng v1: {_num(r.get('poäng_v1'))}"]
-                if kluster.get("klusterstorlek", 1) > 1:
-                    extra.append(f"Kluster #{kluster['kluster_id']} "
-                                 f"({kluster['klusterstorlek']} samvarierande aktier)")
-                else:
-                    extra.append("Kluster: ensam")
-                st.caption(" · ".join(extra))
+            extra = [f"Poäng v1: {_num(r.get('poäng_v1'))}"]
+            if kluster.get("klusterstorlek", 1) > 1:
+                extra.append(f"Kluster #{kluster['kluster_id']} "
+                             f"({kluster['klusterstorlek']} samvarierande aktier)")
+            else:
+                extra.append("Kluster: ensam")
+            st.caption(" · ".join(extra))
 
         with st.expander("Så räknas poängen"):
             st.caption(
@@ -542,7 +546,7 @@ with tab_konsensus:
     def _total_vikt(info):
         return info.get("total_weight") or round(info["avg_weight"] * info["count"], 2)
 
-    # Slimmad översikt — bara det viktigaste. Detaljer i expandrarna nedan.
+    # Slimmad översikt — klicka en rad för detaljerna (renderas under tabellen).
     rows = []
     for tk in consensus_order:
         a = analyses.get(tk, {})
@@ -555,47 +559,51 @@ with tab_konsensus:
             "Analytiker": a.get("rekommendation"),
             "Claude": claude.get(tk, {}).get("rekommendation", "—"),
         })
-    st.dataframe(stylad(pd.DataFrame(rows), ["Aktie", "Stigande trend", "Claude"]),
-                 use_container_width=True, hide_index=True,
-                 column_config={"Bransch": st.column_config.ImageColumn("", width=36)})
-    st.caption("Fäll ut en aktie nedan för konsensussignal, teknik, analytiker och innehavstid.")
+    val = st.dataframe(
+        stylad(pd.DataFrame(rows), ["Aktie", "Stigande trend", "Claude"]),
+        use_container_width=True, hide_index=True,
+        on_select="rerun", selection_mode="single-row", key="kons_val",
+        column_config={"Bransch": st.column_config.ImageColumn("", width=36)})
 
-    # Detaljer per aktie — utfällbart.
-    for tk in consensus_order:
+    # Detaljkort för den markerade raden — konsensussignal, teknik, innehavstid.
+    markerade = val.selection.rows
+    if not markerade:
+        st.caption("Klicka på en rad ovan för konsensussignal, teknik, analytiker och innehavstid.")
+    else:
+        tk = consensus_order[markerade[0]]
         info = consensus[tk]
         a = analyses.get(tk, {})
         c = claude.get(tk, {})
         h = innehav.get(tk, {})
         crek = c.get("rekommendation", "—")
-        ny = " · ny" if tk in nya_kons else ""
-        with st.expander(f"**{tk}**{ny} — {info['count']} portföljer · "
-                         f"trend {trend_label(a)} · Claude {crek}"):
-            k1, k2, k3, k4 = st.columns(4)
-            k1.metric("Total vikt", _num(_total_vikt(info), " %"))
-            k2.metric("Viktad kons.", _num(info.get("viktad_konsensus")))
-            k3.metric("Senaste köp", _num(info.get("senaste_köp_dagar"), " dgr", 0))
-            k4.metric("Snittvikt", _num(info.get("avg_weight"), " %"))
+        st.markdown(f"#### {tk} — {info['count']} portföljer · "
+                    f"trend {trend_label(a)} · Claude {crek}")
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Total vikt", _num(_total_vikt(info), " %"))
+        k2.metric("Viktad kons.", _num(info.get("viktad_konsensus")))
+        k3.metric("Senaste köp", _num(info.get("senaste_köp_dagar"), " dgr", 0))
+        k4.metric("Snittvikt", _num(info.get("avg_weight"), " %"))
 
-            if "error" in a:
-                st.caption(f"Marknadsdata saknas: {a['error']}")
-            else:
-                m1, m2, m3, m4 = st.columns(4)
-                m1.metric("Pris", _num(a.get("pris")))
-                m2.metric("RSI14", _num(a.get("RSI14")))
-                m3.metric("Riktkurs", _num(a.get("riktkurs")))
-                m4.metric("Uppsida", _num(a.get("uppsida_%"), " %"))
+        if "error" in a:
+            st.caption(f"Marknadsdata saknas: {a['error']}")
+        else:
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Pris", _num(a.get("pris")))
+            m2.metric("RSI14", _num(a.get("RSI14")))
+            m3.metric("Riktkurs", _num(a.get("riktkurs")))
+            m4.metric("Uppsida", _num(a.get("uppsida_%"), " %"))
 
-            holders = info.get("holders", [])
-            if holders:
-                st.caption("Ägs av: " + ", ".join(holders))
-            if h:
-                st.caption(
-                    f"Ägd längst: **{format_innehavstid(h.get('längst_dagar'))}** "
-                    f"(av {h.get('längst_profil', '?')}) · snitt "
-                    f"**{format_innehavstid(h.get('snitt_dagar'))}** · upparbetad "
-                    f"snittvinst **{_num(h.get('snitt_vinst_pct'), ' %')}** — lång tid + "
-                    f"hög vinst = risk för vinsthemtagning."
-                )
+        holders = info.get("holders", [])
+        if holders:
+            st.caption("Ägs av: " + ", ".join(holders))
+        if h:
+            st.caption(
+                f"Ägd längst: **{format_innehavstid(h.get('längst_dagar'))}** "
+                f"(av {h.get('längst_profil', '?')}) · snitt "
+                f"**{format_innehavstid(h.get('snitt_dagar'))}** · upparbetad "
+                f"snittvinst **{_num(h.get('snitt_vinst_pct'), ' %')}** — lång tid + "
+                f"hög vinst = risk för vinsthemtagning."
+            )
 
     with st.expander("Så läser du tabellen"):
         st.caption(
