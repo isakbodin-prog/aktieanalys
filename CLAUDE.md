@@ -67,7 +67,16 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
   faktisk forward-avkastning (21/63/126 dgr) ur screener_facit.json
   (loggas automatiskt vid varje analyskörning, gist-synkad). Rapport per
   poängkvartil, komponentkorrelation och divergensutfall till terminal +
-  utvardering.xlsx. Kör INTE analysen. Varnar vid n<10.
+  utvardering.xlsx. Kör INTE analysen. Varnar vid n<10. Kör även §3b:
+  (A) EPISODMÄTNING — rekonstruerar Bästa köp-perioder ur historikens
+  IN/UT UR KONSENSUS, mäter överavkastning mot SPY (+ sektor-ETF) med
+  justerade priser; stängda vs öppna episoder separat (överlevnadsfel),
+  split på Claudes rek vid inträde. (B) FYRA PAPPERSPORTFÖLJER —
+  P1 likaviktad / P2 poängviktad / P3 SPY b&h / P4 poäng+Claude-filter;
+  kedjad avkastning, omsättning, drawdown, parvisa differenser (urvalets/
+  poängmodellens/Claudes värde). Flikar Episoder + Pappersportföljer i
+  utvardering.xlsx. Pappersvikter loggas per körning till pappersportfolj-
+  .json (gist-synkad); facit har fältet claude_rek sedan 2026-07-14.
 - `--force-claude` — kringgår Claude-dagsspärren (kombinerbar med ovan).
 - Webbappen kör alltid standardläget; bakgrunden uppdateras bara via CLI.
 

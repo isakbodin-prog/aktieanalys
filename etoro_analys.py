@@ -1264,8 +1264,13 @@ WEIGHT_CHANGE_THRESHOLD = 1.0  # procentenheter — mindre viktändringar loggas
 GIST_ID = os.environ.get("GIST_ID")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 FACIT_FILE = "screener_facit.json"
+PAPPER_FILE = "pappersportfolj.json"
+# "Bästa köp" = konsensusaktier med poäng ≥ denna tröskel. 0 = alla
+# konsensusaktier (nuvarande UI-beteende). Konstant för reproducerbara
+# episoder (§3b Del A) — höj bara medvetet.
+BASTA_KOP_MIN_POANG = 0
 GIST_FILES = ("portfolj_historik.json", "senaste_analys.json",
-              "bakgrund_topp50.json", "bakgrund_cache.json", FACIT_FILE)
+              "bakgrund_topp50.json", "bakgrund_cache.json", FACIT_FILE, PAPPER_FILE)
 
 
 def _gist_headers():
@@ -1880,19 +1885,24 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
                 near_consensus, holding_info, divergence, divergence_near, bubblar_niva)
 
     # Logga facit för --utvardera (poäng vs framtida avkastning)
-    logga_facit(today, ranking, divergence, analyses, consensus)
+    logga_facit(today, ranking, divergence, analyses, consensus, claude_texts)
+
+    # Logga dagens pappersportfölj-vikter (§3b Del B — ombalansering)
+    logga_pappersportfolj(today, ranking, claude_texts)
 
     # Spara beständig historik till gisten
     gist_push()
     return result
 
 
-def logga_facit(datum, ranking, divergence, analyses, consensus):
+def logga_facit(datum, ranking, divergence, analyses, consensus, claude_texts=None):
     """Appenda dagens poäng/divergens per konsensusaktie till FACIT_FILE.
 
     En rad per aktie och dag (idempotent — samma dag skrivs över), för senare
-    utvärdering mot faktisk forward-avkastning via --utvardera.
+    utvärdering mot faktisk forward-avkastning via --utvardera. claude_rek
+    lagras så episodmätningen (§3b) kan splitta på Claudes rek vid inträde.
     """
+    claude_texts = claude_texts or {}
     facit = []
     if os.path.exists(FACIT_FILE):
         try:
@@ -1913,11 +1923,288 @@ def logga_facit(datum, ranking, divergence, analyses, consensus):
             "pris": a.get("pris"),
             "viktad_konsensus": consensus.get(tk, {}).get("viktad_konsensus"),
             "divergens_pp": dv.get("divergens_pp"),
+            "claude_rek": (claude_texts.get(tk) or {}).get("rekommendation"),
         })
     with open(FACIT_FILE, "w") as f:
         json.dump(facit, f, ensure_ascii=False, indent=2)
     print(f"  Facit uppdaterat: {sum(1 for r in facit if r['datum'] == datum)} rader för {datum} "
           f"(totalt {len(facit)}).")
+
+
+# ----------------------------------------------------------------------
+# §3b Del B: Fyra pappersportföljer — målvikter loggas per körning
+# ----------------------------------------------------------------------
+CLAUDE_VIKTFAKTOR = {"KÖP": 1.0, "AVVAKTA": 0.5, "SÄLJ": 0.0}
+
+
+def _normalisera(raw):
+    """{tk: råvikt} → {tk: andel} normaliserat till 1.0. Tomt/allt-noll → {}."""
+    s = sum(v for v in raw.values() if v > 0)
+    if s <= 0:
+        return {}
+    return {tk: round(v / s, 4) for tk, v in raw.items() if v > 0}
+
+
+def pappersportfolj_vikter(ranking, claude_texts=None):
+    """Målvikter för de tre aktiva pappersportföljerna (P3 = SPY, inga vikter).
+
+    Universum = Bästa köp = konsensusaktier med poäng ≥ BASTA_KOP_MIN_POANG.
+    Vikter är andelar (summa ≤ 1); resten hålls som 0 %-avkastande kassa.
+
+    - likaviktad (P1): 1/N över universumet — mäter urvalets värde.
+    - poangviktad (P2): ∝ max(poäng − 50, 0), normaliserat — mäter poängmodellen.
+    - claude (P4): P2:s vikter × Claude-faktor (KÖP 1,0 · AVVAKTA 0,5 · SÄLJ 0);
+      den frigjorda vikten går till KASSA (KÖP-aktiernas vikter är oförändrade
+      mot P2, så P2 och P4 skiljer sig ENDAST för AVVAKTA/SÄLJ-aktier).
+      Saknas rek → behandlas som KÖP (neutral, ingen nedvikt).
+    """
+    claude_texts = claude_texts or {}
+    universum = [r["ticker"] for r in ranking
+                 if r.get("poäng", 0) >= BASTA_KOP_MIN_POANG]
+    if not universum:
+        return {"likaviktad": {}, "poangviktad": {}, "claude": {}}
+
+    likaviktad = {tk: round(1 / len(universum), 4) for tk in universum}
+
+    poäng = {r["ticker"]: r.get("poäng", 0) for r in ranking}
+    poangviktad = _normalisera({tk: max(poäng.get(tk, 0) - 50, 0) for tk in universum})
+
+    # P4: applicera Claude-faktorn på P2:s NORMALISERADE vikter, fritt → kassa
+    claude = {}
+    for tk, v in poangviktad.items():
+        rek = (claude_texts.get(tk) or {}).get("rekommendation")
+        faktor = CLAUDE_VIKTFAKTOR.get(rek, 1.0)   # okänd rek → neutral (KÖP)
+        ny = round(v * faktor, 4)
+        if ny > 0:
+            claude[tk] = ny
+    return {"likaviktad": likaviktad, "poangviktad": poangviktad, "claude": claude}
+
+
+def logga_pappersportfolj(datum, ranking, claude_texts=None):
+    """Appenda dagens målvikter till PAPPER_FILE (idempotent — nyckel: datum)."""
+    hist = []
+    if os.path.exists(PAPPER_FILE):
+        try:
+            with open(PAPPER_FILE) as f:
+                hist = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            hist = []
+    hist = [d for d in hist if d.get("datum") != datum]   # ersätt dagens post
+    vikter = pappersportfolj_vikter(ranking, claude_texts)
+    hist.append({"datum": datum, "portfoljer": vikter})
+    hist.sort(key=lambda d: d["datum"])
+    with open(PAPPER_FILE, "w") as f:
+        json.dump(hist, f, ensure_ascii=False, indent=2)
+    print(f"  Pappersportföljer: målvikter loggade för {datum} "
+          f"({len(vikter['likaviktad'])} aktier, {len(hist)} ombalanseringar totalt).")
+
+
+# ----------------------------------------------------------------------
+# §3b: Avkastningsmätning — delade prishjälpare (justerade priser)
+# ----------------------------------------------------------------------
+def _adj_close(tk, yf, cache):
+    """Justerad stängningskurs (auto_adjust=True) som pd.Series, cachad. None vid miss."""
+    if tk not in cache:
+        try:
+            h = yf.Ticker(tk).history(period="2y", auto_adjust=True)
+            cache[tk] = h["Close"] if not h.empty else None
+        except Exception:
+            cache[tk] = None
+    return cache[tk]
+
+
+def _price_asof(close, datum):
+    """Pris närmaste handelsdag PÅ eller FÖRE datum (ISO-str). None om serien saknas.
+
+    Datum före seriens start → första tillgängliga pris (best effort).
+    """
+    import pandas as pd
+    if close is None or len(close) == 0:
+        return None
+    d = pd.Timestamp(datum)
+    if close.index.tz is not None:
+        d = d.tz_localize(close.index.tz)
+    pos = int(close.index.searchsorted(d, side="right")) - 1
+    pos = max(0, min(pos, len(close) - 1))
+    return float(close.iloc[pos])
+
+
+# ----------------------------------------------------------------------
+# §3b Del A: Episodmätning
+# ----------------------------------------------------------------------
+def rekonstruera_episoder(history_log):
+    """Bygg episoder ur IN/UT UR KONSENSUS-posterna (= Bästa köp-perioder).
+
+    Returnerar (episoder, obalanserade_ut). Varje episod: {ticker, in_datum,
+    ut_datum|None}. Öppen episod (ingen UT) mäts till idag av mät_episoder.
+    UT utan föregående IN (aktier som var konsensus redan i första snapshoten)
+    kan inte tidsbestämmas → räknas bara, ingen episod.
+    """
+    ev = {}
+    for e in history_log or []:
+        if e["typ"] == "IN I KONSENSUS":
+            ev.setdefault(e["ticker"], []).append((e["datum"], "IN"))
+        elif e["typ"] == "UT UR KONSENSUS":
+            ev.setdefault(e["ticker"], []).append((e["datum"], "UT"))
+
+    episoder, obalanserade_ut = [], 0
+    for tk, lst in ev.items():
+        lst.sort()   # (datum, typ) — IN sorteras före UT samma dag
+        öppen = None
+        for datum, typ in lst:
+            if typ == "IN":
+                if öppen is None:
+                    öppen = datum
+            else:
+                if öppen is not None:
+                    episoder.append({"ticker": tk, "in_datum": öppen, "ut_datum": datum})
+                    öppen = None
+                else:
+                    obalanserade_ut += 1
+        if öppen is not None:
+            episoder.append({"ticker": tk, "in_datum": öppen, "ut_datum": None})
+    return episoder, obalanserade_ut
+
+
+def mät_episoder(episoder, facit, yf, sektor_map):
+    """Mät varje episods överavkastning mot SPY (+ sektor-ETF om känd).
+
+    Returnerar (rader, obs). Varje rad: ticker, in/ut-datum, dagar, avkastning,
+    spy, överavkastning, sektor_etf_överavk, poäng+claude_rek vid inträde,
+    öppen (bool). Episoder utan prisdata exkluderas (räknas i obs['exkluderade']).
+    """
+    from datetime import date
+    cache = {}
+    idag = date.today().isoformat()
+
+    # facit-uppslag: närmaste rad PÅ eller EFTER inträdesdatumet per ticker
+    facit_by_tk = {}
+    for r in facit:
+        facit_by_tk.setdefault(r["ticker"], []).append(r)
+    for lst in facit_by_tk.values():
+        lst.sort(key=lambda r: r["datum"])
+
+    def facit_at(tk, datum):
+        for r in facit_by_tk.get(tk, []):
+            if r["datum"] >= datum:
+                return r
+        return None
+
+    rader, exkluderade = [], 0
+    for ep in episoder:
+        tk = ep["ticker"]
+        in_d = ep["in_datum"]
+        öppen = ep["ut_datum"] is None
+        ut_d = ep["ut_datum"] or idag
+
+        close = _adj_close(tk, yf, cache)
+        p_in, p_ut = _price_asof(close, in_d), _price_asof(close, ut_d)
+        if not p_in or not p_ut:
+            exkluderade += 1
+            continue
+        avk = (p_ut / p_in - 1) * 100
+
+        spy = _adj_close("SPY", yf, cache)
+        s_in, s_ut = _price_asof(spy, in_d), _price_asof(spy, ut_d)
+        spy_avk = (s_ut / s_in - 1) * 100 if (s_in and s_ut) else None
+        överavk = round(avk - spy_avk, 1) if spy_avk is not None else None
+
+        sekt = sektor_map.get(tk) or {}
+        etf = _etf_for(sekt.get("sector"), sekt.get("industry")) if sekt else None
+        sekt_överavk = None
+        if etf and etf != "SPY":
+            ec = _adj_close(etf, yf, cache)
+            e_in, e_ut = _price_asof(ec, in_d), _price_asof(ec, ut_d)
+            if e_in and e_ut:
+                sekt_överavk = round(avk - (e_ut / e_in - 1) * 100, 1)
+
+        fr = facit_at(tk, in_d) or {}
+        rader.append({
+            "ticker": tk, "in_datum": in_d, "ut_datum": ep["ut_datum"], "öppen": öppen,
+            "dagar": (date.fromisoformat(ut_d) - date.fromisoformat(in_d)).days,
+            "avkastning": round(avk, 1),
+            "spy": round(spy_avk, 1) if spy_avk is not None else None,
+            "överavkastning": överavk,
+            "sektor_etf_överavk": sekt_överavk, "sektor_etf": etf,
+            "poäng_in": fr.get("poäng"), "claude_rek_in": fr.get("claude_rek"),
+        })
+    return rader, {"exkluderade": exkluderade}
+
+
+# ----------------------------------------------------------------------
+# §3b Del B: Pappersportföljernas avkastning (kedjade perioder)
+# ----------------------------------------------------------------------
+def utvardera_pappersportfoljer(yf):
+    """Kedja ihop pappersportföljernas avkastning mellan ombalanseringarna.
+
+    Returnerar dict med per-portfölj-nyckeltal (totalavkastning, snittomsättning,
+    max drawdown), SPY-benchmark, parvisa differenser och n — eller None om
+    färre än 2 ombalanseringar finns.
+    """
+    if not os.path.exists(PAPPER_FILE):
+        return None
+    try:
+        with open(PAPPER_FILE) as f:
+            hist = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+    hist = sorted(hist, key=lambda d: d["datum"])
+    if len(hist) < 2:
+        return None
+
+    from datetime import date
+    cache = {}
+    datum = [d["datum"] for d in hist]
+    perioder = list(zip(datum, datum[1:] + [date.today().isoformat()]))   # sista → idag
+    portnamn = ["likaviktad", "poangviktad", "claude"]
+
+    def periodavk(vikter, d0, d1):
+        r = 0.0
+        for tk, w in vikter.items():
+            c = _adj_close(tk, yf, cache)
+            p0, p1 = _price_asof(c, d0), _price_asof(c, d1)
+            if p0 and p1:
+                r += w * (p1 / p0 - 1)   # kassa (1−Σw) bidrar 0
+        return r
+
+    def maxdrawdown(kurva):
+        topp, mdd = kurva[0], 0.0
+        for v in kurva:
+            topp = max(topp, v)
+            mdd = min(mdd, v / topp - 1)
+        return round(mdd * 100, 1)
+
+    resultat = {}
+    for p in portnamn:
+        kurva = [1.0]
+        for (d0, d1) in perioder:
+            kurva.append(kurva[-1] * (1 + periodavk(hist[datum.index(d0)]["portfoljer"][p], d0, d1)))
+        oms = [sum(abs(hist[i]["portfoljer"][p].get(t, 0) - hist[i - 1]["portfoljer"][p].get(t, 0))
+                   for t in set(hist[i]["portfoljer"][p]) | set(hist[i - 1]["portfoljer"][p])) / 2
+               for i in range(1, len(hist))]
+        resultat[p] = {
+            "totalavkastning": round((kurva[-1] - 1) * 100, 1),
+            "snittomsattning": round(sum(oms) / len(oms) * 100, 1) if oms else 0.0,
+            "max_drawdown": maxdrawdown(kurva),
+        }
+
+    # P3: SPY buy-and-hold över hela perioden (datum[0] → idag)
+    spy = _adj_close("SPY", yf, cache)
+    s0, s1 = _price_asof(spy, datum[0]), _price_asof(spy, date.today().isoformat())
+    spy_tot = round((s1 / s0 - 1) * 100, 1) if (s0 and s1) else None
+    resultat["benchmark_spy"] = {"totalavkastning": spy_tot}
+
+    diffar = []
+    p1, p2, p4 = (resultat["likaviktad"]["totalavkastning"],
+                  resultat["poangviktad"]["totalavkastning"],
+                  resultat["claude"]["totalavkastning"])
+    if spy_tot is not None:
+        diffar.append(("Urvalets värde (P1 − SPY)", round(p1 - spy_tot, 1)))
+    diffar.append(("Poängmodellens värde (P2 − P1)", round(p2 - p1, 1)))
+    diffar.append(("Claude-rekommendationens värde (P4 − P2)", round(p4 - p2, 1)))
+
+    return {"resultat": resultat, "diffar": diffar, "n": len(perioder),
+            "start": datum[0], "slut": date.today().isoformat()}
 
 
 def run_utvardering():
@@ -1982,57 +2269,124 @@ def run_utvardering():
     n = len(rader)
     print(f"\nDatapunkter med {PRIMÄR} forward-avkastning: {n}")
     if n == 0:
-        print("Ännu inga färdiga forward-fönster — kom tillbaka när facit mognat.")
-        return
-    if n < 10:
+        print("Ännu inga färdiga forward-fönster — poängkvartilerna hoppas över, "
+              "men episod- och pappersmätningen körs ändå.")
+    elif n < 10:
         print(f"VARNING: för tidigt för slutsatser (n={n}). Behöver ~10+ datapunkter.")
 
-    df = pd.DataFrame([{
-        "poäng": r["poäng"], "divergens_pp": r.get("divergens_pp"),
-        "fwd": r["fwd"][PRIMÄR],
-        **{f"k_{k}": v for k, v in (r.get("komponenter") or {}).items()},
-    } for r in rader])
+    rapport = []   # (rubrik, [(etikett, värde)]) — forward-fönstrets del
+    if n > 0:
+        df = pd.DataFrame([{
+            "poäng": r["poäng"], "divergens_pp": r.get("divergens_pp"),
+            "fwd": r["fwd"][PRIMÄR],
+            **{f"k_{k}": v for k, v in (r.get("komponenter") or {}).items()},
+        } for r in rader])
 
-    rapport = []   # (rubrik, [(etikett, värde)])
+        # 1. Avkastning per poängkvartil
+        kvartil_rader = []
+        try:
+            df["kvartil"] = pd.qcut(df["poäng"], 4, labels=["Q1 (lägst)", "Q2", "Q3", "Q4 (högst)"],
+                                    duplicates="drop")
+            for kv, grp in df.groupby("kvartil", observed=True):
+                kvartil_rader.append((str(kv), f"snitt {grp['fwd'].mean():+.1f} %  (n={len(grp)})"))
+        except (ValueError, IndexError):
+            kvartil_rader.append(("—", "för få unika poäng för kvartiler"))
+        rapport.append((f"Forward-avkastning ({PRIMÄR}) per poängkvartil", kvartil_rader))
 
-    # 1. Avkastning per poängkvartil
-    kvartil_rader = []
-    try:
-        df["kvartil"] = pd.qcut(df["poäng"], 4, labels=["Q1 (lägst)", "Q2", "Q3", "Q4 (högst)"],
-                                duplicates="drop")
-        for kv, grp in df.groupby("kvartil", observed=True):
-            kvartil_rader.append((str(kv), f"snitt {grp['fwd'].mean():+.1f} %  (n={len(grp)})"))
-    except (ValueError, IndexError):
-        kvartil_rader.append(("—", "för få unika poäng för kvartiler"))
-    rapport.append((f"Forward-avkastning ({PRIMÄR}) per poängkvartil", kvartil_rader))
+        # 2. Komponentkorrelation mot forward-avkastning
+        komp_rader = []
+        for kol in [c for c in df.columns if c.startswith("k_")]:
+            if df[kol].nunique() > 1:
+                korr = df[kol].corr(df["fwd"])
+                komp_rader.append((kol[2:], f"korr {korr:+.2f}"))
+        komp_rader.append(("Totalpoäng", f"korr {df['poäng'].corr(df['fwd']):+.2f}"))
+        rapport.append(("Korrelation komponentpoäng ↔ forward-avkastning", komp_rader))
 
-    # 2. Komponentkorrelation mot forward-avkastning
-    komp_rader = []
-    for kol in [c for c in df.columns if c.startswith("k_")]:
-        if df[kol].nunique() > 1:
-            korr = df[kol].corr(df["fwd"])
-            komp_rader.append((kol[2:], f"korr {korr:+.2f}"))
-    komp_rader.append(("Totalpoäng", f"korr {df['poäng'].corr(df['fwd']):+.2f}"))
-    rapport.append(("Korrelation komponentpoäng ↔ forward-avkastning", komp_rader))
+        # 3. Divergensutfall (hög vs låg divergens)
+        div_rader = []
+        dd = df.dropna(subset=["divergens_pp"])
+        if len(dd) >= 4:
+            median = dd["divergens_pp"].median()
+            hög = dd[dd["divergens_pp"] >= median]["fwd"].mean()
+            låg = dd[dd["divergens_pp"] < median]["fwd"].mean()
+            div_rader = [(f"Hög divergens (≥ {median:.0f} pp)", f"snitt {hög:+.1f} %"),
+                         (f"Låg divergens (< {median:.0f} pp)", f"snitt {låg:+.1f} %")]
+        else:
+            div_rader = [("—", "för få divergensdatapunkter")]
+        rapport.append(("Divergensutfall", div_rader))
 
-    # 3. Divergensutfall (hög vs låg divergens)
-    div_rader = []
-    dd = df.dropna(subset=["divergens_pp"])
-    if len(dd) >= 4:
-        median = dd["divergens_pp"].median()
-        hög = dd[dd["divergens_pp"] >= median]["fwd"].mean()
-        låg = dd[dd["divergens_pp"] < median]["fwd"].mean()
-        div_rader = [(f"Hög divergens (≥ {median:.0f} pp)", f"snitt {hög:+.1f} %"),
-                     (f"Låg divergens (< {median:.0f} pp)", f"snitt {låg:+.1f} %")]
+        # Terminalrapport (forward-fönstret)
+        for rubrik, poster in rapport:
+            print(f"\n{rubrik}:")
+            for etikett, värde in poster:
+                print(f"  {etikett:<22} {värde}")
+
+    # ---- §3b Del A: Episodmätning ----
+    from statistics import mean, median
+    sektor_map = {}
+    if os.path.exists(RESULTS_FILE):
+        try:
+            with open(RESULTS_FILE) as f:
+                for tk, a in (json.load(f).get("analyses") or {}).items():
+                    if isinstance(a, dict):
+                        sektor_map[tk] = {"sector": a.get("sector"), "industry": a.get("industry")}
+        except (json.JSONDecodeError, OSError):
+            pass
+    history_log = []
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE) as f:
+                history_log = json.load(f).get("logg") or []
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    episoder, obalanserade = rekonstruera_episoder(history_log)
+    ep_rader, ep_obs = mät_episoder(episoder, facit, yf, sektor_map)
+    stängda = [r for r in ep_rader if not r["öppen"] and r["överavkastning"] is not None]
+    öppna = [r for r in ep_rader if r["öppen"] and r["överavkastning"] is not None]
+
+    print("\n\n=== §3b Del A: Episodmätning (Bästa köp-perioder mot SPY) ===")
+    print(f"{len(ep_rader)} episoder mätta ({len(stängda)} stängda, {len(öppna)} öppna); "
+          f"{ep_obs['exkluderade']} utan prisdata, {obalanserade} UT utan känt inträde.")
+
+    def episod_sammanfattning(rader, etikett):
+        if not rader:
+            print(f"  {etikett}: inga episoder.")
+            return
+        öa = [r["överavkastning"] for r in rader]
+        träff = sum(1 for x in öa if x > 0) / len(öa) * 100
+        varn = "  ⚠ för tidigt för slutsatser" if len(rader) < 10 else ""
+        print(f"  {etikett} (n={len(rader)}):{varn}")
+        print(f"    snittöveravkastning {mean(öa):+.1f} pp · median {median(öa):+.1f} pp · "
+              f"träffprocent {träff:.0f} %")
+
+    print("\n  STÄNGDA episoder (facit — realiserat utfall):")
+    episod_sammanfattning(stängda, "Alla stängda")
+    episod_sammanfattning([r for r in stängda if r["claude_rek_in"] == "KÖP"], "  varav Claude KÖP")
+    episod_sammanfattning([r for r in stängda if r["claude_rek_in"] == "AVVAKTA"], "  varav Claude AVVAKTA")
+    print("\n  ÖPPNA episoder (SEPARAT — kvarliggare har överlevnadsfel, blanda ej):")
+    episod_sammanfattning(öppna, "Alla öppna")
+
+    # ---- §3b Del B: Pappersportföljer ----
+    pp = utvardera_pappersportfoljer(yf)
+    print("\n\n=== §3b Del B: Fyra pappersportföljer ===")
+    if pp is None:
+        print("  För få ombalanseringar än (behöver ≥ 2 körningar på olika datum).")
     else:
-        div_rader = [("—", "för få divergensdatapunkter")]
-    rapport.append(("Divergensutfall", div_rader))
-
-    # Terminalrapport
-    for rubrik, poster in rapport:
-        print(f"\n{rubrik}:")
-        for etikett, värde in poster:
-            print(f"  {etikett:<22} {värde}")
+        NAMN = {"likaviktad": "P1 Likaviktad", "poangviktad": "P2 Poängviktad",
+                "claude": "P4 Poäng+Claude"}
+        varn = "  ⚠ för tidigt (n={})".format(pp["n"]) if pp["n"] < 8 else ""
+        print(f"  {pp['start']} → {pp['slut']}, {pp['n']} ombalanseringsperioder.{varn}")
+        for nyckel, namn in NAMN.items():
+            r = pp["resultat"][nyckel]
+            print(f"    {namn:<18} totalavk {r['totalavkastning']:+6.1f} % · "
+                  f"omsättn {r['snittomsattning']:.0f} %/ombal · maxDD {r['max_drawdown']:.1f} %")
+        spy = pp["resultat"]["benchmark_spy"]["totalavkastning"]
+        print(f"    {'P3 SPY (b&h)':<18} totalavk {spy:+6.1f} %" if spy is not None
+              else f"    P3 SPY: prisdata saknas")
+        print("  Parvisa differenser (vad varje lager tillför):")
+        for etikett, v in pp["diffar"]:
+            print(f"    {etikett:<40} {v:+.1f} pp")
 
     # Excel-flik
     from openpyxl import Workbook
@@ -2054,8 +2408,59 @@ def run_utvardering():
             ws.append([etikett, värde])
     ws.column_dimensions["A"].width = 32
     ws.column_dimensions["B"].width = 30
+
+    # Excel-flik: Episoder (Del A)
+    wsE = wb.create_sheet("Episoder")
+    wsE.append(["Episodmätning — Bästa köp-perioder mot SPY (justerade priser). "
+                "Överavkastning = episod − SPY samma intervall."])
+    wsE["A1"].font = Font(bold=True, size=12)
+    if len(stängda) < 10:
+        wsE.append([f"VARNING: för tidigt för slutsatser (n={len(stängda)} stängda)"])
+    wsE.append([])
+    wsE.append(["Ticker", "In-datum", "Ut-datum", "Dagar", "Avkastning (%)",
+                "SPY samma period (%)", "Överavkastning (pp)",
+                "Sektor-ETF-överavk (pp)", "Poäng vid inträde", "Claude-rek vid inträde"])
+    for c in wsE[wsE.max_row]:
+        c.font = Font(bold=True)
+    for r in sorted(ep_rader, key=lambda x: (x["öppen"], -(x["överavkastning"] or -999))):
+        wsE.append([r["ticker"], r["in_datum"], r["ut_datum"] or "öppen", r["dagar"],
+                    r["avkastning"], r["spy"], r["överavkastning"],
+                    r["sektor_etf_överavk"], r["poäng_in"], r["claude_rek_in"]])
+    for kol, br in zip("ABCDEFGHIJ", (10, 12, 12, 7, 14, 18, 18, 18, 16, 20)):
+        wsE.column_dimensions[kol].width = br
+
+    # Excel-flik: Pappersportföljer (Del B)
+    wsP = wb.create_sheet("Pappersportföljer")
+    wsP.append(["Fyra pappersportföljer — kedjad avkastning över ombalanseringar "
+                "(justerade priser, ingen transaktionskostnad)."])
+    wsP["A1"].font = Font(bold=True, size=12)
+    if pp is None:
+        wsP.append(["För få ombalanseringar än (behöver ≥ 2 körningar på olika datum)."])
+    else:
+        if pp["n"] < 8:
+            wsP.append([f"VARNING: för tidigt (n={pp['n']} perioder)"])
+        wsP.append([f"Period: {pp['start']} → {pp['slut']}  ·  {pp['n']} ombalanseringar"])
+        wsP.append([])
+        wsP.append(["Portfölj", "Totalavkastning (%)", "Snittomsättning (%/ombal)", "Max drawdown (%)"])
+        for c in wsP[wsP.max_row]:
+            c.font = Font(bold=True)
+        NAMN = {"likaviktad": "P1 Likaviktad", "poangviktad": "P2 Poängviktad",
+                "claude": "P4 Poäng + Claude-filter"}
+        for nyckel, namn in NAMN.items():
+            r = pp["resultat"][nyckel]
+            wsP.append([namn, r["totalavkastning"], r["snittomsattning"], r["max_drawdown"]])
+        spy = pp["resultat"]["benchmark_spy"]["totalavkastning"]
+        wsP.append(["P3 SPY (buy & hold)", spy, "—", "—"])
+        wsP.append([])
+        wsP.append(["Parvis differens (vad lagret tillför)", "Skillnad (pp)"])
+        wsP.cell(row=wsP.max_row, column=1).font = Font(bold=True)
+        for etikett, v in pp["diffar"]:
+            wsP.append([etikett, v])
+        for kol, br in zip("ABCD", (38, 22, 26, 18)):
+            wsP.column_dimensions[kol].width = br
+
     wb.save("utvardering.xlsx")
-    print("\nRapport sparad som: utvardering.xlsx")
+    print("\nRapport sparad som: utvardering.xlsx (flikar: Utvärdering, Episoder, Pappersportföljer)")
 
 
 def main():

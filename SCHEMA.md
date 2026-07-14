@@ -16,6 +16,11 @@
 Notera datum + ändring varje gång ett fält som UI:t läser ändras
 (nytt/borttaget/omdöpt/typändrat). Nyast överst.
 
+- **2026-07-14** — §3b avkastningsmätning: `screener_facit.json` fick fältet
+  `claude_rek`. Ny fil `pappersportfolj.json` (målvikter per ombalansering)
+  dokumenterad och gist-synkad. Inga fält i `senaste_analys.json` ändrade —
+  UI:t opåverkat. Nya rapportflikar (Episoder, Pappersportföljer) finns bara
+  i `utvardering.xlsx`, som UI:t inte läser.
 - **2026-07-13** — SCHEMA.md skapad. Dokumenterar nuläget efter att
   konsensus bytt till procentuella trösklar med hysteres (tre nivåer:
   `consensus` / `nara_konsensus` / `bubblar_niva`) och efter FAS 3
@@ -286,16 +291,35 @@ Lista, en rad per (datum, konsensusaktie).
 | `pris` | float \| null | Pris vid inträdet. |
 | `viktad_konsensus` | float \| null | |
 | `divergens_pp` | float \| null | |
+| `claude_rek` | str \| null | Claudes rek vid inträdet (`KÖP`/`AVVAKTA`/`SÄLJ`). `null` på rader loggade före 2026-07-14. |
 
 Idempotent: samma dag skrivs över (nycklad på `datum`).
 
 ---
 
-## `pappersportfolj.json` *(PLANERAD — ej implementerad)*
+## `pappersportfolj.json`
 
-Specad i `UTBYGGNAD_3b_avkastningsmatning.md` (Del B, fyra pappersportföljer)
-men **inte byggd ännu**. När den byggs dokumenteras dess schema här och en
-changelog-rad läggs till. Frontend ska INTE anta att filen finns förrän dess.
+Skrivs av `logga_pappersportfolj()` vid varje analyskörning; läses bara av
+`--utvardera` (§3b Del B). Lista, en post per ombalanseringsdatum, sorterad
+stigande på datum. Idempotent (nycklad på `datum`). UI:t läser den **inte**
+direkt — pappersportföljernas utfall visas via `utvardering.xlsx`.
+
+```json
+[
+  {
+    "datum": "YYYY-MM-DD",
+    "portfoljer": {
+      "likaviktad":  { "TICKER": andel, … },   // P1: 1/N över Bästa köp
+      "poangviktad": { "TICKER": andel, … },   // P2: ∝ max(poäng−50,0), normaliserat
+      "claude":      { "TICKER": andel, … }     // P4: P2 × Claude-faktor, fritt→kassa
+    }
+  }
+]
+```
+
+Vikterna är andelar (summa ≤ 1; resten = 0 %-avkastande kassa). `poangviktad`
+och `claude` skiljer sig ENDAST för AVVAKTA-aktier (×0,5) och SÄLJ (×0).
+P3 (SPY buy-and-hold) har inga vikter — beräknas direkt i utvärderingen.
 
 ---
 
