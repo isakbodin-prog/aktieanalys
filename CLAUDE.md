@@ -1,5 +1,15 @@
 # eToro Portföljanalys — Projektöversikt
 
+## Sessionsuppdelning (backend / frontend)
+Arbetet är uppdelat på två sessioner med skilda ansvarsområden:
+- **Backend** äger `etoro_analys.py`, eToro-API-logiken, poängmodellen,
+  datapipelinen och alla `UTBYGGNAD_*.md`-specar. Rör ALDRIG `app.py`.
+- **Frontend** äger `app.py` (Streamlit-UI:t). Rör ALDRIG `etoro_analys.py`.
+- **`SCHEMA.md` är kontraktet dem emellan** — det exakta dataformatet på
+  JSON-filerna (främst `senaste_analys.json`). Ändrar backend ett fält som
+  UI:t läser måste `SCHEMA.md` (kod + changelog-sektion) uppdateras i samma
+  commit. Frontend bygger mot SCHEMA.md, inte mot backend-koden.
+
 ## Mål
 Automatiskt hämta och jämföra 5 eToro-investerares portföljer, identifiera
 konsensusinnehav (aktier i ≥3 av 5 portföljer), och berika med teknisk
