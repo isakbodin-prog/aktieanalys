@@ -166,6 +166,11 @@ def format_innehavstid(dagar):
     return f"{dagar} dagar" if dagar < 90 else f"{dagar / 365:.1f} år"
 
 
+def _num(v, suf="", dec=1):
+    """Svenskt tal med enhet, eller '—' vid null."""
+    return "—" if v is None else f"{v:.{dec}f}{suf}".replace(".", ",")
+
+
 def nya_pa_listan(log, typ, dagar=7):
     """Tickers som fått en '{typ}'-loggpost de senaste `dagar` dagarna."""
     from datetime import date, timedelta
@@ -382,31 +387,21 @@ with tab_rang:
             badges = " · ".join(f"**{tk}** om {d} dgr" for tk, d in sorted(rapport_snart, key=lambda x: x[1]))
             st.caption(f":material/event_upcoming: **Rapport inom en vecka:** {badges}")
 
+        # Poängmodellens komponenter och deras maxpoäng — styr detaljbarerna.
+        KOMP_MAX = {"Trend": 25, "Momentum": 20, "Analytiker": 20,
+                    "Konsensus": 25, "Värdering": 10}
+
+        # Slimmad översikt — bara det viktigaste. Detaljer i expandrarna nedan.
         rows = []
         for i, r in enumerate(ranking, start=1):
-            d = r["delpoäng"]
-            c = claude.get(r["ticker"], {})
-            kluster = r.get("kluster") or {}
-            rs = r.get("relativ_styrka") or {}
             rows.append({
                 "Rang": i,
                 "Bransch": bransch_ikon(r["ticker"], bransch),
                 "Aktie": r["ticker"],
                 "Poäng": r["poäng"],
-                "Poäng (v1)": r.get("poäng_v1"),
                 "Stigande trend": "▲ Ja" if r["trend_ok"] else "▼ Nej",
-                "Trend (25)": d.get("Trend"),
-                "Momentum (20)": d.get("Momentum"),
-                "Analytiker (20)": d.get("Analytiker"),
-                "Konsensus (25)": d.get("Konsensus"),
-                "Värdering (10)": d.get("Värdering"),
-                "Viktad kons.": consensus.get(r["ticker"], {}).get("viktad_konsensus"),
-                "Nettoflöde 30d (pe)": r.get("nettoflode_30d_pe"),
-                "Rel. styrka (pe)": rs.get("rs_pe"),
                 "Föreslagen vikt (%)": r.get("foreslagen_vikt_%"),
-                "Kluster": (f"#{kluster['kluster_id']} ({kluster['klusterstorlek']} st)"
-                           if kluster.get("klusterstorlek", 1) > 1 else "ensam"),
-                "Claude": c.get("rekommendation", "—"),
+                "Claude": claude.get(r["ticker"], {}).get("rekommendation", "—"),
             })
         st.dataframe(
             stylad(pd.DataFrame(rows), ["Stigande trend", "Claude"]),
@@ -418,17 +413,51 @@ with tab_rang:
                 ),
             },
         )
-        st.caption(
-            "**Poängmodellen (§12, omviktad):** Trend 25 p · Momentum 20 p (inkl. relativ "
-            "styrka mot sektor-ETF) · Analytiker 20 p (uppsida — halverad vid hög "
-            "riktkursspridning — antal analytiker, köprekommendation, EPS-revidering) · "
-            "Konsensus 25 p (viktad konsensus, snittvikt, nettoflöde 30d) — delat med "
-            "√klusterstorlek om aktien samvarierar starkt (korr > 0,7) med andra "
-            "konsensusaktier · Värdering 10 p (forward P/E mot sektormedian, PEG). "
-            "**Poäng (v1)** är förra modellen (utan Värdering/RS/spridning) — kvar för "
-            "jämförelse tills --utvardera hunnit kalibrera de nya vikterna. "
-            "Aktier utan stigande trend rankas alltid sist, oavsett poäng."
-        )
+        st.caption("Fäll ut en aktie nedan för poänguppdelning och nyckeltal.")
+
+        # Detaljer per aktie — poänguppdelning + sekundära nyckeltal, utfällbart.
+        for i, r in enumerate(ranking, start=1):
+            tk = r["ticker"]
+            d = r["delpoäng"]
+            rs = r.get("relativ_styrka") or {}
+            kluster = r.get("kluster") or {}
+            crek = claude.get(tk, {}).get("rekommendation", "—")
+            trend = "▲ Ja" if r["trend_ok"] else "▼ Nej"
+            with st.expander(f"**{i}. {tk}** — {r['poäng']:.1f} p · trend {trend} · Claude {crek}"):
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Föreslagen vikt", _num(r.get("foreslagen_vikt_%"), " %"))
+                m2.metric("Viktad kons.", _num(consensus.get(tk, {}).get("viktad_konsensus")))
+                m3.metric("Nettoflöde 30d", _num(r.get("nettoflode_30d_pe"), " pe"))
+                m4.metric("Rel. styrka", _num(rs.get("rs_pe"), " pe"))
+
+                st.markdown("**Poänguppdelning**")
+                for namn, mx in KOMP_MAX.items():
+                    v = d.get(namn)
+                    if v is None:
+                        continue
+                    andel = min(max(v / mx, 0.0), 1.0)
+                    st.progress(andel, text=f"{namn} — {v:.1f} / {mx} p")
+
+                extra = [f"Poäng v1: {_num(r.get('poäng_v1'))}"]
+                if kluster.get("klusterstorlek", 1) > 1:
+                    extra.append(f"Kluster #{kluster['kluster_id']} "
+                                 f"({kluster['klusterstorlek']} samvarierande aktier)")
+                else:
+                    extra.append("Kluster: ensam")
+                st.caption(" · ".join(extra))
+
+        with st.expander("Så räknas poängen"):
+            st.caption(
+                "**Poängmodellen (§12, omviktad):** Trend 25 p · Momentum 20 p (inkl. relativ "
+                "styrka mot sektor-ETF) · Analytiker 20 p (uppsida — halverad vid hög "
+                "riktkursspridning — antal analytiker, köprekommendation, EPS-revidering) · "
+                "Konsensus 25 p (viktad konsensus, snittvikt, nettoflöde 30d) — delat med "
+                "√klusterstorlek om aktien samvarierar starkt (korr > 0,7) med andra "
+                "konsensusaktier · Värdering 10 p (forward P/E mot sektormedian, PEG). "
+                "**Poäng v1** är förra modellen (utan Värdering/RS/spridning) — kvar för "
+                "jämförelse tills --utvardera hunnit kalibrera de nya vikterna. "
+                "Aktier utan stigande trend rankas alltid sist, oavsett poäng."
+            )
 
     # --- Senaste händelser: kondenserad översikt på förstasidan ---
     log = data.get("historik", [])
@@ -510,44 +539,75 @@ with tab_konsensus:
     log = data.get("historik", [])
     innehav = data.get("innehav", {})
     nya_kons = nya_pa_listan(log, "IN I KONSENSUS")
+    def _total_vikt(info):
+        return info.get("total_weight") or round(info["avg_weight"] * info["count"], 2)
+
+    # Slimmad översikt — bara det viktigaste. Detaljer i expandrarna nedan.
     rows = []
     for tk in consensus_order:
         a = analyses.get(tk, {})
-        c = claude.get(tk, {})
-        h = innehav.get(tk, {})
         rows.append({
             "Bransch": bransch_ikon(tk, bransch),
             "Aktie": tk + (" · ny" if tk in nya_kons else ""),
             "Stigande trend": trend_label(a),
             "Portföljer": consensus[tk]["count"],
-            "Viktad kons.": consensus[tk].get("viktad_konsensus"),
-            "Senaste köp (dgr)": consensus[tk].get("senaste_köp_dagar"),
-            "Total vikt (%)": consensus[tk].get("total_weight")
-                or round(consensus[tk]["avg_weight"] * consensus[tk]["count"], 2),
-            "Snittvikt (%)": round(consensus[tk]["avg_weight"], 2),
-            "Pris": a.get("pris"),
-            "RSI14": a.get("RSI14"),
+            "Total vikt (%)": _total_vikt(consensus[tk]),
             "Analytiker": a.get("rekommendation"),
-            "Riktkurs": a.get("riktkurs"),
-            "Uppsida (%)": a.get("uppsida_%"),
-            "Ägd längst": format_innehavstid(h.get("längst_dagar")),
-            "Ägd snitt": format_innehavstid(h.get("snitt_dagar")),
-            "Inv. vinst (%)": h.get("snitt_vinst_pct", "—"),
-            "Claude": c.get("rekommendation", "—"),
+            "Claude": claude.get(tk, {}).get("rekommendation", "—"),
         })
     st.dataframe(stylad(pd.DataFrame(rows), ["Aktie", "Stigande trend", "Claude"]),
                  use_container_width=True, hide_index=True,
                  column_config={"Bransch": st.column_config.ImageColumn("", width=36)})
-    st.caption(
-        "Stigande trend = priset över MA200 **och** MA200 stigande — utan den kan Claude aldrig ge KÖP. "
-        "**Viktad kons.** väger varje ägare efter hur färskt köpet är (aktivt nyköp 1,5 · "
-        "6 mån 1,0 · äldre 0,5) och måste nå samma tal som antalskravet — hysteresen gäller "
-        "även den. Låg viktad konsensus = gammal, passiv signal. "
-        "*· ny* = ny på listan senaste 7 dagarna. "
-        "**Ägd längst** = äldsta öppna positionen bland investerarna; **Inv. vinst** = deras "
-        "genomsnittliga upparbetade vinst — lång tid + hög vinst = risk för vinsthemtagning."
-    )
-    st.caption(BRANSCH_TEXT)
+    st.caption("Fäll ut en aktie nedan för konsensussignal, teknik, analytiker och innehavstid.")
+
+    # Detaljer per aktie — utfällbart.
+    for tk in consensus_order:
+        info = consensus[tk]
+        a = analyses.get(tk, {})
+        c = claude.get(tk, {})
+        h = innehav.get(tk, {})
+        crek = c.get("rekommendation", "—")
+        ny = " · ny" if tk in nya_kons else ""
+        with st.expander(f"**{tk}**{ny} — {info['count']} portföljer · "
+                         f"trend {trend_label(a)} · Claude {crek}"):
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Total vikt", _num(_total_vikt(info), " %"))
+            k2.metric("Viktad kons.", _num(info.get("viktad_konsensus")))
+            k3.metric("Senaste köp", _num(info.get("senaste_köp_dagar"), " dgr", 0))
+            k4.metric("Snittvikt", _num(info.get("avg_weight"), " %"))
+
+            if "error" in a:
+                st.caption(f"Marknadsdata saknas: {a['error']}")
+            else:
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Pris", _num(a.get("pris")))
+                m2.metric("RSI14", _num(a.get("RSI14")))
+                m3.metric("Riktkurs", _num(a.get("riktkurs")))
+                m4.metric("Uppsida", _num(a.get("uppsida_%"), " %"))
+
+            holders = info.get("holders", [])
+            if holders:
+                st.caption("Ägs av: " + ", ".join(holders))
+            if h:
+                st.caption(
+                    f"Ägd längst: **{format_innehavstid(h.get('längst_dagar'))}** "
+                    f"(av {h.get('längst_profil', '?')}) · snitt "
+                    f"**{format_innehavstid(h.get('snitt_dagar'))}** · upparbetad "
+                    f"snittvinst **{_num(h.get('snitt_vinst_pct'), ' %')}** — lång tid + "
+                    f"hög vinst = risk för vinsthemtagning."
+                )
+
+    with st.expander("Så läser du tabellen"):
+        st.caption(
+            "**Stigande trend** = priset över MA200 **och** MA200 stigande — utan den kan "
+            "Claude aldrig ge KÖP. **Viktad kons.** väger varje ägare efter hur färskt köpet "
+            "är (aktivt nyköp 1,5 · 6 mån 1,0 · äldre 0,5) och måste nå samma tal som "
+            "antalskravet — hysteresen gäller även den. Låg viktad konsensus = gammal, passiv "
+            "signal. *· ny* = ny på listan senaste 7 dagarna. **Ägd längst** = äldsta öppna "
+            "positionen bland investerarna; **upparbetad snittvinst** = deras genomsnittliga "
+            "vinst — lång tid + hög vinst = risk för vinsthemtagning."
+        )
+        st.caption(BRANSCH_TEXT)
 
     # Nära konsensus — en portfölj från att kvala in
     near = data.get("nara_konsensus", {})
@@ -558,16 +618,13 @@ with tab_konsensus:
                    "en ägare till (eller färskare köp) tar dem över innivån.")
         nya_nara = nya_pa_listan(log, "IN I NÄRA KONSENSUS")
 
-        def total_vikt(info):
-            return info.get("total_weight") or round(info["avg_weight"] * info["count"], 2)
-
         near_rows = []
-        for tk, info in sorted(near.items(), key=lambda x: -total_vikt(x[1])):
+        for tk, info in sorted(near.items(), key=lambda x: -_total_vikt(x[1])):
             h = innehav.get(tk, {})
             near_rows.append({
                 "Bransch": bransch_ikon(tk, bransch),
                 "Aktie": tk + (" · ny" if tk in nya_nara else ""),
-                "Total vikt (%)": total_vikt(info),
+                "Total vikt (%)": _total_vikt(info),
                 "Snittvikt (%)": round(info["avg_weight"], 2),
                 "Ägs av": ", ".join(info.get("holders", [])),
                 "Ägd längst": format_innehavstid(h.get("längst_dagar")),
