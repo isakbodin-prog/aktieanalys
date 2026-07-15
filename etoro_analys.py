@@ -623,8 +623,8 @@ def analyze_ticker(ticker):
     try:
         t = yf.Ticker(yticker)
         hist = t.history(period="1y")
-        if hist.empty:
-            hist = None
+        if hist.empty or "Close" not in hist.columns or pd.isna(hist["Close"].iloc[-1]):
+            hist = None   # Yahoo kan ge en icke-tom df med NaN-priser när molnservrar blockeras
     except Exception:
         hist = None
 
