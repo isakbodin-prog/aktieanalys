@@ -69,9 +69,10 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
   poängkvartil, komponentkorrelation och divergensutfall till terminal +
   utvardering.xlsx. Kör INTE analysen. Varnar vid n<10. Kör även §3b:
   (A) EPISODMÄTNING — rekonstruerar Bästa köp-perioder ur historikens
-  IN/UT UR KONSENSUS, mäter överavkastning mot SPY (+ sektor-ETF) med
-  justerade priser; stängda vs öppna episoder separat (överlevnadsfel),
-  split på Claudes rek vid inträde. (B) FYRA PAPPERSPORTFÖLJER —
+  IN/UT UR KONSENSUS och EXIT (TRENDBROTT) (§B), mäter överavkastning mot
+  SPY (+ sektor-ETF) med justerade priser; stängda vs öppna episoder
+  separat (överlevnadsfel), split på Claudes rek vid inträde OCH på
+  ut_orsak ("trendbrott" vs "konsensus tappad"). (B) FYRA PAPPERSPORTFÖLJER —
   P1 likaviktad / P2 poängviktad / P3 SPY b&h / P4 poäng+Claude-filter;
   kedjad avkastning, omsättning, drawdown, parvisa differenser (urvalets/
   poängmodellens/Claudes värde). Flikar Episoder + Pappersportföljer i
@@ -81,6 +82,15 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
 - Webbappen kör alltid standardläget; bakgrunden uppdateras bara via CLI.
 
 ## Pipeline (i skriptet)
+0. Marknadsregim (§A, UTBYGGNAD_regim_exit.md): SPY vs dess MA200 (1 yfinance-
+   anrop, oberoende av eToro-data) → GRÖN (över + stigande) / RÖD (under +
+   fallande) / GUL (blandat, bara varning) / OKÄND (SPY-miss, behandlas som
+   GRÖN). Bara RÖD har effekt: Claudes KÖP-text på Bästa köp-aktier visas
+   nedgraderad ("KÖP (vänta på marknaden)") via claude[tk].rekommendation_
+   visning — den råa rekommendation-nyckeln och poängen/facit förblir
+   OFÖRÄNDRADE. Pappersportföljerna (P1/P2/P4) gör inga nya köp i RÖD —
+   kandidater som inte fanns i föregående ombalansering hålls i kassa
+   (nya_i_kassa i pappersportfolj.json). Skrivs till result["regim"].
 1. Hämta 5 portföljer → aggregera investmentPct per instrumentId
 2. Konsensus: PROCENTUELLA trösklar med HYSTERES (ersatte MIN_PORTFOLIOS=3
    2026-07-13). KONSENSUS_ANDEL_IN=0.60 för att komma IN på listan,
@@ -115,15 +125,27 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
 6. Historik: jämför med förra körningen (portfolj_historik.json) och
    loggar NYTT INNEHAV / SÅLT INNEHAV / VIKTÄNDRING (≥1 procentenhet) /
    IN/UT UR KONSENSUS / IN/UT UR NÄRA KONSENSUS (med övergångsdetalj,
-   t.ex. "upp från nära konsensus"). Loggen ackumuleras över tid.
+   t.ex. "upp från nära konsensus") / EXIT (TRENDBROTT) / ÅTER FRÅN EXIT
+   (§B, se nedan). Loggen ackumuleras över tid.
    Appen visar 🆕-badge (ny på lista ≤7 dagar) och "Lämnat listorna"
    (≤30 dagar) längst ner på Konsensus-fliken.
 6b. Innehavstid: positionernas openTimestamp/netProfit aggregeras per
    aktie (äldsta öppning, snittdagar, investeringsviktad vinst) →
    result["innehav"]. Visas i app/Excel och skickas till Claude som
    underlag för vinsthemtagningsrisk (lång tid + hög vinst = varning).
+6c. Exitregel (§B, UTBYGGNAD_regim_exit.md): dödskors — pris < MA200 OCH
+   MA50 < MA200 (båda krävs, ren rekyl räcker inte) — flyttar aktien från
+   ranking (Bästa köp) till result["exit_lista"] med exit_datum (första
+   flaggningen, bevarat idempotent över körningar) och villkorstext.
+   Konsensuslistan/divergensen påverkas INTE — aktien kan ligga kvar i
+   konsensus men är flaggad. Episodmätningen (§3b Del A) räknar EXIT som
+   ett UT-datum med ut_orsak "trendbrott" (skilt från "konsensus tappad").
+   Pappersportföljerna säljer position till kassa vid nästa ombalansering
+   eftersom ranking redan uteslutit aktien. Återinträde när villkoret
+   inte längre gäller (ingen karenstid).
 7. Skriv portfolj_analys.xlsx: Konsensus & Analys, Teknisk analys
-   (indikatorer + Claudes text), Historik, en flik per profil
+   (indikatorer + Claudes text + EXIT-flagga), Rangordning (regimbadge +
+   EXIT-sektion), Historik, en flik per profil
 
 ## Deploy (GitHub + Render)
 - Repo: https://github.com/isakbodin-prog/aktieanalys (privat) — push till

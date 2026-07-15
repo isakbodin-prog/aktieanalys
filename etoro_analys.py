@@ -1125,14 +1125,73 @@ def compute_score_v2(a, cons, cluster_factor=1.0, nettoflode_pe=None,
     return total, delpoang
 
 
-def build_ranking(analyses, consensus, history_log=None):
+# ----------------------------------------------------------------------
+# §A Marknadsregimfilter (UTBYGGNAD_regim_exit.md)
+# ----------------------------------------------------------------------
+def compute_market_regime():
+    """SPY vs MA200 avgör marknadsregim: GRÖN (över + stigande), RÖD (under
+    + fallande), annars GUL (blandat, bara varning). yfinance-miss/otillräcklig
+    historik → OKÄND, som nedströms behandlas identiskt med GRÖN (hellre
+    falskt grönt än att blockera på datafel)."""
+    from datetime import date
+    try:
+        import yfinance as yf
+        h = yf.Ticker("SPY").history(period="1y", auto_adjust=True)
+        if h.empty or len(h) < 221:
+            return {"regim": "OKÄND", "spy_pris": None, "spy_ma200": None,
+                    "notis": "otillräcklig SPY-historik", "datum": date.today().isoformat()}
+        close = h["Close"]
+        pris = float(close.iloc[-1])
+        ma200_serie = close.rolling(200).mean()
+        ma200 = float(ma200_serie.iloc[-1])
+        ma200_stigande = ma200 > float(ma200_serie.iloc[-21])
+        over = pris > ma200
+        if over and ma200_stigande:
+            regim = "GRÖN"
+        elif not over and not ma200_stigande:
+            regim = "RÖD"
+        else:
+            regim = "GUL"
+        return {"regim": regim, "spy_pris": round(pris, 2), "spy_ma200": round(ma200, 2),
+                "notis": None, "datum": date.today().isoformat()}
+    except Exception:
+        return {"regim": "OKÄND", "spy_pris": None, "spy_ma200": None,
+                "notis": "SPY-hämtning misslyckades", "datum": date.today().isoformat()}
+
+
+# ----------------------------------------------------------------------
+# §B Exitregel (trendbrott) (UTBYGGNAD_regim_exit.md)
+# ----------------------------------------------------------------------
+EXIT_VILLKOR_TEXT = "Dödskors: pris < MA200 och MA50 < MA200"
+
+
+def compute_exit_status(analyses, tickers):
+    """Exitvillkor: pris < MA200 OCH MA50 < MA200 (båda krävs — pris under
+    MA200 ensamt är en normal rekyl). Saknas MA200/MA50 (kort historik) →
+    False (kan inte avgöras, aldrig krasch)."""
+    out = {}
+    for tk in tickers:
+        a = analyses.get(tk) or {}
+        pris, ma50, ma200 = a.get("pris"), a.get("MA50"), a.get("MA200")
+        out[tk] = bool(pris is not None and ma50 is not None and ma200 is not None
+                       and pris < ma200 and ma50 < ma200)
+    return out
+
+
+def build_ranking(analyses, consensus, history_log=None, exit_info=None):
     """Rangordna konsensusaktierna. Aktier utan stigande trend sist, oavsett poäng.
 
     Primär poäng = §12:s omviktade modell (Trend25/Momentum20/Analytiker20/
     Konsensus25/Värdering10). Gamla v1-poängen (Trend30/Momentum25/
     Analytiker25/Konsensus20) sparas som poäng_v1/delpoäng_v1 för jämförelse
     under övergångsperioden, tills --utvardera hunnit kalibrera vikterna.
+
+    exit_info: {ticker: exit_datum} för aktier i EXIT (§B trendbrott) — de
+    beräknas som vanligt (poängen får inte förorenas) men returneras separat
+    i exit_lista i stället för ranking, så Bästa köp/pappersportföljerna
+    utesluter dem automatiskt. Konsensuslistan påverkas inte av detta.
     """
+    exit_info = exit_info or {}
     giltiga = [tk for tk in consensus if "error" not in analyses.get(tk, {})]
     kluster = compute_correlation_clusters(analyses, giltiga)
     netto = compute_netflow_30d(history_log or [], giltiga)
@@ -1140,7 +1199,7 @@ def build_ranking(analyses, consensus, history_log=None):
     rs = compute_relative_strength(analyses, giltiga)
     forslagen_vikt = compute_suggested_weights(analyses, giltiga)
 
-    ranking = []
+    ranking, exit_lista = [], []
     for ticker, cons in consensus.items():
         a = analyses.get(ticker, {})
         if "error" in a:
@@ -1153,7 +1212,7 @@ def build_ranking(analyses, consensus, history_log=None):
                                            rs_bonus=rs_bonus, sector_medians=sector_medians)
         total_v1, delpoang_v1 = compute_score(a, cons, cluster_factor=kf, nettoflode_pe=nf)
 
-        ranking.append({
+        rad = {
             "ticker": ticker,
             "poäng": total,
             "poäng_v1": total_v1,
@@ -1164,9 +1223,16 @@ def build_ranking(analyses, consensus, history_log=None):
             "nettoflode_30d_pe": nf,
             "relativ_styrka": rs.get(ticker),
             "foreslagen_vikt_%": forslagen_vikt.get(ticker),
-        })
+        }
+        if ticker in exit_info:
+            rad["exit_datum"] = exit_info[ticker]
+            rad["exit_villkor"] = EXIT_VILLKOR_TEXT
+            exit_lista.append(rad)
+        else:
+            ranking.append(rad)
     ranking.sort(key=lambda r: (not r["trend_ok"], -r["poäng"]))
-    return ranking
+    exit_lista.sort(key=lambda r: r["exit_datum"])
+    return ranking, exit_lista
 
 
 # ----------------------------------------------------------------------
@@ -1327,12 +1393,18 @@ def gist_push():
         print(f"  OBS: gist-sparning misslyckades ({e}).")
 
 
-def update_history(portfolios, consensus_tickers, near_tickers=None):
+def update_history(portfolios, consensus_tickers, near_tickers=None, exit_status=None):
     """Jämför med förra körningen, logga ändringar och spara ny ögonblicksbild.
 
-    Returnerar hela ändringsloggen (nyaste först).
+    exit_status: {ticker: bool} — dagens exitvillkor (§B trendbrott) för
+    tickers med giltig analys. Övergångar loggas EXIT (TRENDBROTT) / ÅTER
+    FRÅN EXIT, med samma idempotensmönster som konsensus IN/UT (bara nya
+    övergångar loggas, exit_datum bevaras oförändrat medan villkoret består).
+
+    Returnerar (ändringslogg (nyaste först), exit_info {ticker: exit_datum}).
     """
     near_tickers = near_tickers or []
+    exit_status = exit_status or {}
     from datetime import date
     today = date.today().isoformat()
 
@@ -1350,6 +1422,16 @@ def update_history(portfolios, consensus_tickers, near_tickers=None):
     def log(typ, profil, ticker, detalj):
         entries.append({"datum": today, "typ": typ, "profil": profil,
                         "ticker": ticker, "detalj": detalj})
+
+    old_exit = (prev or {}).get("exit") or {}   # {ticker: exit_datum}
+    today_exit_tickers = {tk for tk, flagga in exit_status.items() if flagga}
+    current_tickers = set(consensus_tickers)
+    for tk in sorted(today_exit_tickers - set(old_exit)):
+        log("EXIT (TRENDBROTT)", "", tk, EXIT_VILLKOR_TEXT)
+    for tk in sorted(set(old_exit) - today_exit_tickers):
+        if tk in current_tickers:   # tyst borttagning om aktien lämnat konsensus (redan loggat)
+            log("ÅTER FRÅN EXIT", "", tk, "Trend återhämtad — dödskorset inte längre aktivt")
+    exit_info = {tk: old_exit.get(tk, today) for tk in today_exit_tickers}
 
     if prev:
         for profile, positions in portfolios.items():
@@ -1412,12 +1494,13 @@ def update_history(portfolios, consensus_tickers, near_tickers=None):
     state["senaste"] = {"datum": today, "portfolios": portfolios,
                         "consensus": sorted(consensus_tickers),
                         "near_consensus": sorted(near_tickers),
-                        "regel": KONSENSUS_REGEL}
+                        "regel": KONSENSUS_REGEL,
+                        "exit": exit_info}
     state["logg"] = entries + state.get("logg", [])
     with open(HISTORY_FILE, "w") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
-    return state["logg"]
+    return state["logg"], exit_info
 
 
 # ----------------------------------------------------------------------
@@ -1425,7 +1508,7 @@ def update_history(portfolios, consensus_tickers, near_tickers=None):
 # ----------------------------------------------------------------------
 def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
                 ranking=None, near_consensus=None, holding_info=None, divergence=None,
-                divergence_near=None, bubblar_niva=None):
+                divergence_near=None, bubblar_niva=None, regim=None, exit_lista=None):
     from datetime import date, timedelta
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
@@ -1447,24 +1530,49 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
             c.font, c.fill = hfont, hfill
 
     # Rangordning — sammanvägd poäng, bästa köp först
-    if ranking:
+    if ranking or exit_lista:
         green = PatternFill("solid", start_color="C6EFCE")
         red = PatternFill("solid", start_color="FFC7CE")
+        exit_fill = PatternFill("solid", start_color="FFD966")
         ws = wb.create_sheet("Rangordning", 0)
+        if regim:
+            badge = (f"Marknadsregim: {regim.get('regim')} "
+                     f"(SPY {regim.get('spy_pris')} vs MA200 {regim.get('spy_ma200')})")
+            if regim.get("notis"):
+                badge += f"  — {regim['notis']}"
+            ws.append([badge])
+            ws.cell(row=1, column=1).font = Font(bold=True, size=12)
+            ws.append([])
         ws.append(["Rang", "Instrument", "Poäng (0–100)", "Poäng (v1)", "Stigande trend",
                    "Trend (25)", "Momentum (20)", "Analytiker (20)", "Konsensus (25)",
                    "Värdering (10)", "Relativ styrka (pe)", "Föreslagen vikt (%)",
                    "Claudes rekommendation"])
-        style_header(ws)
-        for i, r in enumerate(ranking, start=1):
+        for c in ws[ws.max_row]:
+            c.font, c.fill = hfont, hfill
+        for i, r in enumerate(ranking or [], start=1):
             d = r["delpoäng"]
             rs = r.get("relativ_styrka") or {}
+            c_rek = claude_texts.get(r["ticker"], {})
             ws.append([i, r["ticker"], r["poäng"], r.get("poäng_v1"),
                        "JA" if r["trend_ok"] else "NEJ",
                        d.get("Trend"), d.get("Momentum"), d.get("Analytiker"), d.get("Konsensus"),
                        d.get("Värdering"), rs.get("rs_pe"), r.get("foreslagen_vikt_%"),
-                       claude_texts.get(r["ticker"], {}).get("rekommendation", "")])
+                       c_rek.get("rekommendation_visning") or c_rek.get("rekommendation", "")])
             ws.cell(row=ws.max_row, column=5).fill = green if r["trend_ok"] else red
+
+        if exit_lista:
+            ws.append([])
+            ws.append([f"EXIT (TRENDBROTT) — {len(exit_lista)} st, uteslutna ur Bästa köp "
+                       "(kvar i konsensus, se Konsensus & Analys)"])
+            ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
+            ws.append(["Instrument", "Exit-datum", "Villkor", "Poäng vid exit"])
+            for c in ws[ws.max_row]:
+                if c.value:
+                    c.font, c.fill = hfont, hfill
+            for r in exit_lista:
+                ws.append([r["ticker"], r["exit_datum"], r["exit_villkor"], r["poäng"]])
+                for col in range(1, 5):
+                    ws.cell(row=ws.max_row, column=col).fill = exit_fill
 
     # Flik per profil
     for name, positions in portfolios.items():
@@ -1593,17 +1701,19 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
             ws.append([e["datum"], e["ticker"], e["typ"], e["detalj"]])
 
     # Teknisk analys (indikatorer + Claudes text)
+    exit_by_ticker = {r["ticker"]: r for r in (exit_lista or [])}
     ws = wb.create_sheet("Teknisk analys", 3)
     ws.append(["Instrument", "Stigande trend", "Över MA200", "MA200 stigande",
                "Pris", "MA50", "MA200", "Golden cross", "RSI14",
                "MACD > signal", "Bollinger (%)", "Avstånd 52v-högsta (%)",
-               "Avkastning 1m (%)", "Avkastning 3m (%)", "Volymtrend (%)",
+               "Avkastning 1m (%)", "Avkastning 3m (%)", "Volymtrend (%)", "EXIT (trendbrott)",
                "Claudes rekommendation", "Claudes analys", "Analys genererad", "EPS-rev 90d (%)"])
     style_header(ws)
     for ticker, _ in consensus_order:
         a = analyses.get(ticker, {})
         c = claude_texts.get(ticker, {})
         trend = a.get("stigande_trend")
+        exit_r = exit_by_ticker.get(ticker)
         ws.append([
             ticker, "JA" if trend else ("NEJ" if trend is not None else "?"),
             a.get("över_MA200"), a.get("MA200_stigande"),
@@ -1611,13 +1721,16 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
             a.get("RSI14"), a.get("MACD_över_signal"), a.get("bollinger_position_%"),
             a.get("avstånd_52v_högsta_%"), a.get("avkastning_1m_%"), a.get("avkastning_3m_%"),
             a.get("volymtrend_20d_vs_3m_%"),
-            c.get("rekommendation"), c.get("analys"), c.get("genererad"),
+            f"sedan {exit_r['exit_datum']}" if exit_r else "",
+            c.get("rekommendation_visning") or c.get("rekommendation"), c.get("analys"), c.get("genererad"),
             a.get("eps_rev_90d_pct"),
         ])
         if trend is not None:
             ws.cell(row=ws.max_row, column=2).fill = green if trend else red
-    ws.column_dimensions["Q"].width = 100
-    for row in ws.iter_rows(min_row=2, min_col=17, max_col=17):
+        if exit_r:
+            ws.cell(row=ws.max_row, column=16).fill = PatternFill("solid", start_color="FFD966")
+    ws.column_dimensions["R"].width = 100
+    for row in ws.iter_rows(min_row=2, min_col=18, max_col=18):
         for cell in row:
             cell.alignment = Alignment(wrap_text=True, vertical="top")
 
@@ -1657,6 +1770,8 @@ def excel_from_result(result):
         result.get("divergens"),
         result.get("divergens_nara"),
         result.get("bubblar_niva"),
+        result.get("regim"),
+        result.get("exit_lista"),
     )
 
 
@@ -1685,6 +1800,11 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
 
     # Hämta beständig historik (Render har tillfällig disk)
     gist_pull()
+
+    # §A Marknadsregim (SPY vs MA200) — oberoende av eToro-data, 1 yfinance-anrop
+    regim = compute_market_regime()
+    print(f"\nMarknadsregim: {regim['regim']} (SPY {regim['spy_pris']} vs MA200 {regim['spy_ma200']})"
+          + (f"  — {regim['notis']}" if regim.get("notis") else ""))
 
     print("\nTestar API-anslutning...")
     test = api_get("/market-data/search", {"query": "Apple"})
@@ -1774,6 +1894,10 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
                 a["uppsida_%"] = round((pa["riktkurs"] / a["pris"] - 1) * 100, 1)
             print(f"    {ticker}: analytikerdata återanvänd från {prev.get('tidpunkt', 'förra körningen')[:10]}")
 
+    # §B Exitregel (trendbrott): pris < MA200 OCH MA50 < MA200 — beräknas här
+    # (kräver bara analyses) men appliceras i update_history/build_ranking nedan
+    exit_status = compute_exit_status(analyses, [tk for tk in consensus if "error" not in analyses.get(tk, {})])
+
     # Innehavstid + investerarnas upparbetade vinst (från positionernas
     # openTimestamp/netProfit) för konsensus- och nära konsensus-aktier
     holding_info = {}
@@ -1845,15 +1969,31 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
         claude_datum = prev_datum
 
     # Ändringshistorik mot förra körningen (görs innan rangordningen så
-    # nettoflödet §5 kan använda dagens nyloggade ändringar också)
+    # nettoflödet §5 kan använda dagens nyloggade ändringar också). Tar även
+    # med exit_status så EXIT (TRENDBROTT)/ÅTER FRÅN EXIT loggas (§B).
     print("\nUppdaterar ändringshistorik...")
-    history_log = update_history(portfolios, list(consensus.keys()), list(near_consensus.keys()))
+    history_log, exit_info = update_history(portfolios, list(consensus.keys()),
+                                             list(near_consensus.keys()), exit_status)
 
-    # Sammanvägd rangordning
-    ranking = build_ranking(analyses, consensus, history_log)
+    # Sammanvägd rangordning (exit_lista = Bästa köp-kandidater i EXIT, §B)
+    ranking, exit_lista = build_ranking(analyses, consensus, history_log, exit_info)
     print("\nRangordning (bästa köp först):")
     for i, r in enumerate(ranking, start=1):
         print(f"  {i}. {r['ticker']}: {r['poäng']} p (trend {'OK' if r['trend_ok'] else 'EJ OK'})")
+    if exit_lista:
+        print(f"EXIT (trendbrott), uteslutna ur Bästa köp: "
+              f"{', '.join(r['ticker'] for r in exit_lista)}")
+
+    # §A: i RÖD regim nedgraderas Claudes KÖP-text på Bästa köp-aktier till
+    # visning ("KÖP (vänta på marknaden)") — poängen/claude_rek i facit
+    # förblir OFÖRÄNDRADE så mätserierna inte förorenas av regimfiltret.
+    bästa_köp_tickers = {r["ticker"] for r in ranking}
+    for tk, c in claude_texts.items():
+        rek = c.get("rekommendation")
+        if regim["regim"] == "RÖD" and rek == "KÖP" and tk in bästa_köp_tickers:
+            c["rekommendation_visning"] = "KÖP (vänta på marknaden)"
+        else:
+            c["rekommendation_visning"] = rek
 
     result = {
         "tidpunkt": datetime.now().isoformat(timespec="minutes"),
@@ -1870,6 +2010,8 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
         "claude": claude_texts,
         "claude_datum": claude_datum,
         "ranking": ranking,
+        "exit_lista": exit_lista,
+        "regim": regim,
         "historik": history_log,
         "innehav": holding_info,
         "divergens": divergence,
@@ -1882,13 +2024,16 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
         json.dump(result, f, ensure_ascii=False, indent=2)
 
     write_excel(portfolios, consensus, analyses, claude_texts, history_log, ranking,
-                near_consensus, holding_info, divergence, divergence_near, bubblar_niva)
+                near_consensus, holding_info, divergence, divergence_near, bubblar_niva,
+                regim, exit_lista)
 
-    # Logga facit för --utvardera (poäng vs framtida avkastning)
+    # Logga facit för --utvardera (poäng vs framtida avkastning) — ranking
+    # innehåller redan inte EXIT-aktier, så facit/episoder påverkas naturligt
     logga_facit(today, ranking, divergence, analyses, consensus, claude_texts)
 
-    # Logga dagens pappersportfölj-vikter (§3b Del B — ombalansering)
-    logga_pappersportfolj(today, ranking, claude_texts)
+    # Logga dagens pappersportfölj-vikter (§3b Del B — ombalansering; regim
+    # styr §A:s "inga nya köp i RÖD", ranking utesluter redan EXIT-aktier)
+    logga_pappersportfolj(today, ranking, claude_texts, regim)
 
     # Spara beständig historik till gisten
     gist_push()
@@ -1945,10 +2090,11 @@ def _normalisera(raw):
     return {tk: round(v / s, 4) for tk, v in raw.items() if v > 0}
 
 
-def pappersportfolj_vikter(ranking, claude_texts=None):
+def pappersportfolj_vikter(ranking, claude_texts=None, regim=None, tidigare_ombalanseringar=None):
     """Målvikter för de tre aktiva pappersportföljerna (P3 = SPY, inga vikter).
 
-    Universum = Bästa köp = konsensusaktier med poäng ≥ BASTA_KOP_MIN_POANG.
+    Universum = Bästa köp = konsensusaktier med poäng ≥ BASTA_KOP_MIN_POANG
+    (exit-aktier ingår aldrig — build_ranking har redan sorterat ut dem).
     Vikter är andelar (summa ≤ 1); resten hålls som 0 %-avkastande kassa.
 
     - likaviktad (P1): 1/N över universumet — mäter urvalets värde.
@@ -1957,12 +2103,26 @@ def pappersportfolj_vikter(ranking, claude_texts=None):
       den frigjorda vikten går till KASSA (KÖP-aktiernas vikter är oförändrade
       mot P2, så P2 och P4 skiljer sig ENDAST för AVVAKTA/SÄLJ-aktier).
       Saknas rek → behandlas som KÖP (neutral, ingen nedvikt).
+
+    §A regimfilter: i RÖD regim görs INGA nya köp — tickers som inte fanns i
+    föregående ombalanserings universum (approximerat via dess likaviktade
+    portfölj, som alltid täcker hela universumet) utesluts och räknas i
+    "nya_i_kassa" i stället för att viktas.
     """
     claude_texts = claude_texts or {}
     universum = [r["ticker"] for r in ranking
                  if r.get("poäng", 0) >= BASTA_KOP_MIN_POANG]
+
+    nya_i_kassa = []
+    if (regim or {}).get("regim") == "RÖD" and tidigare_ombalanseringar:
+        senaste = max(tidigare_ombalanseringar, key=lambda d: d["datum"])
+        forra_universum = set(senaste.get("portfoljer", {}).get("likaviktad", {}))
+        nya_i_kassa = [tk for tk in universum if tk not in forra_universum]
+        if nya_i_kassa:
+            universum = [tk for tk in universum if tk not in nya_i_kassa]
+
     if not universum:
-        return {"likaviktad": {}, "poangviktad": {}, "claude": {}}
+        return {"likaviktad": {}, "poangviktad": {}, "claude": {}, "nya_i_kassa": nya_i_kassa}
 
     likaviktad = {tk: round(1 / len(universum), 4) for tk in universum}
 
@@ -1977,10 +2137,11 @@ def pappersportfolj_vikter(ranking, claude_texts=None):
         ny = round(v * faktor, 4)
         if ny > 0:
             claude[tk] = ny
-    return {"likaviktad": likaviktad, "poangviktad": poangviktad, "claude": claude}
+    return {"likaviktad": likaviktad, "poangviktad": poangviktad, "claude": claude,
+            "nya_i_kassa": nya_i_kassa}
 
 
-def logga_pappersportfolj(datum, ranking, claude_texts=None):
+def logga_pappersportfolj(datum, ranking, claude_texts=None, regim=None):
     """Appenda dagens målvikter till PAPPER_FILE (idempotent — nyckel: datum)."""
     hist = []
     if os.path.exists(PAPPER_FILE):
@@ -1989,14 +2150,20 @@ def logga_pappersportfolj(datum, ranking, claude_texts=None):
                 hist = json.load(f)
         except (json.JSONDecodeError, OSError):
             hist = []
-    hist = [d for d in hist if d.get("datum") != datum]   # ersätt dagens post
-    vikter = pappersportfolj_vikter(ranking, claude_texts)
-    hist.append({"datum": datum, "portfoljer": vikter})
+    hist = [d for d in hist if d.get("datum") != datum]   # ersätt dagens post (idempotent)
+    vikter = pappersportfolj_vikter(ranking, claude_texts, regim, hist)
+    post = {"datum": datum, "portfoljer": {k: v for k, v in vikter.items() if k != "nya_i_kassa"}}
+    if vikter["nya_i_kassa"]:
+        post["nya_i_kassa"] = vikter["nya_i_kassa"]
+    hist.append(post)
     hist.sort(key=lambda d: d["datum"])
     with open(PAPPER_FILE, "w") as f:
         json.dump(hist, f, ensure_ascii=False, indent=2)
     print(f"  Pappersportföljer: målvikter loggade för {datum} "
           f"({len(vikter['likaviktad'])} aktier, {len(hist)} ombalanseringar totalt).")
+    if vikter["nya_i_kassa"]:
+        print(f"    regim: RÖD, {len(vikter['nya_i_kassa'])} kandidater hölls i kassa "
+              f"({', '.join(vikter['nya_i_kassa'])})")
 
 
 # ----------------------------------------------------------------------
@@ -2032,37 +2199,45 @@ def _price_asof(close, datum):
 # ----------------------------------------------------------------------
 # §3b Del A: Episodmätning
 # ----------------------------------------------------------------------
+UT_ORSAK = {"UT UR KONSENSUS": "konsensus tappad", "EXIT (TRENDBROTT)": "trendbrott"}
+
+
 def rekonstruera_episoder(history_log):
-    """Bygg episoder ur IN/UT UR KONSENSUS-posterna (= Bästa köp-perioder).
+    """Bygg episoder ur IN-posterna och de två UT-typerna (= Bästa köp-perioder).
+
+    En Bästa köp-episod kan avslutas av antingen konsensusbortfall (UT UR
+    KONSENSUS) eller §B:s trendbrott (EXIT (TRENDBROTT)) — vilken som helst
+    stänger episoden, ut_orsak skiljer dem åt (§UTBYGGNAD_regim_exit.md).
 
     Returnerar (episoder, obalanserade_ut). Varje episod: {ticker, in_datum,
-    ut_datum|None}. Öppen episod (ingen UT) mäts till idag av mät_episoder.
-    UT utan föregående IN (aktier som var konsensus redan i första snapshoten)
-    kan inte tidsbestämmas → räknas bara, ingen episod.
+    ut_datum|None, ut_orsak|None}. Öppen episod (ingen UT) mäts till idag av
+    mät_episoder. UT utan föregående IN (aktier som var konsensus redan i
+    första snapshoten) kan inte tidsbestämmas → räknas bara, ingen episod.
     """
     ev = {}
     for e in history_log or []:
         if e["typ"] == "IN I KONSENSUS":
-            ev.setdefault(e["ticker"], []).append((e["datum"], "IN"))
-        elif e["typ"] == "UT UR KONSENSUS":
-            ev.setdefault(e["ticker"], []).append((e["datum"], "UT"))
+            ev.setdefault(e["ticker"], []).append((e["datum"], "IN", None))
+        elif e["typ"] in UT_ORSAK:
+            ev.setdefault(e["ticker"], []).append((e["datum"], "UT", UT_ORSAK[e["typ"]]))
 
     episoder, obalanserade_ut = [], 0
     for tk, lst in ev.items():
-        lst.sort()   # (datum, typ) — IN sorteras före UT samma dag
+        lst.sort(key=lambda x: (x[0], x[1]))   # datum, sen IN < UT samma dag
         öppen = None
-        for datum, typ in lst:
+        for datum, typ, orsak in lst:
             if typ == "IN":
                 if öppen is None:
                     öppen = datum
             else:
                 if öppen is not None:
-                    episoder.append({"ticker": tk, "in_datum": öppen, "ut_datum": datum})
+                    episoder.append({"ticker": tk, "in_datum": öppen, "ut_datum": datum,
+                                     "ut_orsak": orsak})
                     öppen = None
                 else:
                     obalanserade_ut += 1
         if öppen is not None:
-            episoder.append({"ticker": tk, "in_datum": öppen, "ut_datum": None})
+            episoder.append({"ticker": tk, "in_datum": öppen, "ut_datum": None, "ut_orsak": None})
     return episoder, obalanserade_ut
 
 
@@ -2121,6 +2296,7 @@ def mät_episoder(episoder, facit, yf, sektor_map):
         fr = facit_at(tk, in_d) or {}
         rader.append({
             "ticker": tk, "in_datum": in_d, "ut_datum": ep["ut_datum"], "öppen": öppen,
+            "ut_orsak": ep.get("ut_orsak"),
             "dagar": (date.fromisoformat(ut_d) - date.fromisoformat(in_d)).days,
             "avkastning": round(avk, 1),
             "spy": round(spy_avk, 1) if spy_avk is not None else None,
@@ -2364,6 +2540,9 @@ def run_utvardering():
     episod_sammanfattning(stängda, "Alla stängda")
     episod_sammanfattning([r for r in stängda if r["claude_rek_in"] == "KÖP"], "  varav Claude KÖP")
     episod_sammanfattning([r for r in stängda if r["claude_rek_in"] == "AVVAKTA"], "  varav Claude AVVAKTA")
+    episod_sammanfattning([r for r in stängda if r["ut_orsak"] == "trendbrott"], "  varav ut: trendbrott (§B)")
+    episod_sammanfattning([r for r in stängda if r["ut_orsak"] == "konsensus tappad"],
+                          "  varav ut: konsensus tappad")
     print("\n  ÖPPNA episoder (SEPARAT — kvarliggare har överlevnadsfel, blanda ej):")
     episod_sammanfattning(öppna, "Alla öppna")
 
@@ -2417,16 +2596,16 @@ def run_utvardering():
     if len(stängda) < 10:
         wsE.append([f"VARNING: för tidigt för slutsatser (n={len(stängda)} stängda)"])
     wsE.append([])
-    wsE.append(["Ticker", "In-datum", "Ut-datum", "Dagar", "Avkastning (%)",
+    wsE.append(["Ticker", "In-datum", "Ut-datum", "Ut-orsak", "Dagar", "Avkastning (%)",
                 "SPY samma period (%)", "Överavkastning (pp)",
                 "Sektor-ETF-överavk (pp)", "Poäng vid inträde", "Claude-rek vid inträde"])
     for c in wsE[wsE.max_row]:
         c.font = Font(bold=True)
     for r in sorted(ep_rader, key=lambda x: (x["öppen"], -(x["överavkastning"] or -999))):
-        wsE.append([r["ticker"], r["in_datum"], r["ut_datum"] or "öppen", r["dagar"],
+        wsE.append([r["ticker"], r["in_datum"], r["ut_datum"] or "öppen", r.get("ut_orsak"), r["dagar"],
                     r["avkastning"], r["spy"], r["överavkastning"],
                     r["sektor_etf_överavk"], r["poäng_in"], r["claude_rek_in"]])
-    for kol, br in zip("ABCDEFGHIJ", (10, 12, 12, 7, 14, 18, 18, 18, 16, 20)):
+    for kol, br in zip("ABCDEFGHIJK", (10, 12, 12, 16, 7, 14, 18, 18, 18, 16, 20)):
         wsE.column_dimensions[kol].width = br
 
     # Excel-flik: Pappersportföljer (Del B)

@@ -16,6 +16,19 @@
 Notera datum + ändring varje gång ett fält som UI:t läser ändras
 (nytt/borttaget/omdöpt/typändrat). Nyast överst.
 
+- **2026-07-15** — Regimfilter & exitregel (UTBYGGNAD_regim_exit.md). Nya
+  toppnycklar i `senaste_analys.json`: `regim` (marknadsregim GRÖN/GUL/RÖD/
+  OKÄND, SPY vs MA200) och `exit_lista` (konsensusaktier uteslutna ur Bästa
+  köp p.g.a. dödskors — pris<MA200 och MA50<MA200). `ranking` innehåller
+  ALDRIG längre exit-aktier (de flyttas till `exit_lista`); konsensuslistan
+  (`consensus`) är opåverkad. `claude`-entryn fick ett nytt fält
+  `rekommendation_visning` (visningstext, degraderas till "KÖP (vänta på
+  marknaden)" i RÖD regim — `rekommendation` förblir rått/oförändrat).
+  `portfolj_historik.json.senaste` fick fältet `exit` ({ticker: exit_datum}).
+  Nya historiktyper: `EXIT (TRENDBROTT)`, `ÅTER FRÅN EXIT`. `screener_facit.json`
+  och pappersportföljerna är opåverkade i sak (ranking exkluderar redan
+  exit-aktier innan de når dem). `pappersportfolj.json` kan nu ha en valfri
+  `nya_i_kassa`-nyckel per post (RÖD regim → nya kandidater hölls i kassa).
 - **2026-07-14** — §3b avkastningsmätning: `screener_facit.json` fick fältet
   `claude_rek`. Ny fil `pappersportfolj.json` (målvikter per ombalansering)
   dokumenterad och gist-synkad. Inga fält i `senaste_analys.json` ändrade —
@@ -37,7 +50,7 @@ Notera datum + ändring varje gång ett fält som UI:t läser ändras
 | `senaste_analys.json` | `run_analysis()` | **JA (primär)** | JA |
 | `portfolj_historik.json` | `update_history()` | Indirekt (via `historik` i resultatet) | JA |
 | `screener_facit.json` | `logga_facit()` | Nej (bara `--utvardera`) | JA |
-| `pappersportfolj.json` | *(§3b, ej byggd ännu)* | Planerad | Planerad |
+| `pappersportfolj.json` | `logga_pappersportfolj()` | Nej (bara `--utvardera`) | JA |
 | `bakgrund_topp50.json` | `run_screener()` | Nej | JA |
 | `bakgrund_cache.json` | `load_background_portfolios()` | Nej | JA |
 
@@ -66,7 +79,9 @@ finns ALLTID (skrivs ovillkorligt). Tomma tillstånd representeras med `{}`,
 | `analyses` | dict | ✅ | Teknisk/fundamental analys PER KONSENSUSAKTIE. Se **Analysis-entry**. |
 | `claude` | dict | ✅ | Claudes text per konsensusaktie. Se **Claude-entry**. Kan vara `{}`. |
 | `claude_datum` | str \| null | ✅ | Datum då Claude-texterna genererades, eller `null`. |
-| `ranking` | list | ✅ | Rangordnade konsensusaktier, bästa köp först. Se **Ranking-entry**. |
+| `ranking` | list | ✅ | Rangordnade konsensusaktier, bästa köp först. Se **Ranking-entry**. Innehåller ALDRIG exit-aktier (se `exit_lista`). |
+| `exit_lista` | list | ✅ | Konsensusaktier i EXIT (§B trendbrott), uteslutna ur `ranking`/Bästa köp. Kan vara `[]`. Se **Exit-entry**. |
+| `regim` | dict | ✅ | Marknadsregim (§A). Se **Regim**. |
 | `historik` | list | ✅ | Ändringslogg, nyaste först. Se **Historik-entry**. |
 | `innehav` | dict | ✅ | Innehavstid/vinst per aktie (konsensus + nära + bubblare). Se **Innehav-entry**. |
 | `divergens` | dict | ✅ | Divergens per KONSENSUSAKTIE. Se **Divergens-entry**. Kan vara `{}`. |
@@ -180,7 +195,8 @@ Nyckel = ticker (endast konsensusaktier, och bara de som analyserats).
 
 | Fält | Typ | Beskrivning |
 |---|---|---|
-| `rekommendation` | str | `"KÖP"`, `"AVVAKTA"`, `"SÄLJ"` eller `"?"`. |
+| `rekommendation` | str | RÅ rekommendation: `"KÖP"`, `"AVVAKTA"`, `"SÄLJ"` eller `"?"`. Ändras ALDRIG av regimfiltret (mätserier/facit läser detta fältet). |
+| `rekommendation_visning` | str | **Visa detta i UI**, inte `rekommendation`. Identisk med `rekommendation` UTOM i RÖD regim på en Bästa köp-aktie med `"KÖP"` → blir `"KÖP (vänta på marknaden)"`. |
 | `analys` | str | Fri text (markdown-vänlig). |
 | `genererad` | str | ISO-datum då texten skapades. |
 
@@ -203,6 +219,33 @@ Lista, redan sorterad (bästa köp först; aktier utan stigande trend sist).
 | `relativ_styrka` | dict \| null | ja | `{rs_pe:float\|null, etf:str, bonus:int}`. |
 | `foreslagen_vikt_%` | float \| null | ja | Volatilitetsjusterad sizing (0,5–3 %). |
 
+### Exit-entry (element i `exit_lista`)
+
+Konsensusaktier i §B:s dödskors (pris<MA200 och MA50<MA200) — uteslutna ur
+`ranking`/Bästa köp, men KVAR i `consensus` (konsensuslistan påverkas inte).
+Samma fält som **Ranking-entry** ovan, plus:
+
+| Fält | Typ | Beskrivning |
+|---|---|---|
+| `exit_datum` | str | ISO-datum då aktien FÖRST flaggades EXIT (bevaras oförändrat medan villkoret består). |
+| `exit_villkor` | str | Klartext, t.ex. `"Dödskors: pris < MA200 och MA50 < MA200"`. |
+
+### Regim (`regim`)
+
+Marknadsregim beräknad från SPY vs dess MA200 (§A), oberoende av eToro-data.
+
+| Fält | Typ | Kan vara null? | Beskrivning |
+|---|---|---|---|
+| `regim` | str | nej | `"GRÖN"` (över MA200 + stigande), `"RÖD"` (under + fallande), `"GUL"` (blandat, bara varning) eller `"OKÄND"` (SPY-data saknas — behandlas som GRÖN överallt). |
+| `spy_pris` | float \| null | ja | `null` vid `OKÄND`. |
+| `spy_ma200` | float \| null | ja | `null` vid `OKÄND`. |
+| `notis` | str \| null | ja | Förklaring vid `OKÄND` (t.ex. "SPY-hämtning misslyckades"). |
+| `datum` | str | nej | ISO-datum för beräkningen. |
+
+> Endast `"RÖD"` har effekt (Claude-textnedgradering, inga nya pappersköp).
+> `"GUL"` och `"OKÄND"` är rent informativa — hellre falskt grönt än att
+> blockera på datafel.
+
 ### Historik-entry (element i `historik`)
 
 Lista, **nyaste först** (ackumuleras över alla körningar).
@@ -217,7 +260,8 @@ Lista, **nyaste först** (ackumuleras över alla körningar).
 
 **Historik-typer** (`typ`):
 `NY PROFIL`, `NYTT INNEHAV`, `SÅLT INNEHAV`, `VIKTÄNDRING`,
-`IN I KONSENSUS`, `UT UR KONSENSUS`, `IN I NÄRA KONSENSUS`, `UT UR NÄRA KONSENSUS`.
+`IN I KONSENSUS`, `UT UR KONSENSUS`, `IN I NÄRA KONSENSUS`, `UT UR NÄRA KONSENSUS`,
+`EXIT (TRENDBROTT)`, `ÅTER FRÅN EXIT`.
 
 ### Innehav-entry (`innehav` — värdena)
 
@@ -267,7 +311,8 @@ finns i `senaste_analys.json.historik`). Struktur för fullständighet:
     "portfolios": { "användarnamn": { "ticker": vikt_pct } },
     "consensus": ["AMZN", …],          // sorterad lista
     "near_consensus": ["ASML", …],
-    "regel": "andel_hysteres_v1"       // regelversion (KONSENSUS_REGEL)
+    "regel": "andel_hysteres_v1",      // regelversion (KONSENSUS_REGEL)
+    "exit": { "TICKER": "YYYY-MM-DD" } // §B: exit_datum per aktie i EXIT just nu
   },
   "logg": [ { …Historik-entry… } ]     // nyaste först
 }
@@ -312,7 +357,8 @@ direkt — pappersportföljernas utfall visas via `utvardering.xlsx`.
       "likaviktad":  { "TICKER": andel, … },   // P1: 1/N över Bästa köp
       "poangviktad": { "TICKER": andel, … },   // P2: ∝ max(poäng−50,0), normaliserat
       "claude":      { "TICKER": andel, … }     // P4: P2 × Claude-faktor, fritt→kassa
-    }
+    },
+    "nya_i_kassa": ["TICKER", …]   // valfri — bara i RÖD regim med nya kandidater
   }
 ]
 ```
@@ -320,6 +366,9 @@ direkt — pappersportföljernas utfall visas via `utvardering.xlsx`.
 Vikterna är andelar (summa ≤ 1; resten = 0 %-avkastande kassa). `poangviktad`
 och `claude` skiljer sig ENDAST för AVVAKTA-aktier (×0,5) och SÄLJ (×0).
 P3 (SPY buy-and-hold) har inga vikter — beräknas direkt i utvärderingen.
+`nya_i_kassa` (§A regimfilter): i RÖD regim utesluts nya Bästa köp-kandidater
+(fanns inte i föregående ombalansering) helt ur alla tre portföljerna —
+nyckeln listar dem, annars saknas den (ingen tom lista skrivs).
 
 ---
 
