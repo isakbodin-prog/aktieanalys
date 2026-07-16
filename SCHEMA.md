@@ -16,6 +16,11 @@
 Notera datum + ändring varje gång ett fält som UI:t läser ändras
 (nytt/borttaget/omdöpt/typändrat). Nyast överst.
 
+- **2026-07-16** — Tokenförbrukningsloggning: ny fil `claude_forbrukning.json`
+  (en rad per Claude-anrop: tokens, orsak, modell, körningsläge), gist-synkad,
+  dokumenterad nedan. Läses bara av `--utvardera` (ny sektion
+  "Claude-förbrukning", terminalrapport). Inga fält i `senaste_analys.json`
+  ändrade — UI:t opåverkat.
 - **2026-07-16** — Claude-triggerfilter: inom dagsspärren/helgvilan omanalyseras
   bara aktier med väsentliga indikatorförändringar. `claude`-entryn (per ticker)
   fick fyra nya fält: `analys_alder_dagar`, `modell` (`claude-opus-4-8` för
@@ -58,6 +63,7 @@ Notera datum + ändring varje gång ett fält som UI:t läser ändras
 | `portfolj_historik.json` | `update_history()` | Indirekt (via `historik` i resultatet) | JA |
 | `screener_facit.json` | `logga_facit()` | Nej (bara `--utvardera`) | JA |
 | `pappersportfolj.json` | `logga_pappersportfolj()` | Nej (bara `--utvardera`) | JA |
+| `claude_forbrukning.json` | `logga_forbrukning()` | Nej (bara `--utvardera`) | JA |
 | `bakgrund_topp50.json` | `run_screener()` | Nej | JA |
 | `bakgrund_cache.json` | `load_background_portfolios()` | Nej | JA |
 
@@ -389,6 +395,53 @@ P3 (SPY buy-and-hold) har inga vikter — beräknas direkt i utvärderingen.
 `nya_i_kassa` (§A regimfilter): i RÖD regim utesluts nya Bästa köp-kandidater
 (fanns inte i föregående ombalansering) helt ur alla tre portföljerna —
 nyckeln listar dem, annars saknas den (ingen tom lista skrivs).
+
+---
+
+## `claude_forbrukning.json`
+
+Skrivs av `logga_forbrukning()` efter varje Claude-anrop; läses bara av
+`--utvardera` ("Claude-förbrukning"-sektionen, terminalrapport). Lista med
+två posttyper, skiljda på `typ`. UI:t läser den **inte**.
+
+```json
+[
+  {
+    "typ": "anrop",
+    "datum": "YYYY-MM-DD",
+    "tidsstämpel": "YYYY-MM-DDTHH:MM:SS",
+    "ticker": "TICKER",
+    "orsak": "RSI korsade 70",
+    "modell": "claude-sonnet-4-6",
+    "input_tokens": 3200,
+    "output_tokens": 450,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 1800,
+    "körningsläge": "standard"
+  },
+  {
+    "typ": "veckosummering",
+    "vecka_start": "YYYY-MM-DD",
+    "modell": "claude-sonnet-4-6",
+    "antal_anrop": 12,
+    "input_tokens": 38000,
+    "output_tokens": 5200
+  }
+]
+```
+
+`typ: "anrop"` — en rad per lyckat API-anrop. Tokenfälten (och
+`cache_*`-fälten) kan vara `null` om `usage`-objektet saknades i
+API-svaret (äldre SDK-version e.d.) — loggas ändå, kraschar aldrig.
+`körningsläge` är `"standard"` | `"divergens"` (`--divergens`) |
+`"force"` (`--force-claude`). `orsak` matchar `claude[tk].analys_orsak`
+i `senaste_analys.json` för samma anrop.
+
+`typ: "veckosummering"` — komprimerade rader äldre än 90 dagar, en post
+per (vecka, modell), skapade automatiskt av `logga_forbrukning()` när
+filen växer förbi 5000 rader. Saknar per-ticker/per-orsak-detalj (bara
+`--utvardera`:s veckoaggregering behöver dem, inte orsaks-/modell-
+fördelningen, som bara räknas på råposter).
 
 ---
 

@@ -1240,6 +1240,7 @@ def build_ranking(analyses, consensus, history_log=None, exit_info=None):
 # ----------------------------------------------------------------------
 CLAUDE_MODELL_NY = "claude-opus-4-8"        # grundanalys — aktien saknar text
 CLAUDE_MODELL_OMANALYS = "claude-sonnet-4-6"   # omanalys av befintlig aktie
+MODELL_KORTNAMN = {CLAUDE_MODELL_NY: "opus", CLAUDE_MODELL_OMANALYS: "sonnet"}
 MAX_ANALYS_ALDER_DAGAR = 7
 POANG_TRIGGER_DIFF = 10.0
 KONSENSUS_TRIGGER_DIFF = 1.0
@@ -1336,21 +1337,29 @@ def behover_ny_analys(ticker, dagens_data, senaste_analys):
 # ----------------------------------------------------------------------
 # Steg 4: Claude gör en gedigen teknisk analys per konsensusaktie
 # ----------------------------------------------------------------------
-def claude_analysis(jobb):
+def claude_analysis(jobb, körningsläge="standard"):
     """Skicka indikatordata till Claude API och få en skriven analys per aktie.
 
     jobb: {ticker: {"data": analysdikt, "model": modell-id, "orsak": str,
     "snapshot": indikator_snapshot}} — modell och orsak väljs av anroparen
     (§ Claude-triggerfilter): claude-opus-4-8 för "ny på listan"
     (grundanalys), annars claude-sonnet-4-6 (omanalys av befintlig aktie).
+    körningsläge: "standard" | "divergens" | "force" — taggas på varje
+    tokenförbrukningspost (se logga_forbrukning).
 
-    Returnerar {ticker: {"rekommendation", "analys", "genererad", "modell",
-    "analys_orsak", "indikator_snapshot"}}.
+    Returnerar (results, forbrukning):
+    - results: {ticker: {"rekommendation", "analys", "genererad", "modell",
+      "analys_orsak", "indikator_snapshot"}}.
+    - forbrukning: lista med en tokenförbrukningspost per lyckat anrop
+      (se logga_forbrukning för fältformat). Saknas usage-objektet i
+      API-svaret (äldre SDK e.d.) loggas posten ändå, med tokenfälten null
+      och en varning i terminalen — kraschar aldrig.
+
     Hoppar över (med varning) om ANTHROPIC_API_KEY saknas.
     """
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print("\nOBS: ANTHROPIC_API_KEY saknas i miljön/.env — hoppar över Claude-analysen.")
-        return {}
+        return {}, []
 
     import anthropic
     client = anthropic.Anthropic()
@@ -1388,9 +1397,10 @@ def claude_analysis(jobb):
         "<själva analysen>"
     )
 
-    from datetime import date
+    from datetime import date, datetime
     idag = date.today().isoformat()
     results = {}
+    forbrukning = []
     for ticker, job in jobb.items():
         data = job["data"]
         if "error" in data:
@@ -1420,11 +1430,196 @@ def claude_analysis(jobb):
                 "modell": modell, "analys_orsak": orsak,
                 "indikator_snapshot": job.get("snapshot"),
             }
+
+            usage = getattr(resp, "usage", None)
+            if usage is None:
+                print(f"    OBS: usage-data saknas i Claude-svaret för {ticker} (äldre SDK-version?).")
+                in_tok = out_tok = cache_skapad = cache_last = None
+            else:
+                in_tok = getattr(usage, "input_tokens", None)
+                out_tok = getattr(usage, "output_tokens", None)
+                cache_skapad = getattr(usage, "cache_creation_input_tokens", None)
+                cache_last = getattr(usage, "cache_read_input_tokens", None)
+            forbrukning.append({
+                "typ": "anrop",
+                "datum": idag,
+                "tidsstämpel": datetime.now().isoformat(timespec="seconds"),
+                "ticker": ticker,
+                "orsak": orsak,
+                "modell": modell,
+                "input_tokens": in_tok,
+                "output_tokens": out_tok,
+                "cache_creation_input_tokens": cache_skapad,
+                "cache_read_input_tokens": cache_last,
+                "körningsläge": körningsläge,
+            })
         except anthropic.APIStatusError as e:
             print(f"    Claude-fel för {ticker}: {e.status_code} {e.message}")
         except Exception as e:
             print(f"    Claude-fel för {ticker}: {e}")
-    return results
+    return results, forbrukning
+
+
+# ----------------------------------------------------------------------
+# Claude-tokenförbrukning — en post per API-anrop, gist-synkad
+# ----------------------------------------------------------------------
+FORBRUKNING_FILE = "claude_forbrukning.json"
+FORBRUKNING_KOMPRIMERA_TROSKEL = 5000   # rader — komprimera först när filen växer förbi detta
+FORBRUKNING_KOMPRIMERA_ALDRE_AN_DAGAR = 90
+
+
+def logga_forbrukning(poster):
+    """Appenda dagens Claude-tokenposter till FORBRUKNING_FILE.
+
+    Varje anropspost (se claude_analysis) har typ "anrop". Växer filen förbi
+    FORBRUKNING_KOMPRIMERA_TROSKEL rader komprimeras anropsposter äldre än
+    FORBRUKNING_KOMPRIMERA_ALDRE_AN_DAGAR dagar till veckosummor per modell
+    (typ "veckosummering") så gisten inte sväller obegränsat. Ingenting
+    krävs — no-op om poster är tom.
+    """
+    if not poster:
+        return
+    logg = []
+    if os.path.exists(FORBRUKNING_FILE):
+        try:
+            with open(FORBRUKNING_FILE) as f:
+                logg = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            logg = []
+    logg.extend(poster)
+    if len(logg) > FORBRUKNING_KOMPRIMERA_TROSKEL:
+        logg = _komprimera_forbrukning(logg)
+    with open(FORBRUKNING_FILE, "w") as f:
+        json.dump(logg, f, ensure_ascii=False, indent=2)
+
+
+def _komprimera_forbrukning(logg):
+    """Slå ihop anropsposter äldre än FORBRUKNING_KOMPRIMERA_ALDRE_AN_DAGAR
+    dagar till veckosummor (datum, antal_anrop, summa tokens) per modell.
+    Redan komprimerade veckosummeringar och färska anropsposter lämnas orörda.
+    """
+    from datetime import date, timedelta
+    gräns = (date.today() - timedelta(days=FORBRUKNING_KOMPRIMERA_ALDRE_AN_DAGAR)).isoformat()
+    behåll, komprimera = [], []
+    for p in logg:
+        if p.get("typ") == "anrop" and p.get("datum", "") < gräns:
+            komprimera.append(p)
+        else:
+            behåll.append(p)
+    if not komprimera:
+        return logg
+
+    per_vecka = {}
+    for p in komprimera:
+        d = date.fromisoformat(p["datum"])
+        vecka_start = (d - timedelta(days=d.weekday())).isoformat()
+        modell = p.get("modell") or "okänd"
+        agg = per_vecka.setdefault((vecka_start, modell),
+                                   {"antal_anrop": 0, "input_tokens": 0, "output_tokens": 0})
+        agg["antal_anrop"] += 1
+        agg["input_tokens"] += p.get("input_tokens") or 0
+        agg["output_tokens"] += p.get("output_tokens") or 0
+
+    veckosummor = [
+        {"typ": "veckosummering", "vecka_start": vecka, "modell": modell, **agg}
+        for (vecka, modell), agg in sorted(per_vecka.items())
+    ]
+    return veckosummor + behåll
+
+
+def _veckointervall(datum_str):
+    """(måndag, söndag) som ISO-strängar för veckan datum_str tillhör."""
+    from datetime import date, timedelta
+    d = date.fromisoformat(datum_str)
+    måndag = d - timedelta(days=d.weekday())
+    söndag = måndag + timedelta(days=6)
+    return måndag.isoformat(), söndag.isoformat()
+
+
+def skriv_forbrukningssammanfattning(claude_texts, forbrukning_denna_körning, idag):
+    """Terminalsammanfattning efter Claude-steget: anrop/modell, återanvända,
+    tokens denna körning + ackumulerat denna kalendervecka (mån–sön)."""
+    antal_anrop = len(forbrukning_denna_körning)
+    återanvända = len(claude_texts) - antal_anrop
+    per_modell = {}
+    for p in forbrukning_denna_körning:
+        kort = MODELL_KORTNAMN.get(p.get("modell"), p.get("modell") or "okänd")
+        per_modell[kort] = per_modell.get(kort, 0) + 1
+    modell_text = ", ".join(f"{n} {namn}" for namn, n in per_modell.items())
+    in_sum = sum(p.get("input_tokens") or 0 for p in forbrukning_denna_körning)
+    out_sum = sum(p.get("output_tokens") or 0 for p in forbrukning_denna_körning)
+
+    print(f"\nClaude-förbrukning denna körning:")
+    print(f"  {antal_anrop} anrop ({modell_text}), {återanvända} återanvända"
+          if modell_text else f"  {antal_anrop} anrop, {återanvända} återanvända")
+    if antal_anrop:
+        print(f"  Tokens denna körning: {in_sum} in / {out_sum} out")
+
+    if not os.path.exists(FORBRUKNING_FILE):
+        return
+    try:
+        with open(FORBRUKNING_FILE) as f:
+            logg = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return
+    måndag, söndag = _veckointervall(idag)
+    veckoposter = [p for p in logg if p.get("typ") == "anrop" and måndag <= p.get("datum", "") <= söndag]
+    if veckoposter:
+        v_in = sum(p.get("input_tokens") or 0 for p in veckoposter)
+        v_out = sum(p.get("output_tokens") or 0 for p in veckoposter)
+        print(f"  Denna vecka ({måndag}–{söndag}): {len(veckoposter)} anrop, {v_in} in / {v_out} out tokens")
+
+
+def claude_forbrukning_rapport():
+    """Aggregerar FORBRUKNING_FILE för --utvardera: tokens per vecka (kombinerar
+    råposter och redan komprimerade veckosummeringar), fördelning per orsak
+    och per modell (bara råposter — komprimerade veckor saknar den detaljen),
+    samt snitt tokens/anrop. Returnerar None om filen saknas/är tom.
+    """
+    if not os.path.exists(FORBRUKNING_FILE):
+        return None
+    try:
+        with open(FORBRUKNING_FILE) as f:
+            logg = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not logg:
+        return None
+
+    per_vecka = {}
+    for p in logg:
+        if p.get("typ") == "veckosummering":
+            key = p["vecka_start"]
+            agg = per_vecka.setdefault(key, {"antal_anrop": 0, "tokens": 0})
+            agg["antal_anrop"] += p.get("antal_anrop", 0)
+            agg["tokens"] += (p.get("input_tokens") or 0) + (p.get("output_tokens") or 0)
+        elif p.get("typ") == "anrop":
+            måndag, _ = _veckointervall(p["datum"])
+            agg = per_vecka.setdefault(måndag, {"antal_anrop": 0, "tokens": 0})
+            agg["antal_anrop"] += 1
+            agg["tokens"] += (p.get("input_tokens") or 0) + (p.get("output_tokens") or 0)
+
+    rå_poster = [p for p in logg if p.get("typ") == "anrop"]
+
+    def _gruppera(nyckelfunk):
+        grupper = {}
+        for p in rå_poster:
+            nyckel = nyckelfunk(p) or "okänd"
+            agg = grupper.setdefault(nyckel, {"antal": 0, "tokens": 0})
+            agg["antal"] += 1
+            agg["tokens"] += (p.get("input_tokens") or 0) + (p.get("output_tokens") or 0)
+        return grupper
+
+    per_orsak = _gruppera(lambda p: p.get("orsak"))
+    per_modell = _gruppera(lambda p: MODELL_KORTNAMN.get(p.get("modell"), p.get("modell")))
+
+    total_antal = sum(v["antal_anrop"] for v in per_vecka.values())
+    total_tokens = sum(v["tokens"] for v in per_vecka.values())
+    return {
+        "per_vecka": per_vecka, "per_orsak": per_orsak, "per_modell": per_modell,
+        "total_antal": total_antal, "total_tokens": total_tokens,
+        "snitt_per_anrop": round(total_tokens / total_antal) if total_antal else None,
+    }
 
 
 # ----------------------------------------------------------------------
@@ -1447,7 +1642,8 @@ PAPPER_FILE = "pappersportfolj.json"
 # episoder (§3b Del A) — höj bara medvetet.
 BASTA_KOP_MIN_POANG = 0
 GIST_FILES = ("portfolj_historik.json", "senaste_analys.json",
-              "bakgrund_topp50.json", "bakgrund_cache.json", FACIT_FILE, PAPPER_FILE)
+              "bakgrund_topp50.json", "bakgrund_cache.json", FACIT_FILE, PAPPER_FILE,
+              FORBRUKNING_FILE)
 
 
 def _gist_headers():
@@ -1916,6 +2112,9 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     """
     from datetime import datetime, date
 
+    # Körningsläge för tokenförbrukningsloggen (se logga_forbrukning)
+    körningsläge = "force" if force_claude else ("divergens" if refresh_background else "standard")
+
     if not API_KEY or not USER_KEY:
         raise RuntimeError("ETORO_API_KEY och ETORO_USER_KEY saknas — lägg dem i .env-filen.")
 
@@ -2104,6 +2303,7 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
 
     claude_texts = {}
     claude_datum = None
+    forbrukning_denna_körning = []
     helg = date.today().weekday() in (5, 6)   # lördag/söndag — marknaden stängd
     if with_claude:
         if helg and prev_claude and not force_claude:
@@ -2117,7 +2317,8 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
             jobb = _bygg_jobb([t for t in analyses if t not in claude_texts], force_alla=False)
             if jobb:
                 print(f"\nClaude-analys körd idag — analyserar {len(jobb)} nya aktier...")
-                claude_texts.update(claude_analysis(jobb))
+                nya_texter, forbrukning_denna_körning = claude_analysis(jobb, körningsläge)
+                claude_texts.update(nya_texter)
             else:
                 print("\nClaude-analysen är redan körd idag — återanvänder den (max 1 gång/dag).")
         else:
@@ -2127,7 +2328,8 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
                 verb = "Force-claude: analyserar alla" if force_claude else \
                        f"Claude-analys: {len(jobb)} aktier med väsentliga förändringar"
                 print(f"\n{verb} (av {len(analyses)})...")
-                claude_texts.update(claude_analysis(jobb))
+                nya_texter, forbrukning_denna_körning = claude_analysis(jobb, körningsläge)
+                claude_texts.update(nya_texter)
             else:
                 print("\nInga väsentliga förändringar sedan senaste Claude-analysen — allt återanvänds.")
             claude_datum = today if claude_texts else None
@@ -2141,6 +2343,11 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     for c in claude_texts.values():
         gen = c.get("genererad")
         c["analys_alder_dagar"] = (today_d - date.fromisoformat(gen)).days if gen else None
+
+    # Tokenförbrukning: logga dagens anrop + sammanfatta denna körning + veckan
+    if with_claude:
+        logga_forbrukning(forbrukning_denna_körning)
+        skriv_forbrukningssammanfattning(claude_texts, forbrukning_denna_körning, today)
 
     # §A: i RÖD regim nedgraderas Claudes KÖP-text på Bästa köp-aktier till
     # visning ("KÖP (vänta på marknaden)") — poängen/claude_rek i facit
@@ -2724,6 +2931,27 @@ def run_utvardering():
         print("  Parvisa differenser (vad varje lager tillför):")
         for etikett, v in pp["diffar"]:
             print(f"    {etikett:<40} {v:+.1f} pp")
+
+    # ---- Claude-förbrukning (terminalrapport, ingen Excel-flik) ----
+    fr = claude_forbrukning_rapport()
+    print("\n\n=== Claude-förbrukning ===")
+    if fr is None:
+        print("  Ingen förbrukningslogg än (claude_forbrukning.json saknas/tom).")
+    else:
+        print(f"  Totalt {fr['total_antal']} anrop, {fr['total_tokens']} tokens "
+              f"(snitt {fr['snitt_per_anrop']} tokens/anrop).")
+        print("  Per vecka (senaste 8):")
+        for vecka in sorted(fr["per_vecka"], reverse=True)[:8]:
+            v = fr["per_vecka"][vecka]
+            print(f"    {vecka}   {v['antal_anrop']:>3} anrop   {v['tokens']:>8} tokens")
+        print("  Per orsak (vad triggar mest, sorterat på tokens):")
+        for orsak, v in sorted(fr["per_orsak"].items(), key=lambda x: -x[1]["tokens"]):
+            snitt = round(v["tokens"] / v["antal"]) if v["antal"] else 0
+            print(f"    {orsak:<40} {v['antal']:>3} anrop   {v['tokens']:>8} tokens   (snitt {snitt}/anrop)")
+        print("  Per modell:")
+        for modell, v in sorted(fr["per_modell"].items(), key=lambda x: -x[1]["tokens"]):
+            snitt = round(v["tokens"] / v["antal"]) if v["antal"] else 0
+            print(f"    {modell:<10} {v['antal']:>3} anrop   {v['tokens']:>8} tokens   (snitt {snitt}/anrop)")
 
     # Excel-flik
     from openpyxl import Workbook

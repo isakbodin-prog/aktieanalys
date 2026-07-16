@@ -131,6 +131,17 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
    utan indikator_snapshot omanalyseras en gång, sedan normalt.
    --force-claude kringgår triggerfiltret helt (alla omanalyseras) men
    modellvalet styrs ändå av "ny på listan"-status.
+   TOKENFÖRBRUKNING: varje lyckat API-anrop loggas (datum/tidsstämpel,
+   ticker, orsak, modell, input/output-tokens, cache-fält, körningsläge
+   standard/divergens/force) till claude_forbrukning.json — en rad per
+   anrop, gist-synkad. Saknas usage-objektet i svaret (äldre SDK) loggas
+   raden ändå med tokenfälten null + en varning, kraschar aldrig. Filen
+   komprimeras automatiskt (rader >90 dagar → veckosummor per modell) när
+   den växer förbi 5000 rader. Terminalsammanfattning efter Claude-steget:
+   antal anrop per modell + antal återanvända, tokens denna körning,
+   ackumulerat denna kalendervecka. --utvardera har en egen sektion
+   "Claude-förbrukning" (tokens per vecka, fördelning per orsak/modell,
+   snitt per anrop) — bara terminalrapport, ingen Excel-flik.
    Webbappen hämtar eToro-data automatiskt vid sidöppning BARA om dagens
    data saknas (senaste_analys.json:s tidpunkt ≠ idag); annars visas
    befintlig data direkt. Kallstart utan lokal fil → gist_pull först.
