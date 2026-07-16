@@ -1411,7 +1411,7 @@ def claude_analysis(jobb, körningsläge="standard"):
         try:
             resp = client.messages.create(
                 model=modell,
-                max_tokens=2000,
+                max_tokens=6000,
                 thinking={"type": "adaptive"},
                 system=system,
                 messages=[{
