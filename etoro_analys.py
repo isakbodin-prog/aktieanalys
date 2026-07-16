@@ -1244,6 +1244,12 @@ MODELL_KORTNAMN = {CLAUDE_MODELL_NY: "opus", CLAUDE_MODELL_OMANALYS: "sonnet"}
 MAX_ANALYS_ALDER_DAGAR = 7
 POANG_TRIGGER_DIFF = 10.0
 KONSENSUS_TRIGGER_DIFF = 1.0
+# Output-tak: Sonnet-omanalyser kör UTAN thinking (ren textbudget, ~120 ord
+# räcker med marginal). Opus-grundanalyser behåller adaptive thinking, som
+# äter av samma max_tokens-budget — mer marginal krävs där (se incidenten
+# 2026-07-16 där 2000 utan uppdelning gav tomma svar för två aktier).
+CLAUDE_MAX_TOKENS_OMANALYS = 600
+CLAUDE_MAX_TOKENS_NY = 2000
 
 
 def _bygg_indikator_snapshot(a, poang, viktad_konsensus, exit_flagga):
@@ -1334,6 +1340,48 @@ def behover_ny_analys(ticker, dagens_data, senaste_analys):
     return False, "inga väsentliga ändringar"
 
 
+def _bygg_claude_input(ticker, a, poäng, delpoäng, viktad_konsensus, divergens_pp,
+                       exit_flagga, regim_status):
+    """Tokensnål payload till Claude — bara fälten systemprompten faktiskt
+    använder, ALDRIG hela indikator-dicten eller rå yfinance-data. Flyttal
+    avrundas till 1–2 decimaler (långa decimaler kostar tokens utan att
+    tillföra något); nyckar med None-värde utesluts helt.
+    """
+    def r(x, n=1):
+        return round(x, n) if isinstance(x, (int, float)) else x
+
+    payload = {
+        "ticker": ticker,
+        "pris": r(a.get("pris"), 2),
+        "valuta": a.get("valuta"),
+        "RSI14": r(a.get("RSI14")),
+        "MA50": r(a.get("MA50"), 2),
+        "MA200": r(a.get("MA200"), 2),
+        "stigande_trend": a.get("stigande_trend"),
+        "MACD_över_signal": a.get("MACD_över_signal"),
+        "golden_cross": a.get("golden_cross"),
+        "bollinger_position_%": r(a.get("bollinger_position_%")),
+        "avstånd_52v_högsta_%": r(a.get("avstånd_52v_högsta_%")),
+        "avkastning_1m_%": r(a.get("avkastning_1m_%")),
+        "avkastning_3m_%": r(a.get("avkastning_3m_%")),
+        "poäng": r(poäng),
+        "delpoäng": {k: r(v) for k, v in (delpoäng or {}).items()} or None,
+        "viktad_konsensus": r(viktad_konsensus),
+        "divergens_mot_bakgrundsgruppen_pp": r(divergens_pp),
+        "eps_rev_90d_pct": r(a.get("eps_rev_90d_pct")),
+        "riktkurs": r(a.get("riktkurs"), 2),
+        "riktkurs_spridningskvot": r(a.get("riktkurs_spridningskvot"), 2),
+        "uppsida_%": r(a.get("uppsida_%")),
+        "investerarnas_innehavstid_dagar_längst": a.get("investerarnas_innehavstid_dagar_längst"),
+        "investerarnas_innehavstid_dagar_snitt": a.get("investerarnas_innehavstid_dagar_snitt"),
+        "investerarnas_upparbetade_vinst_pct_snitt": r(a.get("investerarnas_upparbetade_vinst_pct_snitt")),
+        "nasta_rapport": a.get("nasta_rapport"),
+        "regim": regim_status,
+        "exit": exit_flagga,
+    }
+    return {k: v for k, v in payload.items() if v is not None}
+
+
 # ----------------------------------------------------------------------
 # Steg 4: Claude gör en gedigen teknisk analys per konsensusaktie
 # ----------------------------------------------------------------------
@@ -1366,15 +1414,15 @@ def claude_analysis(jobb, körningsläge="standard"):
 
     system = (
         "Du är en erfaren teknisk analytiker på en svensk bank. Du får tekniska "
-        "indikatorer och analytikerdata för en aktie i JSON-format. Skriv en gedigen "
-        "men koncis teknisk analys på svenska (150–250 ord) som väger samman trend "
-        "(MA50/MA200, golden cross), momentum (RSI, MACD, 1m/3m-avkastning), "
-        "volatilitet (Bollingerband, avstånd till 52-veckorsnivåer), volymtrend och "
-        "analytikernas riktkurs. Var konkret: nämn nivåer och vad som skulle ändra bilden.\n\n"
-        "VIKTIGASTE KRITERIET för investeraren är stigande trend: aktien ska handlas "
-        "över MA200 och MA200 ska vara stigande (fälten över_MA200, MA200_stigande, "
-        "stigande_trend). Är stigande_trend false får rekommendationen ALDRIG vara KÖP "
-        "— högst AVVAKTA, och ange då tydligt vilken nivå som måste återtas för att "
+        "indikatorer och analytikerdata för en aktie i JSON-format (fälten är redan "
+        "urvalda — inga andra data finns). Skriv en koncis teknisk analys på svenska "
+        "(max ca 120 ord) som väger samman trend (MA50/MA200, golden cross), momentum "
+        "(RSI, MACD, 1m/3m-avkastning), volatilitet (Bollingerband, avstånd till "
+        "52-veckorsnivåer) och analytikernas riktkurs. Var konkret: nämn nivåer och "
+        "vad som skulle ändra bilden.\n\n"
+        "VIKTIGASTE KRITERIET för investeraren är stigande trend (fältet "
+        "stigande_trend). Är den false får rekommendationen ALDRIG vara KÖP — högst "
+        "AVVAKTA, och ange då tydligt vilken nivå som måste återtas för att "
         "trendkriteriet ska vara uppfyllt. Är trendkriteriet uppfyllt, bedöm övriga "
         "indikatorer som vanligt.\n\n"
         "VINSTHEMTAGNINGSRISK: fälten investerarnas_innehavstid_dagar_* och "
@@ -1383,11 +1431,14 @@ def claude_analysis(jobb, körningsläge="standard"):
         "hög upparbetad vinst ökar risken att de börjar sälja och ta hem vinsten — "
         "väg in det i bedömningen och kommentera det uttryckligen när risken är "
         "förhöjd.\n\n"
-        "DIVERGENS: fältet ägs_av_pct_av_bakgrundsgruppen visar hur stor andel av en "
-        "bred referensgrupp (topp ~50 screenade traders) som äger aktien, och "
-        "divergens_mot_bakgrundsgruppen_pp är skillnaden mot signalgruppens andel. "
-        "Hög divergens = signalgruppens unika övertygelse (starkare signal); låg eller "
-        "negativ = flockbeteende där 'alla' redan äger aktien. Nämn det kort.\n\n"
+        "DIVERGENS: fältet divergens_mot_bakgrundsgruppen_pp visar hur mycket mer "
+        "(eller mindre) signalgruppen äger aktien jämfört med en bred referensgrupp "
+        "(topp ~50 screenade traders). Hög divergens = unik övertygelse (starkare "
+        "signal); låg/negativ = flockbeteende. Nämn det kort.\n\n"
+        "REGIM/EXIT: fältet regim anger marknadsläget (GRÖN/GUL/RÖD/OKÄND, SPY vs "
+        "dess MA200) — är det RÖD bör nya köp vänta, väg in det. Fältet exit=true "
+        "betyder att aktien har ett dödskors (pris och MA50 båda under MA200) — "
+        "betona att trenden brutits även om andra indikatorer ser bra ut.\n\n"
         "VALUTA: alla priser och nivåer anges i aktiens handelsvaluta (fältet "
         "'valuta', t.ex. USD, EUR, SEK). Använd rätt valutabeteckning — skriv "
         "ALDRIG 'kr' på ett USD-pris. Är valutan USD, skriv priser som t.ex. "
@@ -1403,16 +1454,19 @@ def claude_analysis(jobb, körningsläge="standard"):
     forbrukning = []
     for ticker, job in jobb.items():
         data = job["data"]
-        if "error" in data:
-            continue
         modell = job.get("model") or CLAUDE_MODELL_NY
         orsak = job.get("orsak", "?")
+        # Sonnet-omanalyser: ingen thinking (ren textbudget). Opus-grundanalyser
+        # ("ny på listan"): behåller adaptive thinking, med mer max_tokens-marginal.
+        är_ny = modell == CLAUDE_MODELL_NY
+        thinking_param = {"type": "adaptive"} if är_ny else {"type": "disabled"}
+        max_tok = CLAUDE_MAX_TOKENS_NY if är_ny else CLAUDE_MAX_TOKENS_OMANALYS
         print(f"  Claude analyserar {ticker} ({modell}, orsak: {orsak})...")
         try:
             resp = client.messages.create(
                 model=modell,
-                max_tokens=6000,
-                thinking={"type": "adaptive"},
+                max_tokens=max_tok,
+                thinking=thinking_param,
                 system=system,
                 messages=[{
                     "role": "user",
@@ -2272,6 +2326,7 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
         print(f"EXIT (trendbrott), uteslutna ur Bästa köp: "
               f"{', '.join(r['ticker'] for r in exit_lista)}")
     poang_by_ticker = {r["ticker"]: r["poäng"] for r in ranking + exit_lista}
+    delpoang_by_ticker = {r["ticker"]: r["delpoäng"] for r in ranking + exit_lista}
 
     # Claude skriver en gedigen teknisk analys per konsensusaktie
     # (max en gång per dag — återanvänd dagens texter om de finns). Steg 4:
@@ -2297,7 +2352,12 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
             else:
                 behövs, orsak = behover_ny_analys(tk, snapshot, prev_entry)
             if behövs:
-                jobb[tk] = {"data": a, "orsak": orsak, "snapshot": snapshot,
+                dv = divergence.get(tk, {})
+                claude_input = _bygg_claude_input(
+                    tk, a, poang_by_ticker.get(tk), delpoang_by_ticker.get(tk),
+                    cons.get("viktad_konsensus"), dv.get("divergens_pp"),
+                    tk in exit_info, regim["regim"])
+                jobb[tk] = {"data": claude_input, "orsak": orsak, "snapshot": snapshot,
                            "model": CLAUDE_MODELL_NY if ny else CLAUDE_MODELL_OMANALYS}
         return jobb
 

@@ -109,10 +109,20 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
 3. Teknisk analys via yfinance: RSI14, MA50/MA200, golden cross, MACD,
    Bollingerband, 52v-nivåer, 1m/3m-momentum, volymtrend
 4. Analytikerdata via yfinance: rekommendation, riktkurs, uppsida %
-5. Claude-analys: indikatorerna skickas till Claude API (anthropic-SDK,
-   adaptive thinking) som skriver en analys på svenska per konsensusaktie +
-   rekommendation (KÖP/AVVAKTA/SÄLJ). Kräver ANTHROPIC_API_KEY i .env —
-   saknas den hoppas steget över.
+5. Claude-analys: en tokensnål, explicit fältlista (ticker, pris, valuta,
+   RSI14, MA50/MA200, stigande_trend, MACD/golden-cross-status, Bollinger,
+   52v-läge, 1m/3m-momentum, poäng v2 + delpoäng, viktad konsensus,
+   divergens, EPS-rev, riktkurs+spridning, uppsida, innehavstid/vinst,
+   nästa rapport, regim/EXIT) — ALDRIG hela indikator-dicten eller rå
+   yfinance-data — byggs av _bygg_claude_input() och skickas till Claude
+   API (anthropic-SDK) som skriver en analys på svenska (max ~120 ord) per
+   konsensusaktie + rekommendation (KÖP/AVVAKTA/SÄLJ). Kräver
+   ANTHROPIC_API_KEY i .env — saknas den hoppas steget över.
+   Sonnet-omanalyser körs UTAN adaptive thinking (ren textbudget,
+   max_tokens=600); Opus-grundanalyser ("ny på listan") behåller adaptive
+   thinking med mer marginal (max_tokens=2000), eftersom thinking äter av
+   samma budget. Trimningen (2026-07-16) sänkte snittförbrukningen från
+   ~10 300 till ~1 600 tokens/anrop (85 %) utan kvalitetsförlust.
    DAGSSPÄRR: körs max 1 gång/dag (claude_datum i senaste_analys.json);
    samma dag återanvänds texterna, men NYA konsensusaktier analyseras.
    Kringgå med force_claude=True / CLI-flaggan --force-claude.
