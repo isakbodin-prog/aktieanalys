@@ -16,6 +16,13 @@
 Notera datum + ändring varje gång ett fält som UI:t läser ändras
 (nytt/borttaget/omdöpt/typändrat). Nyast överst.
 
+- **2026-07-16** — Claude-triggerfilter: inom dagsspärren/helgvilan omanalyseras
+  bara aktier med väsentliga indikatorförändringar. `claude`-entryn (per ticker)
+  fick fyra nya fält: `analys_alder_dagar`, `modell` (`claude-opus-4-8` för
+  "ny på listan", annars `claude-sonnet-4-6`), `analys_orsak` och
+  `indikator_snapshot` (internt, UI behöver inte läsa det). `rekommendation`/
+  `rekommendation_visning`/`analys`/`genererad` oförändrade i sak. Gamla texter
+  (utan `indikator_snapshot`) omanalyseras en gång automatiskt, sen normalt.
 - **2026-07-15** — Regimfilter & exitregel (UTBYGGNAD_regim_exit.md). Nya
   toppnycklar i `senaste_analys.json`: `regim` (marknadsregim GRÖN/GUL/RÖD/
   OKÄND, SPY vs MA200) och `exit_lista` (konsensusaktier uteslutna ur Bästa
@@ -198,9 +205,22 @@ Nyckel = ticker (endast konsensusaktier, och bara de som analyserats).
 | `rekommendation` | str | RÅ rekommendation: `"KÖP"`, `"AVVAKTA"`, `"SÄLJ"` eller `"?"`. Ändras ALDRIG av regimfiltret (mätserier/facit läser detta fältet). |
 | `rekommendation_visning` | str | **Visa detta i UI**, inte `rekommendation`. Identisk med `rekommendation` UTOM i RÖD regim på en Bästa köp-aktie med `"KÖP"` → blir `"KÖP (vänta på marknaden)"`. |
 | `analys` | str | Fri text (markdown-vänlig). |
-| `genererad` | str | ISO-datum då texten skapades. |
+| `genererad` | str | ISO-datum då texten senast (om)genererades. |
+| `analys_alder_dagar` | int \| null | Dagar sedan `genererad`, beräknat varje körning (även för återanvända texter). `null` om `genererad` saknas. |
+| `modell` | str \| null | Modellen som skrev texten: `"claude-opus-4-8"` (grundanalys — aktien var "ny på listan") eller `"claude-sonnet-4-6"` (omanalys av befintlig aktie). `null` på texter från före Claude-triggerfiltret (2026-07-16). |
+| `analys_orsak` | str \| null | Varför texten (om)genererades senast, t.ex. `"ny på listan"`, `"RSI korsade 70"`, `"poäng ändrad 65.2 → 78.9"`, `"force-claude"`. Loggas för att se vad som triggar flest omanalyser. `null` på gamla texter. |
+| `indikator_snapshot` | dict \| null | Ögonblicksbild av indikatorerna vid genereringstillfället — jämförs mot dagens värden nästa körning för att avgöra omanalys. `{rsi, pris, ma50, ma200, macd_diff, over_ma200, golden_cross, poang, viktad_konsensus, exit}` (alla nullbara). `null` på texter från före filtret — det UI:t behöver inte läsa, det är internt facit för backend. |
 
 → Saknas en konsensusaktie i `claude`: visa "ingen Claude-analys".
+
+**Claude-triggerfilter** (2026-07-16): inom dagsspärren/helgvilan (ovan)
+omanalyseras en aktie ENDAST vid väsentlig förändring sedan `indikator_snapshot`
+sparades — annars återanvänds texten oförändrad (`analys_orsak` uppdateras
+inte, bara `analys_alder_dagar`). UI kan visa t.ex. "Analys från {genererad}
+(återanvänd, orsak: inga väsentliga ändringar)" när `genererad` ≠ dagens datum,
+annars "(ny analys, orsak: {analys_orsak})". `--force-claude` kringgår filtret
+helt (alla omanalyseras) men modellvalet (`modell`) styrs ändå av om aktien var
+"ny på listan" eller inte.
 
 ### Ranking-entry (element i `ranking`)
 

@@ -110,14 +110,27 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
    Bollingerband, 52v-nivåer, 1m/3m-momentum, volymtrend
 4. Analytikerdata via yfinance: rekommendation, riktkurs, uppsida %
 5. Claude-analys: indikatorerna skickas till Claude API (anthropic-SDK,
-   modell claude-opus-4-8, adaptive thinking) som skriver en analys på
-   svenska per konsensusaktie + rekommendation (KÖP/AVVAKTA/SÄLJ).
-   Kräver ANTHROPIC_API_KEY i .env — saknas den hoppas steget över.
+   adaptive thinking) som skriver en analys på svenska per konsensusaktie +
+   rekommendation (KÖP/AVVAKTA/SÄLJ). Kräver ANTHROPIC_API_KEY i .env —
+   saknas den hoppas steget över.
    DAGSSPÄRR: körs max 1 gång/dag (claude_datum i senaste_analys.json);
    samma dag återanvänds texterna, men NYA konsensusaktier analyseras.
    Kringgå med force_claude=True / CLI-flaggan --force-claude.
    HELGVILA: lördag/söndag återanvänds senaste analysen (marknaden
    stängd) och appen hämtar ingen ny data — fredagens data är färsk.
+   CLAUDE-TRIGGERFILTER (inom dagsspärren/helgvilan, ändrar den INTE):
+   behover_ny_analys(ticker, dagens_data, senaste_analys) avgör om en
+   redan analyserad aktie omanalyseras — bara vid väsentlig förändring
+   sedan claude[tk].indikator_snapshot sparades (RSI korsat 30/70, pris
+   korsat MA200, MACD korsat signallinjen, golden/death cross, EXIT-status
+   ändrad, poäng ändrat >10, viktad konsensus ändrad >1.0, eller text äldre
+   än 7 dagar). Annars återanvänds texten och claude[tk].analys_alder_dagar
+   uppdateras. Modellval: claude-opus-4-8 för grundanalys ("ny på listan" —
+   aktien saknar sparad text), annars claude-sonnet-4-6 för omanalys av
+   befintlig aktie (loggas i claude[tk].modell/.analys_orsak). Gamla texter
+   utan indikator_snapshot omanalyseras en gång, sedan normalt.
+   --force-claude kringgår triggerfiltret helt (alla omanalyseras) men
+   modellvalet styrs ändå av "ny på listan"-status.
    Webbappen hämtar eToro-data automatiskt vid sidöppning BARA om dagens
    data saknas (senaste_analys.json:s tidpunkt ≠ idag); annars visas
    befintlig data direkt. Kallstart utan lokal fil → gist_pull först.

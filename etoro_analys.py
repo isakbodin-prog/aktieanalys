@@ -1236,12 +1236,116 @@ def build_ranking(analyses, consensus, history_log=None, exit_info=None):
 
 
 # ----------------------------------------------------------------------
+# Steg 4 — Claude-triggerfilter: bara väsentliga förändringar omanalyseras
+# ----------------------------------------------------------------------
+CLAUDE_MODELL_NY = "claude-opus-4-8"        # grundanalys — aktien saknar text
+CLAUDE_MODELL_OMANALYS = "claude-sonnet-4-6"   # omanalys av befintlig aktie
+MAX_ANALYS_ALDER_DAGAR = 7
+POANG_TRIGGER_DIFF = 10.0
+KONSENSUS_TRIGGER_DIFF = 1.0
+
+
+def _bygg_indikator_snapshot(a, poang, viktad_konsensus, exit_flagga):
+    """Kompakt ögonblicksbild av det som avgör om en Claude-text blivit inaktuell.
+
+    Sparas bredvid varje analystext (claude[tk].indikator_snapshot) så nästa
+    körning kan jämföra dagens värden mot de som gällde när texten skrevs.
+    """
+    macd, macd_sig = a.get("MACD"), a.get("MACD_signal")
+    return {
+        "rsi": a.get("RSI14"),
+        "pris": a.get("pris"),
+        "ma50": a.get("MA50"),
+        "ma200": a.get("MA200"),
+        "macd_diff": round(macd - macd_sig, 4) if macd is not None and macd_sig is not None else None,
+        "over_ma200": a.get("över_MA200"),
+        "golden_cross": a.get("golden_cross"),
+        "poang": poang,
+        "viktad_konsensus": viktad_konsensus,
+        "exit": exit_flagga,
+    }
+
+
+def _rsi_korsade_troskel(old_rsi, new_rsi, troskel):
+    if old_rsi is None or new_rsi is None:
+        return False
+    return (old_rsi < troskel <= new_rsi) or (new_rsi < troskel <= old_rsi)
+
+
+def behover_ny_analys(ticker, dagens_data, senaste_analys):
+    """Avgör om `ticker` behöver Claude-omanalyseras. Returnerar (bool, orsak).
+
+    dagens_data: dagens indikator_snapshot (se _bygg_indikator_snapshot).
+    senaste_analys: förra körningens claude[ticker]-dict, eller None/tomt om
+    aktien saknar sparad text (ny på listan/kallstart) — analyseras då alltid.
+    Saknar den befintliga texten fältet indikator_snapshot (gammal fil från
+    före detta filter) behandlas den likaså som saknad — engångsomanalys,
+    därefter normal jämförelse.
+
+    Analyseras om ENDAST vid: saknad text, RSI-korsning av 30/70, pris-korsning
+    av MA200, MACD-korsning av signallinjen, golden/death cross, ändrad
+    EXIT-status, poängändring > 10, viktad konsensus-ändring > 1.0, eller
+    text äldre än MAX_ANALYS_ALDER_DAGAR dagar.
+    """
+    from datetime import date
+    if not senaste_analys or not senaste_analys.get("analys"):
+        return True, "ny på listan"
+
+    gammal = senaste_analys.get("indikator_snapshot")
+    if not gammal:
+        return True, "saknar indikatorsnapshot (gammal analys, engångsuppdatering)"
+
+    genererad = senaste_analys.get("genererad")
+    if genererad:
+        alder = (date.today() - date.fromisoformat(genererad)).days
+        if alder > MAX_ANALYS_ALDER_DAGAR:
+            return True, f"text äldre än {MAX_ANALYS_ALDER_DAGAR} dagar ({alder} dagar)"
+
+    if _rsi_korsade_troskel(gammal.get("rsi"), dagens_data.get("rsi"), 30):
+        return True, "RSI korsade 30"
+    if _rsi_korsade_troskel(gammal.get("rsi"), dagens_data.get("rsi"), 70):
+        return True, "RSI korsade 70"
+
+    go, gn = gammal.get("over_ma200"), dagens_data.get("over_ma200")
+    if go is not None and gn is not None and go != gn:
+        return True, "pris korsade MA200"
+
+    gmd, nmd = gammal.get("macd_diff"), dagens_data.get("macd_diff")
+    if gmd is not None and nmd is not None and (gmd > 0) != (nmd > 0):
+        return True, "MACD korsade signallinjen"
+
+    ggc, ngc = gammal.get("golden_cross"), dagens_data.get("golden_cross")
+    if ggc is not None and ngc is not None and ggc != ngc:
+        return True, "dödskors/goldenkors inträffade"
+
+    ge, ne = gammal.get("exit"), dagens_data.get("exit")
+    if ge is not None and ne is not None and ge != ne:
+        return True, ("aktien gick in i EXIT" if ne else "aktien återinträdde från EXIT")
+
+    gp, np_ = gammal.get("poang"), dagens_data.get("poang")
+    if gp is not None and np_ is not None and abs(np_ - gp) > POANG_TRIGGER_DIFF:
+        return True, f"poäng ändrad {gp:.1f} → {np_:.1f}"
+
+    gk, nk = gammal.get("viktad_konsensus"), dagens_data.get("viktad_konsensus")
+    if gk is not None and nk is not None and abs(nk - gk) > KONSENSUS_TRIGGER_DIFF:
+        return True, f"viktad konsensus ändrad {gk:.1f} → {nk:.1f}"
+
+    return False, "inga väsentliga ändringar"
+
+
+# ----------------------------------------------------------------------
 # Steg 4: Claude gör en gedigen teknisk analys per konsensusaktie
 # ----------------------------------------------------------------------
-def claude_analysis(analyses):
+def claude_analysis(jobb):
     """Skicka indikatordata till Claude API och få en skriven analys per aktie.
 
-    Returnerar {ticker: {"rekommendation": str, "analys": str}}.
+    jobb: {ticker: {"data": analysdikt, "model": modell-id, "orsak": str,
+    "snapshot": indikator_snapshot}} — modell och orsak väljs av anroparen
+    (§ Claude-triggerfilter): claude-opus-4-8 för "ny på listan"
+    (grundanalys), annars claude-sonnet-4-6 (omanalys av befintlig aktie).
+
+    Returnerar {ticker: {"rekommendation", "analys", "genererad", "modell",
+    "analys_orsak", "indikator_snapshot"}}.
     Hoppar över (med varning) om ANTHROPIC_API_KEY saknas.
     """
     if not os.environ.get("ANTHROPIC_API_KEY"):
@@ -1287,13 +1391,16 @@ def claude_analysis(analyses):
     from datetime import date
     idag = date.today().isoformat()
     results = {}
-    for ticker, data in analyses.items():
+    for ticker, job in jobb.items():
+        data = job["data"]
         if "error" in data:
             continue
-        print(f"  Claude analyserar {ticker}...")
+        modell = job.get("model") or CLAUDE_MODELL_NY
+        orsak = job.get("orsak", "?")
+        print(f"  Claude analyserar {ticker} ({modell}, orsak: {orsak})...")
         try:
             resp = client.messages.create(
-                model="claude-opus-4-8",
+                model=modell,
                 max_tokens=2000,
                 thinking={"type": "adaptive"},
                 system=system,
@@ -1308,7 +1415,11 @@ def claude_analysis(analyses):
                 first, _, rest = text.partition("\n")
                 rating = first.split(":", 1)[1].strip()
                 text = rest.strip()
-            results[ticker] = {"rekommendation": rating, "analys": text, "genererad": idag}
+            results[ticker] = {
+                "rekommendation": rating, "analys": text, "genererad": idag,
+                "modell": modell, "analys_orsak": orsak,
+                "indikator_snapshot": job.get("snapshot"),
+            }
         except anthropic.APIStatusError as e:
             print(f"    Claude-fel för {ticker}: {e.status_code} {e.message}")
         except Exception as e:
@@ -1702,18 +1813,27 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
 
     # Teknisk analys (indikatorer + Claudes text)
     exit_by_ticker = {r["ticker"]: r for r in (exit_lista or [])}
+    today_str = date.today().isoformat()
     ws = wb.create_sheet("Teknisk analys", 3)
     ws.append(["Instrument", "Stigande trend", "Över MA200", "MA200 stigande",
                "Pris", "MA50", "MA200", "Golden cross", "RSI14",
                "MACD > signal", "Bollinger (%)", "Avstånd 52v-högsta (%)",
                "Avkastning 1m (%)", "Avkastning 3m (%)", "Volymtrend (%)", "EXIT (trendbrott)",
-               "Claudes rekommendation", "Claudes analys", "Analys genererad", "EPS-rev 90d (%)"])
+               "Claudes rekommendation", "Claudes analys", "Analysstatus", "Modell",
+               "EPS-rev 90d (%)"])
     style_header(ws)
     for ticker, _ in consensus_order:
         a = analyses.get(ticker, {})
         c = claude_texts.get(ticker, {})
         trend = a.get("stigande_trend")
         exit_r = exit_by_ticker.get(ticker)
+        gen = c.get("genererad")
+        if gen == today_str:
+            status = f"Analys från {gen} (ny analys, orsak: {c.get('analys_orsak') or '?'})"
+        elif gen:
+            status = f"Analys från {gen} (återanvänd, orsak: inga väsentliga ändringar)"
+        else:
+            status = ""
         ws.append([
             ticker, "JA" if trend else ("NEJ" if trend is not None else "?"),
             a.get("över_MA200"), a.get("MA200_stigande"),
@@ -1722,7 +1842,8 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
             a.get("avstånd_52v_högsta_%"), a.get("avkastning_1m_%"), a.get("avkastning_3m_%"),
             a.get("volymtrend_20d_vs_3m_%"),
             f"sedan {exit_r['exit_datum']}" if exit_r else "",
-            c.get("rekommendation_visning") or c.get("rekommendation"), c.get("analys"), c.get("genererad"),
+            c.get("rekommendation_visning") or c.get("rekommendation"), c.get("analys"), status,
+            c.get("modell"),
             a.get("eps_rev_90d_pct"),
         ])
         if trend is not None:
@@ -1934,11 +2055,52 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
             a["ägs_av_pct_av_bakgrundsgruppen"] = dv["bakgrund_andel_pct"]
             a["divergens_mot_bakgrundsgruppen_pp"] = dv["divergens_pp"]
 
+    # Ändringshistorik mot förra körningen (görs innan rangordningen så
+    # nettoflödet §5 kan använda dagens nyloggade ändringar också). Tar även
+    # med exit_status så EXIT (TRENDBROTT)/ÅTER FRÅN EXIT loggas (§B). Flyttad
+    # hit (före Claude-steget) så dagens poäng/exit-status finns tillgängliga
+    # för Claude-triggerfiltret nedan.
+    print("\nUppdaterar ändringshistorik...")
+    history_log, exit_info = update_history(portfolios, list(consensus.keys()),
+                                             list(near_consensus.keys()), exit_status)
+
+    # Sammanvägd rangordning (exit_lista = Bästa köp-kandidater i EXIT, §B)
+    ranking, exit_lista = build_ranking(analyses, consensus, history_log, exit_info)
+    print("\nRangordning (bästa köp först):")
+    for i, r in enumerate(ranking, start=1):
+        print(f"  {i}. {r['ticker']}: {r['poäng']} p (trend {'OK' if r['trend_ok'] else 'EJ OK'})")
+    if exit_lista:
+        print(f"EXIT (trendbrott), uteslutna ur Bästa köp: "
+              f"{', '.join(r['ticker'] for r in exit_lista)}")
+    poang_by_ticker = {r["ticker"]: r["poäng"] for r in ranking + exit_lista}
+
     # Claude skriver en gedigen teknisk analys per konsensusaktie
-    # (max en gång per dag — återanvänd dagens texter om de finns)
+    # (max en gång per dag — återanvänd dagens texter om de finns). Steg 4:
+    # Claude-triggerfilter — inom dagsspärren/helgvilan analyseras bara
+    # aktier med väsentliga förändringar sedan texten skrevs om.
     prev_claude = prev.get("claude") or {}
     prev_datum = prev.get("claude_datum")
     today = date.today().isoformat()
+
+    def _bygg_jobb(tickers, force_alla):
+        jobb = {}
+        for tk in tickers:
+            a = analyses.get(tk, {})
+            if "error" in a:
+                continue
+            cons = consensus.get(tk, {})
+            snapshot = _bygg_indikator_snapshot(
+                a, poang_by_ticker.get(tk), cons.get("viktad_konsensus"), tk in exit_info)
+            prev_entry = prev_claude.get(tk)
+            ny = not prev_entry or not prev_entry.get("analys")
+            if force_alla:
+                behövs, orsak = True, ("ny på listan" if ny else "force-claude")
+            else:
+                behövs, orsak = behover_ny_analys(tk, snapshot, prev_entry)
+            if behövs:
+                jobb[tk] = {"data": a, "orsak": orsak, "snapshot": snapshot,
+                           "model": CLAUDE_MODELL_NY if ny else CLAUDE_MODELL_OMANALYS}
+        return jobb
 
     claude_texts = {}
     claude_datum = None
@@ -1952,37 +2114,33 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
         elif prev_datum == today and not force_claude:
             claude_texts = {t: c for t, c in prev_claude.items() if t in consensus}
             claude_datum = prev_datum
-            missing = {t: a for t, a in analyses.items()
-                       if t not in claude_texts and "error" not in a}
-            if missing:
-                print(f"\nClaude-analys körd idag — analyserar bara {len(missing)} nya aktier...")
-                claude_texts.update(claude_analysis(missing))
+            jobb = _bygg_jobb([t for t in analyses if t not in claude_texts], force_alla=False)
+            if jobb:
+                print(f"\nClaude-analys körd idag — analyserar {len(jobb)} nya aktier...")
+                claude_texts.update(claude_analysis(jobb))
             else:
                 print("\nClaude-analysen är redan körd idag — återanvänder den (max 1 gång/dag).")
         else:
-            print("\nClaude-analys av konsensusaktierna...")
-            claude_texts = claude_analysis(analyses)
+            claude_texts = {t: c for t, c in prev_claude.items() if t in consensus}
+            jobb = _bygg_jobb(list(analyses.keys()), force_alla=force_claude)
+            if jobb:
+                verb = "Force-claude: analyserar alla" if force_claude else \
+                       f"Claude-analys: {len(jobb)} aktier med väsentliga förändringar"
+                print(f"\n{verb} (av {len(analyses)})...")
+                claude_texts.update(claude_analysis(jobb))
+            else:
+                print("\nInga väsentliga förändringar sedan senaste Claude-analysen — allt återanvänds.")
             claude_datum = today if claude_texts else None
     else:
         # Claude bortvald denna körning — visa senaste kända texter
         claude_texts = {t: c for t, c in prev_claude.items() if t in consensus}
         claude_datum = prev_datum
 
-    # Ändringshistorik mot förra körningen (görs innan rangordningen så
-    # nettoflödet §5 kan använda dagens nyloggade ändringar också). Tar även
-    # med exit_status så EXIT (TRENDBROTT)/ÅTER FRÅN EXIT loggas (§B).
-    print("\nUppdaterar ändringshistorik...")
-    history_log, exit_info = update_history(portfolios, list(consensus.keys()),
-                                             list(near_consensus.keys()), exit_status)
-
-    # Sammanvägd rangordning (exit_lista = Bästa köp-kandidater i EXIT, §B)
-    ranking, exit_lista = build_ranking(analyses, consensus, history_log, exit_info)
-    print("\nRangordning (bästa köp först):")
-    for i, r in enumerate(ranking, start=1):
-        print(f"  {i}. {r['ticker']}: {r['poäng']} p (trend {'OK' if r['trend_ok'] else 'EJ OK'})")
-    if exit_lista:
-        print(f"EXIT (trendbrott), uteslutna ur Bästa köp: "
-              f"{', '.join(r['ticker'] for r in exit_lista)}")
+    # analys_alder_dagar (för visning: "Analys från ... (återanvänd, ...)")
+    # sätts för samtliga texter, oavsett om de precis skrevs eller återanvänds
+    for c in claude_texts.values():
+        gen = c.get("genererad")
+        c["analys_alder_dagar"] = (today_d - date.fromisoformat(gen)).days if gen else None
 
     # §A: i RÖD regim nedgraderas Claudes KÖP-text på Bästa köp-aktier till
     # visning ("KÖP (vänta på marknaden)") — poängen/claude_rek i facit
