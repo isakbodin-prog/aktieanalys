@@ -97,10 +97,15 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
    KONSENSUS_ANDEL_KVAR=0.50 för att LIGGA KVAR (kvarnivån gäller bara
    aktier som var konsensus förra körningen — läses ur portfolj_historik-
    .json via load_previous_consensus()). Antal ägare mot ceil(andel×N):
-   6 profiler → IN 4, KVAR 3. DUBBELVILLKOR (skalat från §1): antal ägare
-   >= tröskeln OCH viktad_konsensus (Σ färskhetsvikt) >= samma tal — en
-   trio där någons senaste köp passerat 180 dgr (vikt 0,5) faller ur trots
-   3 ägare. Tre nivåer returneras av compute_consensus(): konsensus,
+   6 profiler → IN 4, KVAR 3. DUBBELVILLKOR (skalat från §1) gäller ENDAST
+   INnivån: antal ägare >= tröskeln OCH viktad_konsensus (Σ färskhetsvikt)
+   >= samma tal — en ny kandidat med gamla/passiva köpare klarar inte IN på
+   bara antal. På KVARnivån (hysteres, redan etablerad konsensusaktie)
+   styr ENDAST antalsvillkoret listmedlemskapet — designbeslut 2026-07-17
+   efter TSM-fallet (3 ägare, viktad_konsensus 2,5 < 3,0 hade annars fällt
+   ur den trots oförändrat antal). Viktad konsensus påverkar ändå poängen
+   (Konsensus-komponenten i compute_score_v2), bara inte listmedlemskapet.
+   Tre nivåer returneras av compute_consensus(): konsensus,
    nära konsensus (klarar kvarnivåns antal men ej in), bubblarnivå
    (exakt en ägare under kvarnivån — bubblare = de med divergens ≥ +30).
    Historiksnapshoten bär regelversion (KONSENSUS_REGEL) — nivåövergångar
@@ -108,16 +113,36 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
    spammar inte "Lämnat listorna". IN/UT-poster anger tillämpad tröskel.
 3. Teknisk analys via yfinance: RSI14, MA50/MA200, golden cross, MACD,
    Bollingerband, 52v-nivåer, 1m/3m-momentum, volymtrend
-4. Analytikerdata via yfinance: rekommendation, riktkurs, uppsida %
+4. Analytikerdata via yfinance: rekommendation, riktkurs, uppsida %, EPS-rev,
+   forward P/E, PEG, riktkursspridning, nästa rapport, sektor. Alla dessa
+   fält (och SPY-regimen i steg 0) kan falla bort tyst om Yahoo blockerar/
+   rate-limitar molnservrar (Render) — även när prishistoriken i steg 3
+   fungerar (separata yfinance-anrop: .info/.eps_trend/.calendar).
+   DIAGNOSTIK (2026-07-17): varje tyst fallback loggar nu ticker + fält +
+   feltyp/meddelande via _logga_yf_miss() — "OBS: yfinance-miss för
+   TICKER.fält: ExceptionType: meddelande" (eller en beskrivning om det
+   inte var en exception, t.ex. ett misstänkt tunt .info-svar utan fel).
+   Kör lokalt och jämför med Render-loggen för att skilja "miljön blockerad"
+   från "koden trasig". FALLBACK: faller ett §7–§10-fält bort trots att
+   prisdata (datakälla Yahoo) finns, återanvänds fältet från förra
+   körningens analys (samma mönster som riktkurs-fallbacken); SPY-regimen
+   återanvänder på samma sätt förra kända GRÖN/GUL/RÖD i stället för att
+   visa OKÄND.
+   Värderingspoängen (§7, se UTBYGGNAD_screener_v2.md) blir NEUTRAL (5/10)
+   om data helt saknas — aldrig 0, som annars är omöjligt att skilja från
+   en genuint dyr aktie. Excel-kommentar flaggar cellen när detta slår till.
 5. Claude-analys: en tokensnål, explicit fältlista (ticker, pris, valuta,
    RSI14, MA50/MA200, stigande_trend, MACD/golden-cross-status, Bollinger,
    52v-läge, 1m/3m-momentum, poäng v2 + delpoäng, viktad konsensus,
    divergens, EPS-rev, riktkurs+spridning, uppsida, innehavstid/vinst,
-   nästa rapport, regim/EXIT) — ALDRIG hela indikator-dicten eller rå
+   nästa rapport, EXIT) — ALDRIG hela indikator-dicten eller rå
    yfinance-data — byggs av _bygg_claude_input() och skickas till Claude
-   API (anthropic-SDK) som skriver en analys på svenska (max ~120 ord) per
-   konsensusaktie + rekommendation (KÖP/AVVAKTA/SÄLJ). Kräver
-   ANTHROPIC_API_KEY i .env — saknas den hoppas steget över.
+   API (anthropic-SDK) som skriver en analys på svenska (max ~120 ord,
+   naturligt språk utan råa fältnamn eller markdown) per konsensusaktie +
+   rekommendation (KÖP/AVVAKTA/SÄLJ). Regimen skickas INTE med i prompten
+   (visas redan i rapportheadern; en återanvänd text skulle annars bära en
+   inaktuell regim-etikett) — se i stället regimskifte-triggern nedan.
+   Kräver ANTHROPIC_API_KEY i .env — saknas den hoppas steget över.
    Sonnet-omanalyser körs UTAN adaptive thinking (ren textbudget,
    max_tokens=600); Opus-grundanalyser ("ny på listan") behåller adaptive
    thinking med mer marginal (max_tokens=2000), eftersom thinking äter av
@@ -133,8 +158,9 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
    redan analyserad aktie omanalyseras — bara vid väsentlig förändring
    sedan claude[tk].indikator_snapshot sparades (RSI korsat 30/70, pris
    korsat MA200, MACD korsat signallinjen, golden/death cross, EXIT-status
-   ändrad, poäng ändrat >10, viktad konsensus ändrad >1.0, eller text äldre
-   än 7 dagar). Annars återanvänds texten och claude[tk].analys_alder_dagar
+   ändrad, poäng ändrat >10, viktad konsensus ändrad >1.0, regimskifte
+   GRÖN↔RÖD (GUL/OKÄND triggar inte), eller text äldre än 7 dagar). Annars
+   återanvänds texten och claude[tk].analys_alder_dagar
    uppdateras. Modellval: claude-opus-4-8 för grundanalys ("ny på listan" —
    aktien saknar sparad text), annars claude-sonnet-4-6 för omanalys av
    befintlig aktie (loggas i claude[tk].modell/.analys_orsak). Gamla texter

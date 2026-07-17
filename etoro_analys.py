@@ -248,9 +248,16 @@ def compute_consensus(portfolios, port_meta=None, previous_consensus=None):
     ceil(KONSENSUS_ANDEL_KVAR × N) — kvarnivån tillämpas bara för aktier
     som var konsensus i föregående körning (previous_consensus).
 
-    Dubbelvillkor (UTBYGGNAD_screener_v2 §1, skalat): antal ägare >= tröskel
-    OCH viktad_konsensus (Σ farskhetsvikt) >= samma tal. Viktkravet följer
-    alltså antalskravet i stället för hårdkodade 3.0.
+    Dubbelvillkor (UTBYGGNAD_screener_v2 §1, skalat) gäller ENDAST INnivån:
+    antal ägare >= tröskel OCH viktad_konsensus (Σ farskhetsvikt) >= samma
+    tal — en ny aktie med gamla/passiva köpare klarar inte innivån bara på
+    antal. På KVARnivån (hysteres) styr ENDAST antalsvillkoret listmedlem-
+    skapet — en redan etablerad konsensusaktie åker inte ut bara för att
+    innehaven åldrats (design­beslut 2026-07-17, TSM-fallet: 3 ägare men
+    viktad_konsensus 2,5 < 3,0 skulle annars fällt den ur listan trots
+    oförändrat antal ägare). Viktad konsensus påverkar ändå fortsatt
+    poängen (Konsensus-komponenten i compute_score_v2), bara inte om
+    aktien finns kvar på listan.
 
     Returnerar (consensus, near_consensus, bubblar_niva):
     - consensus: klarar sin tillämpliga tröskel (in eller kvar)
@@ -288,7 +295,11 @@ def compute_consensus(portfolios, port_meta=None, previous_consensus=None):
                  "senaste_köp_dagar": min(dagar_lista) if dagar_lista else None,
                  "tröskel": troskel,
                  "hysteres": hysteres}
-        if len(holders) >= troskel and entry["viktad_konsensus"] >= float(troskel):
+        if hysteres:
+            klarar_konsensus = len(holders) >= troskel   # bara antal på KVAR-nivån
+        else:
+            klarar_konsensus = len(holders) >= troskel and entry["viktad_konsensus"] >= float(troskel)
+        if klarar_konsensus:
             consensus[ticker] = entry
         elif len(holders) >= kvar_krav:
             near_consensus[ticker] = entry
@@ -543,7 +554,20 @@ def fetch_overview_alphavantage(yticker):
         return {}
 
 
-def next_earnings_date(t):
+def _logga_yf_miss(ticker, falt, exception=None, detalj=None):
+    """Diagnostisk logg vid tyst yfinance-fallback (§ felsökning 2026-07-17).
+    Skiljer 'fältet fanns inte i svaret' (exception=None, detalj beskriver läget)
+    från 'blockering/rate-limit' (exception satt — visar typ + meddelande, t.ex.
+    HTTPError 429) — annars ser en tom kolumn likadan ut oavsett orsak.
+    """
+    if exception is not None:
+        print(f"    OBS: yfinance-miss för {ticker}.{falt}: "
+              f"{type(exception).__name__}: {exception}")
+    else:
+        print(f"    OBS: yfinance-miss för {ticker}.{falt}: {detalj or 'tomt/oväntat svar'}")
+
+
+def next_earnings_date(t, ticker="?"):
     """Nästa kommande rapportdatum (ISO-datum) från yfinance .calendar. None vid miss.
 
     yfinance har bytt returformat mellan versioner (dict eller DataFrame) —
@@ -554,12 +578,14 @@ def next_earnings_date(t):
     try:
         cal = t.calendar
         if cal is None:
+            _logga_yf_miss(ticker, "calendar", detalj="calendar var None")
             return None
         if isinstance(cal, dict):
             datum_lista = cal.get("Earnings Date")
         else:
             datum_lista = cal.loc["Earnings Date"].dropna().tolist()
         if not datum_lista:
+            _logga_yf_miss(ticker, "calendar", detalj="inget 'Earnings Date' i svaret")
             return None
         if not isinstance(datum_lista, (list, tuple)):
             datum_lista = [datum_lista]
@@ -570,16 +596,18 @@ def next_earnings_date(t):
             except Exception:
                 continue
         if not kandidater:
+            _logga_yf_miss(ticker, "calendar", detalj="kunde inte tolka datumen i svaret")
             return None
         kandidater.sort()
         idag = date.today()
         framtida = [d for d in kandidater if d >= idag]
         return (framtida[0] if framtida else kandidater[-1]).isoformat()
-    except Exception:
+    except Exception as e:
+        _logga_yf_miss(ticker, "calendar", e)
         return None
 
 
-def eps_revision_pct(t):
+def eps_revision_pct(t, ticker="?"):
     """EPS-estimatrevidering för innevarande räkenskapsår över 90 dgr (%).
 
     Riktningen på analytikernas vinstestimat — stigande estimat stärker en
@@ -594,10 +622,12 @@ def eps_revision_pct(t):
     try:
         et = t.eps_trend
         if et is None or et.empty or "0y" not in et.index:
+            _logga_yf_miss(ticker, "eps_trend", detalj="eps_trend tomt eller saknar '0y'-raden")
             return None
         rad = et.loc["0y"]
         cur, old = float(rad["current"]), float(rad["90daysAgo"])
-    except Exception:
+    except Exception as e:
+        _logga_yf_miss(ticker, "eps_trend", e)
         return None
     if old < 0 <= cur:
         return 50.0
@@ -631,7 +661,12 @@ def analyze_ticker(ticker):
     if hist is not None:
         try:
             info = t.info or {}
-        except Exception:
+            if len(info) < 5:
+                # Yahoo kan svara 200 med ett nästan tomt info-objekt vid
+                # blockering/rate-limit — ingen exception, men lika tyst annars
+                _logga_yf_miss(ticker, "info", detalj=f"misstänkt tunt svar ({len(info)} nycklar)")
+        except Exception as e:
+            _logga_yf_miss(ticker, "info", e)
             info = {}   # kursdata funkade men inte analytikerdatan — fylls från förra körningen
     else:
         hist = fetch_history_alphavantage(yticker)
@@ -693,7 +728,7 @@ def analyze_ticker(ticker):
         target = info.get("targetMeanPrice")
         n_analysts = info.get("numberOfAnalystOpinions")
         upside = round((target / price - 1) * 100, 1) if target else None
-        eps_rev = eps_revision_pct(t) if source == "Yahoo" else None
+        eps_rev = eps_revision_pct(t, ticker) if source == "Yahoo" else None
 
         # §7 Värdering: forward P/E (fallback trailing), PEG — jämförs mot
         # sektormedian i ett efterföljande steg (build_ranking)
@@ -707,7 +742,7 @@ def analyze_ticker(ticker):
             spridningskvot = round((target_high - target_low) / target, 2)
 
         # §9 Nästa rapportdatum (endast Yahoo — ingen poängeffekt, bara varning)
-        nasta_rapport = next_earnings_date(t) if source == "Yahoo" else None
+        nasta_rapport = next_earnings_date(t, ticker) if source == "Yahoo" else None
 
         # §10 Industry (för sektor→ETF-mappning, halvledare→SOXX)
         industry = info.get("industry")
@@ -894,18 +929,30 @@ def compute_sector_pe_medians(analyses, tickers):
 
 
 def compute_valuation_score(a, sector_medians):
-    """§7 Värderingspoäng (0–10): forward P/E mot sektormedian + PEG-bonus."""
-    varde = 0.0
+    """§7 Värderingspoäng (0–10): forward P/E mot sektormedian + PEG-bonus.
+
+    Saknas BÅDA underlagen (ingen P/E-jämförelse OCH ingen PEG) → neutral
+    5.0 (degraderingsprincipen: saknad data ska aldrig straffa som "dyr
+    aktie", 0 var tidigare omöjligt att skilja från genuint neutral
+    värdering). Finns minst ett av underlagen räknas poängen som vanligt.
+    Returnerar (poäng, är_neutral).
+    """
     fpe, peg = a.get("forward_pe"), a.get("peg_ratio")
     median_val = sector_medians.get(a.get("sector"))
-    if fpe and median_val:
+    pe_kand = bool(fpe and median_val)
+    peg_kand = peg is not None
+    if not pe_kand and not peg_kand:
+        return 5.0, True
+
+    varde = 0.0
+    if pe_kand:
         if fpe < 0.8 * median_val:
             varde += 10
         elif fpe > 1.5 * median_val:
             varde -= 10
-    if peg is not None and 0 < peg < 1.5:
+    if peg_kand and 0 < peg < 1.5:
         varde += 5
-    return round(max(0.0, min(10.0, varde)), 1)
+    return round(max(0.0, min(10.0, varde)), 1), False
 
 
 # §10 Relativ styrka mot sektor — ETF-mappning (halvledare→SOXX oavsett sektor)
@@ -1119,10 +1166,11 @@ def compute_score_v2(a, cons, cluster_factor=1.0, nettoflode_pe=None,
     delpoang["Konsensus"] = round(max(0.0, min(25.0, kon)), 1)
 
     # Värdering (tak 10) — helt ny komponent (§7)
-    delpoang["Värdering"] = compute_valuation_score(a, sector_medians)
+    värdering_poäng, värdering_neutral = compute_valuation_score(a, sector_medians)
+    delpoang["Värdering"] = värdering_poäng
 
     total = round(sum(delpoang.values()), 1)
-    return total, delpoang
+    return total, delpoang, värdering_neutral
 
 
 # ----------------------------------------------------------------------
@@ -1138,6 +1186,8 @@ def compute_market_regime():
         import yfinance as yf
         h = yf.Ticker("SPY").history(period="1y", auto_adjust=True)
         if h.empty or len(h) < 221:
+            _logga_yf_miss("SPY", "history",
+                          detalj=f"otillräcklig historik ({len(h)} rader, behöver ≥221)")
             return {"regim": "OKÄND", "spy_pris": None, "spy_ma200": None,
                     "notis": "otillräcklig SPY-historik", "datum": date.today().isoformat()}
         close = h["Close"]
@@ -1154,7 +1204,8 @@ def compute_market_regime():
             regim = "GUL"
         return {"regim": regim, "spy_pris": round(pris, 2), "spy_ma200": round(ma200, 2),
                 "notis": None, "datum": date.today().isoformat()}
-    except Exception:
+    except Exception as e:
+        _logga_yf_miss("SPY", "history", e)
         return {"regim": "OKÄND", "spy_pris": None, "spy_ma200": None,
                 "notis": "SPY-hämtning misslyckades", "datum": date.today().isoformat()}
 
@@ -1208,8 +1259,9 @@ def build_ranking(analyses, consensus, history_log=None, exit_info=None):
         nf = netto.get(ticker)
         rs_bonus = rs.get(ticker, {}).get("bonus", 0)
 
-        total, delpoang = compute_score_v2(a, cons, cluster_factor=kf, nettoflode_pe=nf,
-                                           rs_bonus=rs_bonus, sector_medians=sector_medians)
+        total, delpoang, värdering_neutral = compute_score_v2(
+            a, cons, cluster_factor=kf, nettoflode_pe=nf,
+            rs_bonus=rs_bonus, sector_medians=sector_medians)
         total_v1, delpoang_v1 = compute_score(a, cons, cluster_factor=kf, nettoflode_pe=nf)
 
         rad = {
@@ -1219,6 +1271,7 @@ def build_ranking(analyses, consensus, history_log=None, exit_info=None):
             "trend_ok": bool(a.get("stigande_trend")),
             "delpoäng": delpoang,
             "delpoäng_v1": delpoang_v1,
+            "vardering_neutral": värdering_neutral,
             "kluster": kluster.get(ticker),
             "nettoflode_30d_pe": nf,
             "relativ_styrka": rs.get(ticker),
@@ -1252,11 +1305,14 @@ CLAUDE_MAX_TOKENS_OMANALYS = 600
 CLAUDE_MAX_TOKENS_NY = 2000
 
 
-def _bygg_indikator_snapshot(a, poang, viktad_konsensus, exit_flagga):
+def _bygg_indikator_snapshot(a, poang, viktad_konsensus, exit_flagga, regim_status=None):
     """Kompakt ögonblicksbild av det som avgör om en Claude-text blivit inaktuell.
 
     Sparas bredvid varje analystext (claude[tk].indikator_snapshot) så nästa
     körning kan jämföra dagens värden mot de som gällde när texten skrevs.
+    regim_status sparas ENDAST för triggerjämförelsen (GRÖN↔RÖD-skifte) —
+    regimen skickas inte längre till Claude i själva prompten (se
+    _bygg_claude_input), den visas redan i rapportheadern.
     """
     macd, macd_sig = a.get("MACD"), a.get("MACD_signal")
     return {
@@ -1270,6 +1326,7 @@ def _bygg_indikator_snapshot(a, poang, viktad_konsensus, exit_flagga):
         "poang": poang,
         "viktad_konsensus": viktad_konsensus,
         "exit": exit_flagga,
+        "regim": regim_status,
     }
 
 
@@ -1291,7 +1348,8 @@ def behover_ny_analys(ticker, dagens_data, senaste_analys):
 
     Analyseras om ENDAST vid: saknad text, RSI-korsning av 30/70, pris-korsning
     av MA200, MACD-korsning av signallinjen, golden/death cross, ändrad
-    EXIT-status, poängändring > 10, viktad konsensus-ändring > 1.0, eller
+    EXIT-status, poängändring > 10, viktad konsensus-ändring > 1.0,
+    regimskifte GRÖN↔RÖD (GUL/OKÄND triggar inte — för brusigt), eller
     text äldre än MAX_ANALYS_ALDER_DAGAR dagar.
     """
     from datetime import date
@@ -1337,15 +1395,23 @@ def behover_ny_analys(ticker, dagens_data, senaste_analys):
     if gk is not None and nk is not None and abs(nk - gk) > KONSENSUS_TRIGGER_DIFF:
         return True, f"viktad konsensus ändrad {gk:.1f} → {nk:.1f}"
 
+    gr, nr = gammal.get("regim"), dagens_data.get("regim")
+    if {gr, nr} == {"GRÖN", "RÖD"}:   # GUL/OKÄND ingår aldrig i mängden -> triggar inte
+        return True, f"regimskifte {gr} → {nr}"
+
     return False, "inga väsentliga ändringar"
 
 
 def _bygg_claude_input(ticker, a, poäng, delpoäng, viktad_konsensus, divergens_pp,
-                       exit_flagga, regim_status):
+                       exit_flagga):
     """Tokensnål payload till Claude — bara fälten systemprompten faktiskt
     använder, ALDRIG hela indikator-dicten eller rå yfinance-data. Flyttal
     avrundas till 1–2 decimaler (långa decimaler kostar tokens utan att
     tillföra något); nyckar med None-värde utesluts helt.
+
+    Regim skickas INTE med (visas redan i rapportheadern, och en återanvänd
+    text skulle annars bära en inaktuell regim-etikett) — regimskifte
+    GRÖN↔RÖD är i stället en omanalys-trigger, se behover_ny_analys.
     """
     def r(x, n=1):
         return round(x, n) if isinstance(x, (int, float)) else x
@@ -1376,7 +1442,6 @@ def _bygg_claude_input(ticker, a, poäng, delpoäng, viktad_konsensus, divergens
         "investerarnas_innehavstid_dagar_snitt": a.get("investerarnas_innehavstid_dagar_snitt"),
         "investerarnas_upparbetade_vinst_pct_snitt": r(a.get("investerarnas_upparbetade_vinst_pct_snitt")),
         "nasta_rapport": a.get("nasta_rapport"),
-        "regim": regim_status,
         "exit": exit_flagga,
     }
     return {k: v for k, v in payload.items() if v is not None}
@@ -1435,14 +1500,17 @@ def claude_analysis(jobb, körningsläge="standard"):
         "(eller mindre) signalgruppen äger aktien jämfört med en bred referensgrupp "
         "(topp ~50 screenade traders). Hög divergens = unik övertygelse (starkare "
         "signal); låg/negativ = flockbeteende. Nämn det kort.\n\n"
-        "REGIM/EXIT: fältet regim anger marknadsläget (GRÖN/GUL/RÖD/OKÄND, SPY vs "
-        "dess MA200) — är det RÖD bör nya köp vänta, väg in det. Fältet exit=true "
-        "betyder att aktien har ett dödskors (pris och MA50 båda under MA200) — "
-        "betona att trenden brutits även om andra indikatorer ser bra ut.\n\n"
+        "EXIT: fältet exit=true betyder att aktien har ett dödskors (pris och MA50 "
+        "båda under MA200) — betona att trenden brutits även om andra indikatorer "
+        "ser bra ut.\n\n"
         "VALUTA: alla priser och nivåer anges i aktiens handelsvaluta (fältet "
         "'valuta', t.ex. USD, EUR, SEK). Använd rätt valutabeteckning — skriv "
         "ALDRIG 'kr' på ett USD-pris. Är valutan USD, skriv priser som t.ex. "
         "'242 USD' eller '$242', aldrig kronor.\n\n"
+        "SPRÅK: skriv naturligt löpande språk, som till en investerare — använd "
+        "ALDRIG råa fältnamn i texten (t.ex. 'stigande_trend är false' eller "
+        "'exit=true'), skriv i stället vad det betyder i klartext. Använd heller "
+        "ingen markdown-formatering (inga **, #, listor) — ren löptext.\n\n"
         "Svara EXAKT i detta format:\n"
         "REKOMMENDATION: <KÖP | AVVAKTA | SÄLJ>\n"
         "<själva analysen>"
@@ -1873,6 +1941,7 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
     from datetime import date, timedelta
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.comments import Comment
 
     holding_info = holding_info or {}
     nyhets_cutoff = (date.today() - timedelta(days=7)).isoformat()
@@ -1920,6 +1989,9 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
                        d.get("Värdering"), rs.get("rs_pe"), r.get("foreslagen_vikt_%"),
                        c_rek.get("rekommendation_visning") or c_rek.get("rekommendation", "")])
             ws.cell(row=ws.max_row, column=5).fill = green if r["trend_ok"] else red
+            if r.get("vardering_neutral"):
+                ws.cell(row=ws.max_row, column=10).comment = Comment(
+                    "Data saknas → neutral (5/10)", "System")
 
         if exit_lista:
             ws.append([])
@@ -2231,6 +2303,15 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
         except (json.JSONDecodeError, OSError):
             prev = {}
 
+    # SPY-hämtningen kan blockeras separat (samma Yahoo-bibliotek/symptom som
+    # analysfälten ovan) — återanvänd förra kända regimen hellre än OKÄND
+    if regim["regim"] == "OKÄND":
+        prev_regim = prev.get("regim") or {}
+        if prev_regim.get("regim") and prev_regim["regim"] != "OKÄND":
+            print(f"    SPY-regim återanvänd från {prev.get('tidpunkt', 'förra körningen')[:10]}: "
+                  f"{prev_regim['regim']} ({regim.get('notis')})")
+            regim = {**prev_regim, "notis": f"återanvänd — {regim.get('notis')}"}
+
     # Teknisk analys + analytikerdata
     import time
     analyses = {}
@@ -2267,6 +2348,25 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
             if a.get("pris"):
                 a["uppsida_%"] = round((pa["riktkurs"] / a["pris"] - 1) * 100, 1)
             print(f"    {ticker}: analytikerdata återanvänd från {prev.get('tidpunkt', 'förra körningen')[:10]}")
+
+    # Yahoo kan blockera .info/.eps_trend/.calendar separat från historik/pris
+    # (felsökt 2026-07-17 — Render-specifikt, fälten fylls lokalt). Fältvis
+    # återanvändning från förra körningen, oberoende av riktkurs-fallbacken ovan.
+    ATERANVANDBARA_INFO_FALT = [
+        "eps_rev_90d_pct", "forward_pe", "peg_ratio", "riktkurs_hog", "riktkurs_lag",
+        "riktkurs_spridningskvot", "nasta_rapport", "sector", "industry",
+    ]
+    for ticker, a in analyses.items():
+        if "error" in a:
+            continue
+        pa = prev_analyses.get(ticker) or {}
+        återanvänt = [f for f in ATERANVANDBARA_INFO_FALT
+                     if a.get(f) is None and pa.get(f) is not None]
+        for falt in återanvänt:
+            a[falt] = pa[falt]
+        if återanvänt:
+            print(f"    {ticker}: {len(återanvänt)} värderings-/rapportfält återanvända från "
+                  f"{prev.get('tidpunkt', 'förra körningen')[:10]} ({', '.join(återanvänt)})")
 
     # §B Exitregel (trendbrott): pris < MA200 OCH MA50 < MA200 — beräknas här
     # (kräver bara analyses) men appliceras i update_history/build_ranking nedan
@@ -2344,7 +2444,8 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
                 continue
             cons = consensus.get(tk, {})
             snapshot = _bygg_indikator_snapshot(
-                a, poang_by_ticker.get(tk), cons.get("viktad_konsensus"), tk in exit_info)
+                a, poang_by_ticker.get(tk), cons.get("viktad_konsensus"), tk in exit_info,
+                regim["regim"])
             prev_entry = prev_claude.get(tk)
             ny = not prev_entry or not prev_entry.get("analys")
             if force_alla:
@@ -2356,7 +2457,7 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
                 claude_input = _bygg_claude_input(
                     tk, a, poang_by_ticker.get(tk), delpoang_by_ticker.get(tk),
                     cons.get("viktad_konsensus"), dv.get("divergens_pp"),
-                    tk in exit_info, regim["regim"])
+                    tk in exit_info)
                 jobb[tk] = {"data": claude_input, "orsak": orsak, "snapshot": snapshot,
                            "model": CLAUDE_MODELL_NY if ny else CLAUDE_MODELL_OMANALYS}
         return jobb

@@ -123,6 +123,15 @@ oberoende signaler. Klustring överskattar konsensusstyrkan.
   nära konsensus + bubblare ger ~30 tickers, tillräckligt för grov median).
 - Poäng: forward P/E < 0.8× sektormedian → +10; > 1.5× → -10; PEG < 1.5 → +5.
 - Ny poängkomponent "Värdering (10)" — se §12.
+- **Neutral vid saknad data (2026-07-17):** saknas BÅDE P/E-jämförelsen
+  (ingen forward_pe eller ingen sektormedian) OCH PEG helt → poängen sätts
+  till **5** (mitten av 0–10-skalan), inte 0. Degraderingsprincipen kräver
+  neutral vid databortfall — 0 straffade tidigare saknad data som om
+  aktien vore kraftigt övervärderad, vilket är fel (och omöjligt att skilja
+  från en genuint mellanliggande värdering). Finns minst ett av underlagen
+  (P/E-jämförelse ELLER PEG) räknas poängen normalt utifrån det som finns.
+  Excel-kommentar ("Data saknas → neutral (5/10)") flaggar cellen i
+  Rangordning-fliken när neutralfallet slår till.
 
 ### 8. Riktkursspridning
 
