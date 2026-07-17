@@ -16,6 +16,14 @@
 Notera datum + ändring varje gång ett fält som UI:t läser ändras
 (nytt/borttaget/omdöpt/typändrat). Nyast överst.
 
+- **2026-07-17** — Regimhämtningens robusthet: `regim` fick två nya fält —
+  `regim_kalla` (vilken ticker i fallbackkedjan SPY/^GSPC/VOO/IVV som
+  lyckades) och `regim_datum` (datum för senaste LYCKADE beräkning, skiljs
+  från `datum` = denna körnings datum). `notis` kan nu eskaleras till en
+  synlig varning ("⚠ regim baserad på X dagar gammal data") när en
+  återanvänd regim är äldre än 5 handelsdagar — UI bör rendera den
+  varningsfärgad. `spy_pris`/`spy_ma200` avser numera `regim_kalla`-
+  tickern, inte nödvändigtvis bokstavligen SPY.
 - **2026-07-16** — Tokenförbrukningsloggning: ny fil `claude_forbrukning.json`
   (en rad per Claude-anrop: tokens, orsak, modell, körningsläge), gist-synkad,
   dokumenterad nedan. Läses bara av `--utvardera` (ny sektion
@@ -258,19 +266,25 @@ Samma fält som **Ranking-entry** ovan, plus:
 
 ### Regim (`regim`)
 
-Marknadsregim beräknad från SPY vs dess MA200 (§A), oberoende av eToro-data.
+Marknadsregim beräknad från ett S&P 500-index vs dess MA200 (§A), oberoende
+av eToro-data. Provar en ticker-fallbackkedja (SPY → ^GSPC → VOO → IVV) —
+se `regim_kalla`.
 
 | Fält | Typ | Kan vara null? | Beskrivning |
 |---|---|---|---|
-| `regim` | str | nej | `"GRÖN"` (över MA200 + stigande), `"RÖD"` (under + fallande), `"GUL"` (blandat, bara varning) eller `"OKÄND"` (SPY-data saknas — behandlas som GRÖN överallt). |
-| `spy_pris` | float \| null | ja | `null` vid `OKÄND`. |
-| `spy_ma200` | float \| null | ja | `null` vid `OKÄND`. |
-| `notis` | str \| null | ja | Förklaring vid `OKÄND` (t.ex. "SPY-hämtning misslyckades"). |
-| `datum` | str | nej | ISO-datum för beräkningen. |
+| `regim` | str | nej | `"GRÖN"` (över MA200 + stigande), `"RÖD"` (under + fallande), `"GUL"` (blandat, bara varning) eller `"OKÄND"` (hela fallbackkedjan missade — behandlas som GRÖN överallt). |
+| `spy_pris` | float \| null | ja | Priset för `regim_kalla`-tickern (inte nödvändigtvis bokstavligen SPY). `null` vid `OKÄND`. |
+| `spy_ma200` | float \| null | ja | MA200 för `regim_kalla`-tickern. `null` vid `OKÄND`. |
+| `regim_kalla` | str \| null | ja | Vilken ticker i fallbackkedjan (`"SPY"`, `"^GSPC"`, `"VOO"` eller `"IVV"`) som faktiskt lyckades. `null` om alla fyra missade (`OKÄND`) eller vid återanvänd regim från en körning som saknar fältet. |
+| `regim_datum` | str \| null | ja | ISO-datum för SENAST LYCKADE beräkning (skiljer sig från `datum` när regimen är återanvänd — se notisen). `null` bara om ingen lyckad beräkning någonsin skett. |
+| `notis` | str \| null | ja | `null` vid lyckad färsk beräkning. Vid återanvänd regim: `"återanvänd — …"` (≤5 handelsdagar sedan `regim_datum`) eller eskalerad varning `"⚠ regim baserad på X dagar gammal data"` (>5 handelsdagar) — visa den senare tydligt (varningsfärg) i UI. Vid `OKÄND`: förklaring, t.ex. "alla index i fallbackkedjan misslyckades (SPY, ^GSPC, VOO, IVV)". |
+| `datum` | str | nej | ISO-datum för DENNA körning (oavsett om regimen är färsk eller återanvänd). |
 
 > Endast `"RÖD"` har effekt (Claude-textnedgradering, inga nya pappersköp).
 > `"GUL"` och `"OKÄND"` är rent informativa — hellre falskt grönt än att
-> blockera på datafel.
+> blockera på datafel. En återanvänd regim med `notis` som börjar på "⚠"
+> ska renderas som en synlig varning (t.ex. varningsfärg på regimbadgen) —
+> regimvärdet i sig fungerar som vanligt (GRÖN beter sig som GRÖN).
 
 ### Historik-entry (element i `historik`)
 

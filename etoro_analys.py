@@ -1176,20 +1176,19 @@ def compute_score_v2(a, cons, cluster_factor=1.0, nettoflode_pe=None,
 # ----------------------------------------------------------------------
 # §A Marknadsregimfilter (UTBYGGNAD_regim_exit.md)
 # ----------------------------------------------------------------------
-def compute_market_regime():
-    """SPY vs MA200 avgör marknadsregim: GRÖN (över + stigande), RÖD (under
-    + fallande), annars GUL (blandat, bara varning). yfinance-miss/otillräcklig
-    historik → OKÄND, som nedströms behandlas identiskt med GRÖN (hellre
-    falskt grönt än att blockera på datafel)."""
-    from datetime import date
+REGIM_TICKER_KEDJA = ["SPY", "^GSPC", "VOO", "IVV"]   # alla S&P 500 — identisk MA200-regim
+
+
+def _hamta_regim_for_ticker(ticker):
+    """Ett försök i regimkedjan. Returnerar {regim, spy_pris, spy_ma200} vid
+    lyckad beräkning, annars None (och loggar orsaken via _logga_yf_miss)."""
+    import yfinance as yf
     try:
-        import yfinance as yf
-        h = yf.Ticker("SPY").history(period="1y", auto_adjust=True)
+        h = yf.Ticker(ticker).history(period="1y", auto_adjust=True)
         if h.empty or len(h) < 221:
-            _logga_yf_miss("SPY", "history",
+            _logga_yf_miss(ticker, "history",
                           detalj=f"otillräcklig historik ({len(h)} rader, behöver ≥221)")
-            return {"regim": "OKÄND", "spy_pris": None, "spy_ma200": None,
-                    "notis": "otillräcklig SPY-historik", "datum": date.today().isoformat()}
+            return None
         close = h["Close"]
         pris = float(close.iloc[-1])
         ma200_serie = close.rolling(200).mean()
@@ -1202,12 +1201,57 @@ def compute_market_regime():
             regim = "RÖD"
         else:
             regim = "GUL"
-        return {"regim": regim, "spy_pris": round(pris, 2), "spy_ma200": round(ma200, 2),
-                "notis": None, "datum": date.today().isoformat()}
+        return {"regim": regim, "spy_pris": round(pris, 2), "spy_ma200": round(ma200, 2)}
     except Exception as e:
-        _logga_yf_miss("SPY", "history", e)
-        return {"regim": "OKÄND", "spy_pris": None, "spy_ma200": None,
-                "notis": "SPY-hämtning misslyckades", "datum": date.today().isoformat()}
+        _logga_yf_miss(ticker, "history", e)
+        return None
+
+
+def compute_market_regime():
+    """Marknadsregim (index vs MA200): GRÖN (över + stigande), RÖD (under
+    + fallande), annars GUL (blandat, bara varning).
+
+    Provar REGIM_TICKER_KEDJA (SPY, ^GSPC, VOO, IVV — alla S&P 500-trackare,
+    ger identisk MA200-regim) i tur och ordning tills en lyckas, så att en
+    enskild blockerad/rate-limitad ticker (t.ex. SPY specifikt på Render,
+    se CLAUDE.md § Kända miljöbegränsningar) inte slår ut regimberäkningen
+    helt. `regim_kalla` anger vilken ticker som faktiskt lyckades.
+
+    Misslyckas ALLA fyra → OKÄND (regim_kalla=None). Nedströms (run_analysis)
+    behandlas OKÄND identiskt med GRÖN och en senaste kända regim återanvänds
+    om en finns (hellre falskt grönt/inaktuellt än att blockera på datafel).
+    """
+    from datetime import date
+    for ticker in REGIM_TICKER_KEDJA:
+        resultat = _hamta_regim_for_ticker(ticker)
+        if resultat is not None:
+            resultat["regim_kalla"] = ticker
+            resultat["notis"] = None
+            resultat["datum"] = date.today().isoformat()
+            resultat["regim_datum"] = date.today().isoformat()
+            return resultat
+    return {"regim": "OKÄND", "spy_pris": None, "spy_ma200": None, "regim_kalla": None,
+            "notis": f"alla index i fallbackkedjan misslyckades ({', '.join(REGIM_TICKER_KEDJA)})",
+            "datum": date.today().isoformat(), "regim_datum": None}
+
+
+REGIM_ALDER_VARNING_HANDELSDAGAR = 5
+
+
+def _handelsdagar_mellan(datum1_str, datum2_str):
+    """Grov approximation av antal handelsdagar (vardagar mån–fre) mellan två
+    ISO-datum, utan hänsyn till marknadshelgdagar — tillräckligt för en
+    varningströskel, ingen exakt handelskalender behövs."""
+    from datetime import date, timedelta
+    d1, d2 = date.fromisoformat(datum1_str), date.fromisoformat(datum2_str)
+    if d2 < d1:
+        d1, d2 = d2, d1
+    dagar, d = 0, d1
+    while d < d2:
+        d += timedelta(days=1)
+        if d.weekday() < 5:
+            dagar += 1
+    return dagar
 
 
 # ----------------------------------------------------------------------
@@ -1967,11 +2011,14 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
         ws = wb.create_sheet("Rangordning", 0)
         if regim:
             badge = (f"Marknadsregim: {regim.get('regim')} "
-                     f"(SPY {regim.get('spy_pris')} vs MA200 {regim.get('spy_ma200')})")
+                     f"({regim.get('regim_kalla') or 'index'} {regim.get('spy_pris')} "
+                     f"vs MA200 {regim.get('spy_ma200')})")
             if regim.get("notis"):
                 badge += f"  — {regim['notis']}"
             ws.append([badge])
-            ws.cell(row=1, column=1).font = Font(bold=True, size=12)
+            varning_cell = ws.cell(row=1, column=1)
+            varning_cell.font = Font(bold=True, size=12,
+                                     color="9C0006" if (regim.get("notis") or "").startswith("⚠") else "000000")
             ws.append([])
         ws.append(["Rang", "Instrument", "Poäng (0–100)", "Poäng (v1)", "Stigande trend",
                    "Trend (25)", "Momentum (20)", "Analytiker (20)", "Konsensus (25)",
@@ -2303,14 +2350,23 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
         except (json.JSONDecodeError, OSError):
             prev = {}
 
-    # SPY-hämtningen kan blockeras separat (samma Yahoo-bibliotek/symptom som
-    # analysfälten ovan) — återanvänd förra kända regimen hellre än OKÄND
+    # Regimkedjan (SPY/^GSPC/VOO/IVV) kan blockeras helt (samma Yahoo-symptom
+    # som analysfälten ovan) — återanvänd förra kända regimen hellre än OKÄND.
+    # regim_datum (datum för senaste LYCKADE beräkning, ej senaste körning)
+    # följer med oförändrat — en åldersvarning eskaleras om den blir för gammal.
     if regim["regim"] == "OKÄND":
         prev_regim = prev.get("regim") or {}
         if prev_regim.get("regim") and prev_regim["regim"] != "OKÄND":
-            print(f"    SPY-regim återanvänd från {prev.get('tidpunkt', 'förra körningen')[:10]}: "
-                  f"{prev_regim['regim']} ({regim.get('notis')})")
-            regim = {**prev_regim, "notis": f"återanvänd — {regim.get('notis')}"}
+            regim_datum = prev_regim.get("regim_datum") or prev_regim.get("datum")
+            alder = _handelsdagar_mellan(regim_datum, date.today().isoformat()) if regim_datum else None
+            if alder is not None and alder > REGIM_ALDER_VARNING_HANDELSDAGAR:
+                notis = f"⚠ regim baserad på {alder} dagar gammal data"
+            else:
+                notis = f"återanvänd — {regim.get('notis')}"
+            print(f"    Regim återanvänd från {regim_datum or 'okänt datum'} "
+                  f"({alder if alder is not None else '?'} handelsdagar sedan): "
+                  f"{prev_regim['regim']} — {notis}")
+            regim = {**prev_regim, "regim_datum": regim_datum, "notis": notis}
 
     # Teknisk analys + analytikerdata
     import time

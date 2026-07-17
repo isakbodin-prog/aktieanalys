@@ -51,6 +51,27 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
   implementerad — tradervikt är neutral (1.0) för alla. Försök inte
   samma endpoints igen utan ny information.
 
+## Kända miljöbegränsningar
+- **Yahoo/yfinance-blockering på Render är INTERMITTENT och ASYMMETRISK**
+  (verifierat 2026-07-17, körning 09:17 UTC): per-aktiefälten (§7–§10:
+  EPS-rev, forward P/E, PEG, riktkursspridning, nästa rapport, sektor)
+  kan komma igenom helt normalt i SAMMA körning som SPY-anropet för
+  marknadsregimen (§A) blockeras/rate-limitas. Det är alltså inte "allt
+  eller inget" — olika yfinance-anrop inom samma körning kan lyckas
+  respektive misslyckas oberoende av varandra.
+  - Motåtgärd för regimen: REGIM_TICKER_KEDJA (SPY → ^GSPC → VOO → IVV,
+    alla S&P 500-trackare, identisk MA200-regim) i compute_market_regime()
+    — bara om ALLA fyra misslyckas återanvänds senaste kända regim, med en
+    åldersvarning ("⚠ regim baserad på X dagar gammal data") om den
+    återanvända regimen är äldre än REGIM_ALDER_VARNING_HANDELSDAGAR (5).
+  - Motåtgärd för per-aktiefälten: fältvis återanvändning från förra
+    körningen (se Pipeline steg 3–4 ovan).
+  - Nästa eskaleringssteg OM blockeringen förvärras (implementera INTE
+    förrän det faktiskt behövs): beräkna regimen lokalt (utanför Render)
+    och gist-synka resultatet, så Render aldrig behöver nå Yahoo för just
+    SPY/index-anropet. Samma idé kan i så fall appliceras på per-aktie-
+    fälten om de också blir konsekvent blockerade, inte bara intermittent.
+
 ## Körlägen (CLI)
 - `python3 etoro_analys.py` — standardanalysen (signalgruppens 5 profiler).
   Divergensen räknas från cachade bakgrundsportföljer, inga extra anrop.
@@ -82,10 +103,19 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
 - Webbappen kör alltid standardläget; bakgrunden uppdateras bara via CLI.
 
 ## Pipeline (i skriptet)
-0. Marknadsregim (§A, UTBYGGNAD_regim_exit.md): SPY vs dess MA200 (1 yfinance-
-   anrop, oberoende av eToro-data) → GRÖN (över + stigande) / RÖD (under +
-   fallande) / GUL (blandat, bara varning) / OKÄND (SPY-miss, behandlas som
-   GRÖN). Bara RÖD har effekt: Claudes KÖP-text på Bästa köp-aktier visas
+0. Marknadsregim (§A, UTBYGGNAD_regim_exit.md): index vs dess MA200 → GRÖN
+   (över + stigande) / RÖD (under + fallande) / GUL (blandat, bara
+   varning) / OKÄND (hela kedjan missade, behandlas som GRÖN). REGIM_TICKER_
+   KEDJA provas i tur och ordning (SPY → ^GSPC → VOO → IVV, alla S&P 500 —
+   identisk MA200-regim) så att en enskild blockerad ticker inte slår ut
+   hela beräkningen (se § Kända miljöbegränsningar); regim_kalla anger
+   vilken som lyckades. Misslyckas ALLA fyra återanvänds senaste kända
+   regim (regim_datum = datum för senaste LYCKADE beräkning, ej senaste
+   körning); är den återanvända regimen äldre än 5 handelsdagar eskaleras
+   notisen till en varning ("⚠ regim baserad på X dagar gammal data") i
+   JSON, Excel-headern och appens regimbadge — regimen fortsätter gälla
+   funktionellt (GRÖN beter sig som GRÖN), bara notisen ändras.
+   Bara RÖD har effekt: Claudes KÖP-text på Bästa köp-aktier visas
    nedgraderad ("KÖP (vänta på marknaden)") via claude[tk].rekommendation_
    visning — den råa rekommendation-nyckeln och poängen/facit förblir
    OFÖRÄNDRADE. Pappersportföljerna (P1/P2/P4) gör inga nya köp i RÖD —
