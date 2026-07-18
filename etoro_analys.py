@@ -1659,10 +1659,24 @@ def logga_forbrukning(poster):
         json.dump(logg, f, ensure_ascii=False, indent=2)
 
 
+def _är_force_post(p):
+    """En post räknas som "felsökning/force" om just den tickerns omanalys
+    saknade en egen genuin trigger (orsak == "force-claude") — INTE samma sak
+    som run-nivåns 'körningsläge'-fält, som taggar hela anropet som "force"
+    så fort --force-claude användes, även för tickers med en egen riktig
+    orsak (t.ex. "ny på listan"). De räknas här som normal drift, eftersom
+    de skulle analyserats även utan flaggan."""
+    if p.get("typ") == "veckosummering":
+        return bool(p.get("force"))
+    return p.get("orsak") == "force-claude"
+
+
 def _komprimera_forbrukning(logg):
     """Slå ihop anropsposter äldre än FORBRUKNING_KOMPRIMERA_ALDRE_AN_DAGAR
-    dagar till veckosummor (datum, antal_anrop, summa tokens) per modell.
-    Redan komprimerade veckosummeringar och färska anropsposter lämnas orörda.
+    dagar till veckosummor (datum, antal_anrop, summa tokens) per modell och
+    drift/force-status (se _är_force_post) så att --utvardera:s uppdelning
+    fortsätter fungera även efter komprimering. Redan komprimerade
+    veckosummeringar och färska anropsposter lämnas orörda.
     """
     from datetime import date, timedelta
     gräns = (date.today() - timedelta(days=FORBRUKNING_KOMPRIMERA_ALDRE_AN_DAGAR)).isoformat()
@@ -1680,15 +1694,16 @@ def _komprimera_forbrukning(logg):
         d = date.fromisoformat(p["datum"])
         vecka_start = (d - timedelta(days=d.weekday())).isoformat()
         modell = p.get("modell") or "okänd"
-        agg = per_vecka.setdefault((vecka_start, modell),
+        force = _är_force_post(p)
+        agg = per_vecka.setdefault((vecka_start, modell, force),
                                    {"antal_anrop": 0, "input_tokens": 0, "output_tokens": 0})
         agg["antal_anrop"] += 1
         agg["input_tokens"] += p.get("input_tokens") or 0
         agg["output_tokens"] += p.get("output_tokens") or 0
 
     veckosummor = [
-        {"typ": "veckosummering", "vecka_start": vecka, "modell": modell, **agg}
-        for (vecka, modell), agg in sorted(per_vecka.items())
+        {"typ": "veckosummering", "vecka_start": vecka, "modell": modell, "force": force, **agg}
+        for (vecka, modell, force), agg in sorted(per_vecka.items())
     ]
     return veckosummor + behåll
 
@@ -1736,24 +1751,13 @@ def skriv_forbrukningssammanfattning(claude_texts, forbrukning_denna_körning, i
         print(f"  Denna vecka ({måndag}–{söndag}): {len(veckoposter)} anrop, {v_in} in / {v_out} out tokens")
 
 
-def claude_forbrukning_rapport():
-    """Aggregerar FORBRUKNING_FILE för --utvardera: tokens per vecka (kombinerar
-    råposter och redan komprimerade veckosummeringar), fördelning per orsak
-    och per modell (bara råposter — komprimerade veckor saknar den detaljen),
-    samt snitt tokens/anrop. Returnerar None om filen saknas/är tom.
-    """
-    if not os.path.exists(FORBRUKNING_FILE):
-        return None
-    try:
-        with open(FORBRUKNING_FILE) as f:
-            logg = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return None
-    if not logg:
-        return None
-
+def _bygg_forbrukning_sektion(poster, med_fordelning=True):
+    """Aggregerar en delmängd av loggen (drift ELLER force) till per_vecka
+    (kombinerar råposter + redan komprimerade veckosummeringar) och, om
+    begärt, per_orsak/per_modell (bara råposter — komprimerade veckor
+    saknar den detaljen)."""
     per_vecka = {}
-    for p in logg:
+    for p in poster:
         if p.get("typ") == "veckosummering":
             key = p["vecka_start"]
             agg = per_vecka.setdefault(key, {"antal_anrop": 0, "tokens": 0})
@@ -1765,26 +1769,55 @@ def claude_forbrukning_rapport():
             agg["antal_anrop"] += 1
             agg["tokens"] += (p.get("input_tokens") or 0) + (p.get("output_tokens") or 0)
 
-    rå_poster = [p for p in logg if p.get("typ") == "anrop"]
-
-    def _gruppera(nyckelfunk):
-        grupper = {}
-        for p in rå_poster:
-            nyckel = nyckelfunk(p) or "okänd"
-            agg = grupper.setdefault(nyckel, {"antal": 0, "tokens": 0})
-            agg["antal"] += 1
-            agg["tokens"] += (p.get("input_tokens") or 0) + (p.get("output_tokens") or 0)
-        return grupper
-
-    per_orsak = _gruppera(lambda p: p.get("orsak"))
-    per_modell = _gruppera(lambda p: MODELL_KORTNAMN.get(p.get("modell"), p.get("modell")))
-
     total_antal = sum(v["antal_anrop"] for v in per_vecka.values())
     total_tokens = sum(v["tokens"] for v in per_vecka.values())
-    return {
-        "per_vecka": per_vecka, "per_orsak": per_orsak, "per_modell": per_modell,
-        "total_antal": total_antal, "total_tokens": total_tokens,
+    resultat = {
+        "per_vecka": per_vecka, "total_antal": total_antal, "total_tokens": total_tokens,
         "snitt_per_anrop": round(total_tokens / total_antal) if total_antal else None,
+    }
+    if med_fordelning:
+        rå_poster = [p for p in poster if p.get("typ") == "anrop"]
+
+        def _gruppera(nyckelfunk):
+            grupper = {}
+            for p in rå_poster:
+                nyckel = nyckelfunk(p) or "okänd"
+                agg = grupper.setdefault(nyckel, {"antal": 0, "tokens": 0})
+                agg["antal"] += 1
+                agg["tokens"] += (p.get("input_tokens") or 0) + (p.get("output_tokens") or 0)
+            return grupper
+
+        resultat["per_orsak"] = _gruppera(lambda p: p.get("orsak"))
+        resultat["per_modell"] = _gruppera(lambda p: MODELL_KORTNAMN.get(p.get("modell"), p.get("modell")))
+    return resultat
+
+
+def claude_forbrukning_rapport():
+    """Aggregerar FORBRUKNING_FILE för --utvardera, uppdelat i:
+    - "drift": poster med en genuin trigger (orsak != "force-claude") —
+      normal drift, huvudsiffran i rapporten.
+    - "force": poster som bara tillkom pga. --force-claude-flaggan (ingen
+      egen trigger) — felsökning/testkörningar, redovisas kompakt så de
+      inte förorenar driftssiffrorna.
+    Se _är_force_post för den exakta gränsdragningen (den skiljer sig
+    medvetet från run-nivåns 'körningsläge'-fält).
+    Returnerar None om filen saknas/är tom, annars {"drift": {...}, "force": {...}}.
+    """
+    if not os.path.exists(FORBRUKNING_FILE):
+        return None
+    try:
+        with open(FORBRUKNING_FILE) as f:
+            logg = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not logg:
+        return None
+
+    drift_poster = [p for p in logg if not _är_force_post(p)]
+    force_poster = [p for p in logg if _är_force_post(p)]
+    return {
+        "drift": _bygg_forbrukning_sektion(drift_poster, med_fordelning=True),
+        "force": _bygg_forbrukning_sektion(force_poster, med_fordelning=False),
     }
 
 
@@ -3150,25 +3183,37 @@ def run_utvardering():
             print(f"    {etikett:<40} {v:+.1f} pp")
 
     # ---- Claude-förbrukning (terminalrapport, ingen Excel-flik) ----
+    # Uppdelad i normal drift (genuin trigger) och felsökning/force (bara
+    # --force-claude, ingen egen orsak) så testkörningar inte förorenar
+    # driftssiffrorna — se _är_force_post.
     fr = claude_forbrukning_rapport()
     print("\n\n=== Claude-förbrukning ===")
     if fr is None:
         print("  Ingen förbrukningslogg än (claude_forbrukning.json saknas/tom).")
     else:
-        print(f"  Totalt {fr['total_antal']} anrop, {fr['total_tokens']} tokens "
-              f"(snitt {fr['snitt_per_anrop']} tokens/anrop).")
-        print("  Per vecka (senaste 8):")
-        for vecka in sorted(fr["per_vecka"], reverse=True)[:8]:
-            v = fr["per_vecka"][vecka]
-            print(f"    {vecka}   {v['antal_anrop']:>3} anrop   {v['tokens']:>8} tokens")
-        print("  Per orsak (vad triggar mest, sorterat på tokens):")
-        for orsak, v in sorted(fr["per_orsak"].items(), key=lambda x: -x[1]["tokens"]):
-            snitt = round(v["tokens"] / v["antal"]) if v["antal"] else 0
-            print(f"    {orsak:<40} {v['antal']:>3} anrop   {v['tokens']:>8} tokens   (snitt {snitt}/anrop)")
-        print("  Per modell:")
-        for modell, v in sorted(fr["per_modell"].items(), key=lambda x: -x[1]["tokens"]):
-            snitt = round(v["tokens"] / v["antal"]) if v["antal"] else 0
-            print(f"    {modell:<10} {v['antal']:>3} anrop   {v['tokens']:>8} tokens   (snitt {snitt}/anrop)")
+        drift, force = fr["drift"], fr["force"]
+        if drift["total_antal"]:
+            print(f"  Normal drift: {drift['total_antal']} anrop, {drift['total_tokens']} tokens "
+                  f"(snitt {drift['snitt_per_anrop']} tokens/anrop).")
+        else:
+            print("  Normal drift: inga anrop loggade än.")
+        if force["total_antal"]:
+            print(f"    + {force['total_antal']} force-anrop under felsökning "
+                  f"({force['total_tokens']} tokens, snitt {force['snitt_per_anrop']} tokens/anrop)")
+
+        if drift["total_antal"]:
+            print("  Per vecka (senaste 8, normal drift):")
+            for vecka in sorted(drift["per_vecka"], reverse=True)[:8]:
+                v = drift["per_vecka"][vecka]
+                print(f"    {vecka}   {v['antal_anrop']:>3} anrop   {v['tokens']:>8} tokens")
+            print("  Per orsak (normal drift — vad triggar mest, sorterat på tokens):")
+            for orsak, v in sorted(drift["per_orsak"].items(), key=lambda x: -x[1]["tokens"]):
+                snitt = round(v["tokens"] / v["antal"]) if v["antal"] else 0
+                print(f"    {orsak:<40} {v['antal']:>3} anrop   {v['tokens']:>8} tokens   (snitt {snitt}/anrop)")
+            print("  Per modell (normal drift):")
+            for modell, v in sorted(drift["per_modell"].items(), key=lambda x: -x[1]["tokens"]):
+                snitt = round(v["tokens"] / v["antal"]) if v["antal"] else 0
+                print(f"    {modell:<10} {v['antal']:>3} anrop   {v['tokens']:>8} tokens   (snitt {snitt}/anrop)")
 
     # Excel-flik
     from openpyxl import Workbook

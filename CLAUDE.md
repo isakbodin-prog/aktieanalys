@@ -202,12 +202,21 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
    standard/divergens/force) till claude_forbrukning.json — en rad per
    anrop, gist-synkad. Saknas usage-objektet i svaret (äldre SDK) loggas
    raden ändå med tokenfälten null + en varning, kraschar aldrig. Filen
-   komprimeras automatiskt (rader >90 dagar → veckosummor per modell) när
-   den växer förbi 5000 rader. Terminalsammanfattning efter Claude-steget:
-   antal anrop per modell + antal återanvända, tokens denna körning,
-   ackumulerat denna kalendervecka. --utvardera har en egen sektion
-   "Claude-förbrukning" (tokens per vecka, fördelning per orsak/modell,
-   snitt per anrop) — bara terminalrapport, ingen Excel-flik.
+   komprimeras automatiskt (rader >90 dagar → veckosummor per modell,
+   uppdelat på drift/force — se nedan) när den växer förbi 5000 rader.
+   Terminalsammanfattning efter Claude-steget: antal anrop per modell +
+   antal återanvända, tokens denna körning, ackumulerat denna kalendervecka.
+   --utvardera har en egen sektion "Claude-förbrukning" — uppdelad i
+   NORMAL DRIFT (poster med genuin trigger, orsak != "force-claude": tokens
+   per vecka, fördelning per orsak/modell, snitt per anrop — huvudsiffran)
+   och en kompakt FELSÖKNING/FORCE-rad (poster som bara tillkom pga.
+   --force-claude-flaggan, ingen egen trigger) som läggs under som tillägg
+   ("+ N force-anrop..."), så testkörningar inte förorenar driftssiffrorna.
+   OBS: denna gränsdragning (_är_force_post) är per POST på fältet `orsak`,
+   inte samma som run-nivåns `körningsläge`-fält (som taggar hela anropet
+   som "force" så fort flaggan användes, även tickers med egen genuin
+   orsak som "ny på listan" — de räknas ändå som normal drift). Bara
+   terminalrapport, ingen Excel-flik.
    Webbappen hämtar eToro-data automatiskt vid sidöppning BARA om dagens
    data saknas (senaste_analys.json:s tidpunkt ≠ idag); annars visas
    befintlig data direkt. Kallstart utan lokal fil → gist_pull först.
