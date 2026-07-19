@@ -44,9 +44,24 @@ st.markdown(f"""
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400;1,6..72,500&family=Space+Grotesk:wght@400;500&display=swap');
 
-  /* Centrerad redaktionell kolumn med generös luft */
+  /* Full bredd på ytan (fullbreddslinjer + hörnplacerad wordmark); innehållet
+     centreras i egna 900px-block. */
   [data-testid="stMainBlockContainer"], .block-container {{
-      max-width: 940px !important; padding-top: 3.2rem !important; padding-bottom: 2rem !important; }}
+      max-width: 100% !important; padding: 2rem 3.5rem 2rem !important; }}
+  [data-testid="stMainBlockContainer"] {{ overflow-x: clip; }}
+
+  /* Fullbreddslinje vid sidhuvud/sidfot (bryter ut ur ytans padding) */
+  .fullrule {{ border: none; border-top: 1px solid {HAIRLINE};
+      margin: .9rem -3.5rem 0; }}
+
+  /* Mjuk fade när en vy tar över mittsektionen */
+  @keyframes vyfade {{ from {{ opacity: 0; transform: translateY(4px); }}
+                       to {{ opacity: 1; transform: translateY(0); }} }}
+
+  /* Aktiv menypunkt i toppnavet — samma läckra serif som sidfotens verktyg */
+  .navactive {{ font-family: 'Newsreader', Georgia, serif; font-size: .84rem; color: {TEXT};
+      letter-spacing: .01em; padding: .3rem .3rem; border-bottom: 1px solid {TEXT};
+      display: inline-block; white-space: nowrap; }}
 
   /* Typografi: serif-display i rubriker, resten grotesk */
   h1, h2, h3, h4 {{ font-family: 'Newsreader', Georgia, serif !important;
@@ -59,11 +74,11 @@ st.markdown(f"""
   .hero-label {{ font-family: 'Space Grotesk', sans-serif; text-transform: uppercase;
       letter-spacing: .24em; font-size: .68rem; color: {MUTED}; margin-bottom: .5rem; }}
   .hero-title {{ font-family: 'Newsreader', serif; font-size: 3.4rem; line-height: 1;
-      letter-spacing: -.025em; color: {TEXT}; margin: 2.4rem 0 .55rem; }}
+      letter-spacing: -.025em; color: {TEXT}; margin: 2rem auto .55rem; max-width: 900px; }}
   .hero-sub {{ font-family: 'Space Grotesk', sans-serif; font-size: .8rem; color: {MUTED};
-      letter-spacing: .01em; margin-bottom: 1.7rem; max-width: 34rem; line-height: 1.5; }}
+      letter-spacing: .01em; margin: 0 auto 1.7rem; max-width: 900px; line-height: 1.5; }}
 
-  .stocklist {{ margin: .2rem 0 .5rem; }}
+  .stocklist {{ margin: .2rem auto .5rem; max-width: 900px; }}
   .stock {{ border-top: 1px solid {HAIRLINE}; }}
   .stock:last-child {{ border-bottom: 1px solid {HAIRLINE}; }}
   .stoggle {{ position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }}
@@ -72,7 +87,7 @@ st.markdown(f"""
   .stock:hover .rad {{ padding-left: .95rem; }}
   .rang {{ font-family: 'Space Grotesk', sans-serif; font-size: .76rem; color: {MUTED};
       width: 1.7rem; flex: 0 0 auto; }}
-  .bikon {{ width: 24px; height: 24px; opacity: .72; flex: 0 0 auto; }}
+  .bikon {{ width: 28px; height: 28px; opacity: .72; flex: 0 0 auto; }}
   .tk {{ font-family: 'Newsreader', serif; font-size: 1.55rem; color: {TEXT};
       min-width: 5.5rem; flex: 0 0 auto; }}
   .meter {{ flex: 1 1 auto; height: 2px; background: {HAIRLINE}; position: relative; min-width: 50px; }}
@@ -113,13 +128,38 @@ st.markdown(f"""
 
   /* sidfoten */
   .appfot {{ display: flex; justify-content: space-between; flex-wrap: wrap;
-      gap: .5rem 2rem; margin: 3.5rem 0 1rem; padding-top: 1rem;
-      border-top: 1px solid {HAIRLINE}; color: {MUTED};
+      gap: .5rem 2rem; margin: 1.4rem 0 1rem; color: {MUTED};
       font-family: 'Space Grotesk', sans-serif; font-size: .72rem; letter-spacing: .06em;
       text-transform: uppercase; }}
   .appfot .mitt {{ text-align: center; text-transform: none; letter-spacing: .02em; }}
   .appfot-sub {{ text-align: center; color: {MUTED}; font-family: 'Space Grotesk', sans-serif;
       font-size: .66rem; letter-spacing: .07em; text-transform: uppercase; margin: .5rem 0 1.6rem; }}
+  .footctrl-label {{ font-family: 'Newsreader', Georgia, serif; font-size: .95rem; color: {MUTED};
+      letter-spacing: .01em; }}
+
+  /* ---- Fear & Greed ---- */
+  .fg-mini {{ font-family: 'Space Grotesk', sans-serif; font-size: .78rem; color: {MUTED};
+      letter-spacing: .02em; max-width: 900px; margin: 0 auto .2rem; display: flex;
+      align-items: center; gap: .5rem; }}
+  .fg-mini b {{ font-weight: 500; letter-spacing: .01em; }}
+  .fg-dot {{ width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }}
+  .fg-mini-hint {{ margin-left: auto; text-transform: uppercase; letter-spacing: .1em;
+      font-size: .62rem; color: {MUTED}; }}
+  .fg-etikett {{ text-align: center; font-family: 'Newsreader', Georgia, serif; font-size: 1.6rem;
+      margin: -.4rem 0 1.4rem; letter-spacing: .01em; }}
+  .fg-hist {{ border-top: 1px solid {HAIRLINE}; }}
+  .fg-row {{ display: flex; align-items: center; gap: 1rem; padding: .7rem .1rem;
+      border-bottom: 1px solid {HAIRLINE}; }}
+  .fg-when {{ font-family: 'Space Grotesk', sans-serif; font-size: .78rem; color: {TEXT};
+      flex: 1 1 auto; }}
+  .fg-badge {{ font-family: 'Space Grotesk', sans-serif; font-size: .82rem; color: #F2EEE4;
+      min-width: 2.4rem; text-align: center; padding: .1rem .5rem; border-radius: 3px;
+      flex: 0 0 auto; }}
+  .fg-cat {{ font-family: 'Space Grotesk', sans-serif; font-size: .72rem; color: {MUTED};
+      text-transform: uppercase; letter-spacing: .08em; width: 7.5rem; text-align: right;
+      flex: 0 0 auto; }}
+  .fg-ts {{ font-family: 'Space Grotesk', sans-serif; font-size: .66rem; color: {MUTED};
+      letter-spacing: .04em; text-align: center; margin-top: 1.3rem; line-height: 1.6; }}
 
   /* --- Sidopanelen är dold; ersatt av diskret toppnavigering --- */
   section[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"] {{
@@ -359,10 +399,9 @@ def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max):
                         f'<span class="dpval">{v:.0f}/{mx}</span></div>')
 
         if kluster.get("klusterstorlek", 1) > 1:
-            kl = f"Kluster #{kluster['kluster_id']} ({kluster['klusterstorlek']} samvarierande)"
+            meta = f"Kluster #{kluster['kluster_id']} ({kluster['klusterstorlek']} samvarierande aktier)"
         else:
-            kl = "Kluster: ensam"
-        meta = f"Poäng v1: {_num(r.get('poäng_v1'))} · {kl}"
+            meta = "Kluster: ensam"
 
         rader.append(
             f'<div class="stock">'
@@ -383,7 +422,61 @@ def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max):
 
 
 # ----------------------------------------------------------------------
-# Diskret toppnavigering (ersätter sidopanelen)
+# Fear & Greed (CNN-stil) — zonfärger + halvcirkelmätare
+# ----------------------------------------------------------------------
+# (övre_gräns, etikett, färg) — röd rädsla → grön girighet, i palettens anda.
+FG_ZONER = [
+    (25, "Extreme Fear", "#A23A2B"),
+    (45, "Fear", "#C67D3E"),
+    (55, "Neutral", MUTED),
+    (75, "Greed", "#8B9A5B"),
+    (100.01, "Extreme Greed", MOSS),
+]
+
+
+def fg_zon(v):
+    """(etikett, färg) för ett Fear & Greed-värde 0–100."""
+    for grans, etikett, farg in FG_ZONER:
+        if v < grans:
+            return etikett, farg
+    return FG_ZONER[-1][1], FG_ZONER[-1][2]
+
+
+def fear_greed_gauge(varde):
+    """CNN-lik halvcirkelmätare (Plotly go.Indicator) med fem färgzoner + nål."""
+    import plotly.graph_objects as go
+
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=varde,
+        number={"font": {"size": 52, "color": TEXT, "family": "Space Grotesk"}},
+        gauge={
+            "shape": "angular",
+            "axis": {"range": [0, 100], "tickvals": [0, 25, 45, 55, 75, 100],
+                     "tickcolor": HAIRLINE, "tickwidth": 1,
+                     "tickfont": {"size": 11, "color": MUTED, "family": "Space Grotesk"}},
+            "bar": {"color": "rgba(0,0,0,0)", "thickness": 0},
+            "borderwidth": 0, "bordercolor": "rgba(0,0,0,0)",
+            "steps": [
+                {"range": [0, 25], "color": "#A23A2B"},
+                {"range": [25, 45], "color": "#C67D3E"},
+                {"range": [45, 55], "color": MUTED},
+                {"range": [55, 75], "color": "#8B9A5B"},
+                {"range": [75, 100], "color": MOSS},
+            ],
+            "threshold": {"line": {"color": TEXT, "width": 5}, "thickness": 0.9, "value": varde},
+        },
+        domain={"x": [0, 1], "y": [0, 1]},
+    ))
+    fig.update_layout(height=270, margin=dict(l=24, r=24, t=6, b=0),
+                      paper_bgcolor="rgba(0,0,0,0)", font={"family": "Space Grotesk"})
+    return fig
+
+
+# ----------------------------------------------------------------------
+# Körlogik — kontrollerna ligger i sidfoten. Deras klick sätter flaggor i
+# session_state (via on_click) som fångas här överst, så analysen hinner köras
+# innan vyerna renderas.
 # ----------------------------------------------------------------------
 def data_ar_fran_idag(d):
     from datetime import date
@@ -394,53 +487,9 @@ def data_ar_fran_idag(d):
     return d.get("tidpunkt", "")[:10] == date.today().isoformat()
 
 
-nav_l, nav_r = st.columns([4, 6], vertical_alignment="center")
-with nav_l:
-    st.markdown('<div class="wordmark">eToro Portföljanalys</div>', unsafe_allow_html=True)
-with nav_r:
-    n1, n2, n3, n4 = st.columns(4)
-    run_now = n1.button("Uppdatera", use_container_width=True)
-    with n2.popover("Claude", use_container_width=True):
-        with_claude = st.checkbox(
-            "Inkludera Claude-analys", value=True,
-            help="Claude körs max en gång per dag (drar API-credits) — annars återanvänds dagens analys.",
-        )
-        force_claude = st.checkbox(
-            "Tvinga om Claude-analysen", value=False,
-            help="Kör Claude igen även om den redan körts idag. Drar credits!",
-        )
-    with n3.popover("Bakgrund", use_container_width=True):
-        def _fildatum(fil):
-            try:
-                with open(fil) as f:
-                    return json.load(f).get("datum")
-            except (OSError, json.JSONDecodeError):
-                return None
-
-        st.caption(f"Senast screenad: {_fildatum(ea.BG_MEMBERS_FILE) or 'aldrig'} · "
-                   f"portföljer hämtade: {_fildatum(ea.BG_CACHE_FILE) or 'aldrig'}")
-        st.caption("Körs även automatiskt: screener månadsvis, divergens varje lördag.")
-
-        if st.button(":material/person_search: Kör screener", use_container_width=True,
-                     help="Väljer om vilka 50 traders som utgör bakgrundsgruppen. Snabbt (~10 s)."):
-            with st.spinner("Screenar fram topp 50..."):
-                try:
-                    if ea.run_screener():
-                        ea.gist_push()
-                        st.success("Bakgrundsgruppen är uppdaterad!")
-                    else:
-                        st.error("Screenern misslyckades — försök igen senare.")
-                except Exception as e:
-                    st.error(str(e))
-
-        if st.button(":material/balance: Uppdatera divergens", use_container_width=True,
-                     help="Hämtar bakgrundsgruppens 50 portföljer och kör om analysen. Tar 3–5 minuter."):
-            with st.spinner("Hämtar 50 bakgrundsportföljer och räknar om divergensen — tar 3–5 minuter..."):
-                try:
-                    ea.run_analysis(with_claude=with_claude, refresh_background=True)
-                    st.success("Divergensen är uppdaterad!")
-                except RuntimeError as e:
-                    st.error(str(e))
+with_claude = st.session_state.setdefault("with_claude", True)
+force_claude = st.session_state.setdefault("force_claude", False)
+run_now = st.session_state.pop("kor_nu", False)
 
 # Vid sidöppning: synka först mot gisten (fångar t.ex. --divergens-körningar
 # gjorda på datorn), kör sedan analysen bara om dagens data saknas.
@@ -451,38 +500,76 @@ if "auto_check" not in st.session_state:
     if not data_ar_fran_idag(befintlig):
         run_now = True
 
+if st.session_state.pop("kor_screener", False):
+    with st.spinner("Screenar fram topp 50..."):
+        try:
+            if ea.run_screener():
+                ea.gist_push()
+                st.toast("Bakgrundsgruppen är uppdaterad!", icon="✅")
+            else:
+                st.toast("Screenern misslyckades — försök igen senare.", icon="⚠️")
+        except Exception as e:
+            st.toast(str(e), icon="⚠️")
+
+if st.session_state.pop("kor_divergens", False):
+    with st.spinner("Hämtar 50 bakgrundsportföljer och räknar om divergensen — tar 3–5 minuter..."):
+        try:
+            ea.run_analysis(with_claude=with_claude, refresh_background=True)
+            st.toast("Divergensen är uppdaterad!", icon="✅")
+        except RuntimeError as e:
+            st.toast(str(e), icon="⚠️")
+
 if run_now:
     with st.spinner("Hämtar portföljdata från eToro och räknar indikatorer — tar 1–2 minuter..."):
         try:
             ea.run_analysis(with_claude=with_claude, force_claude=force_claude)
         except RuntimeError as e:
-            st.error(str(e))
+            st.toast(str(e), icon="⚠️")
 
 data = load_results()
 
+# Se till att Excel-filen finns/matchar senaste analysen (laddas ned i sidfoten).
 if data:
-    # Se till att Excel-filen finns/matchar senaste analysen; lägg nedladdningen
-    # i navens sista kolumn (n4).
     behov_regen = not os.path.exists(ea.OUTPUT_FILE)
     if not behov_regen and os.path.exists(ea.RESULTS_FILE):
         behov_regen = os.path.getmtime(ea.OUTPUT_FILE) < os.path.getmtime(ea.RESULTS_FILE)
     if behov_regen:
         try:
             ea.excel_from_result(data)
-        except Exception as e:
-            st.caption(f"Kunde inte skapa Excel-rapporten: {e}")
-    if os.path.exists(ea.OUTPUT_FILE):
-        with open(ea.OUTPUT_FILE, "rb") as f:
-            n4.download_button(
-                "Excel", f.read(), file_name=ea.OUTPUT_FILE,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            )
+        except Exception:
+            pass
 
-st.markdown('<hr class="navhr">', unsafe_allow_html=True)
+# ----------------------------------------------------------------------
+# Sidhuvud: wordmark (vänstra hörnet) + fördjupningsmeny (byter mittsektion)
+# ----------------------------------------------------------------------
+# (nyckel, etikett): vyn lagras på nyckeln, menyn visar etiketten (rom. siffror).
+VYER = [
+    ("Bästa köp", "Bästa köp"),
+    ("Konsensus", "I · Konsensus"),
+    ("Divergens", "II · Divergens"),
+    ("Claude", "III · Claude"),
+    ("Ändringar", "IV · Ändringar"),
+    ("Historik", "V · Historik"),
+    ("Portföljer", "VI · Portföljer"),
+    ("Sentiment", "VII · Sentiment"),
+]
+st.session_state.setdefault("view", "Bästa köp")
+
+hcol1, hcol2 = st.columns([2, 8], vertical_alignment="center")
+with hcol1:
+    st.markdown('<div class="wordmark">eToro Portföljanalys</div>', unsafe_allow_html=True)
+with hcol2:
+    navcols = st.columns(len(VYER))
+    for _c, (_key, _label) in zip(navcols, VYER):
+        if _key == st.session_state["view"]:
+            _c.markdown(f'<div class="navactive">{_label}</div>', unsafe_allow_html=True)
+        elif _c.button(_label, key=f"nav_{_key.replace(' ', '_')}"):
+            st.session_state["view"] = _key
+            st.rerun()
+
+st.markdown('<hr class="fullrule">', unsafe_allow_html=True)
 
 if data:
-    # Visa datafel diskret (t.ex. om Yahoo Finance blockerar serverns anrop)
     fel = {t: a["error"] for t, a in data.get("analyses", {}).items() if "error" in a}
     if fel:
         with st.popover(f":material/warning: {len(fel)} aktier saknar marknadsdata"):
@@ -493,8 +580,7 @@ if data:
 # Huvudinnehåll
 # ----------------------------------------------------------------------
 if not data:
-    st.title("eToro Portföljanalys")
-    st.info("Ingen analys har körts ännu. Klicka på **Kör ny analys** i sidopanelen för att komma igång.")
+    st.info("Ingen analys har körts ännu. Klicka på **Uppdatera** längst ner för att komma igång.")
     st.stop()
 
 consensus = data["consensus"]
@@ -504,130 +590,145 @@ bransch = data.get("bransch", {})
 consensus_order = sorted(consensus, key=lambda t: (-consensus[t]["count"], -consensus[t]["avg_weight"]))
 
 ranking = data.get("ranking", [])
+innehav = data.get("innehav", {})
 KOMP_MAX = {"Trend": 25, "Momentum": 20, "Analytiker": 20,
             "Konsensus": 25, "Värdering": 10}
 
-# ======================================================================
-# HJÄLTE — Bästa köp (redaktionell hover/klick-lista)
-# ======================================================================
+# Mjuk fade när en vy tar över mittsektionen (unikt keyframe-namn per vy gör att
+# animationen spelas om vid vybyte men inte vid vanliga omritningar).
+view = st.session_state["view"]
+_slug = "".join(ch if ch.isalnum() else "_" for ch in view)
 st.markdown(
-    '<div class="hero-title">Bästa köp</div>'
-    '<div class="hero-sub">Sammanvägd poäng 0–100. Håll muspekaren över eller klicka '
-    'på en aktie för poänguppdelning och nyckeltal.</div>',
+    f"<style>@keyframes vyfade_{_slug} {{ from {{ opacity: 0; }} to {{ opacity: 1; }} }}"
+    f"[data-testid='stMainBlockContainer'] {{ animation: vyfade_{_slug} .5s ease; }}</style>",
     unsafe_allow_html=True,
 )
 
-if not ranking:
-    st.info("Ingen rangordning i senaste körningen — kör en ny analys.")
-else:
-    # Rapport-badges: aktier med bolagsrapport inom 7 dagar
-    from datetime import date as _d_rang
-    rapport_snart = []
-    for tk in [r["ticker"] for r in ranking]:
-        rap = analyses.get(tk, {}).get("nasta_rapport")
-        if rap:
-            try:
-                dagar_kvar = (pd.Timestamp(rap).date() - _d_rang.today()).days
-                if 0 <= dagar_kvar <= 7:
-                    rapport_snart.append((tk, dagar_kvar))
-            except Exception:
-                pass
-    if rapport_snart:
-        badges = " · ".join(f"**{tk}** om {d} dgr" for tk, d in sorted(rapport_snart, key=lambda x: x[1]))
-        st.caption(f":material/event_upcoming: **Rapport inom en vecka:** {badges}")
-
-    st.markdown(hero_html(ranking, claude, consensus, bransch, KOMP_MAX), unsafe_allow_html=True)
-
-    with st.popover("Så räknas poängen"):
-        st.caption(
-            "**Poängmodellen (§12, omviktad):** Trend 25 p · Momentum 20 p (inkl. relativ "
-            "styrka mot sektor-ETF) · Analytiker 20 p (uppsida — halverad vid hög "
-            "riktkursspridning — antal analytiker, köprekommendation, EPS-revidering) · "
-            "Konsensus 25 p (viktad konsensus, snittvikt, nettoflöde 30d) — delat med "
-            "√klusterstorlek om aktien samvarierar starkt (korr > 0,7) med andra "
-            "konsensusaktier · Värdering 10 p (forward P/E mot sektormedian, PEG). "
-            "**Poäng v1** är förra modellen (utan Värdering/RS/spridning) — kvar för "
-            "jämförelse tills --utvardera hunnit kalibrera de nya vikterna. "
-            "Aktier utan stigande trend rankas alltid sist, oavsett poäng."
+# ======================================================================
+# VY: Bästa köp — hjälte + senaste händelser
+# ======================================================================
+if view == "Bästa köp":
+    # Miniatyr av marknadssentimentet (Fear & Greed) — bara siffra + etikett.
+    _fg = data.get("fear_greed")
+    if _fg and _fg.get("varde") is not None:
+        _fgv = _fg["varde"]
+        _fge = _fg.get("etikett") or fg_zon(_fgv)[0]
+        _fgf = fg_zon(_fgv)[1]
+        st.markdown(
+            f'<div class="fg-mini"><span class="fg-dot" style="background:{_fgf}"></span>'
+            f'Marknadssentiment <b style="color:{_fgf}">{_fgv:.0f} · {_fge}</b>'
+            f'<span class="fg-mini-hint">→ VII · Sentiment</span></div>',
+            unsafe_allow_html=True,
         )
+    st.markdown(
+        '<div class="hero-title">Bästa köp</div>'
+        '<div class="hero-sub">Sammanvägd poäng 0–100. Håll muspekaren över eller klicka '
+        'på en aktie för poänguppdelning och nyckeltal.</div>',
+        unsafe_allow_html=True,
+    )
 
-# ======================================================================
-# Senaste händelser — kondenserad översikt direkt under hjälten
-# ======================================================================
-log = data.get("historik", [])
-if log:
-    from datetime import date as _d, timedelta as _td
-    cut30 = (_d.today() - _td(days=30)).isoformat()
-    senaste_datum = log[0]["datum"]
-    dagens = [e for e in log if e["datum"] == senaste_datum]
+    if not ranking:
+        st.info("Ingen rangordning i senaste körningen — kör en ny analys.")
+    else:
+        # Rapport-badges: aktier med bolagsrapport inom 7 dagar
+        from datetime import date as _d_rang
+        rapport_snart = []
+        for tk in [r["ticker"] for r in ranking]:
+            rap = analyses.get(tk, {}).get("nasta_rapport")
+            if rap:
+                try:
+                    dagar_kvar = (pd.Timestamp(rap).date() - _d_rang.today()).days
+                    if 0 <= dagar_kvar <= 7:
+                        rapport_snart.append((tk, dagar_kvar))
+                except Exception:
+                    pass
+        if rapport_snart:
+            badges = " · ".join(f"**{tk}** om {d} dgr" for tk, d in sorted(rapport_snart, key=lambda x: x[1]))
+            st.caption(f":material/event_upcoming: **Rapport inom en vecka:** {badges}")
 
-    # Förändringar i listorna (30 dgr): in/ut konsensus + lämnat nära konsensus
-    lista_rader = []
-    for e in log:
-        if e["datum"] < cut30:
-            continue
-        if e["typ"] == "IN I KONSENSUS":
-            lista_rader.append(f'<span style="color:{MOSS}">▲</span> **{e["ticker"]}** '
-                               f'in i konsensus — {e["detalj"]}')
-        elif e["typ"] == "UT UR KONSENSUS":
-            lista_rader.append(f'<span style="color:{RUST}">▼</span> **{e["ticker"]}** '
-                               f'lämnade konsensus — {e["detalj"]}')
-        elif e["typ"] == "UT UR NÄRA KONSENSUS":
-            lista_rader.append(f'<span style="color:{RUST}">▼</span> **{e["ticker"]}** '
-                               f'lämnade nära konsensus')
+        st.markdown(hero_html(ranking, claude, consensus, bransch, KOMP_MAX), unsafe_allow_html=True)
 
-    # Största viktändringarna (senaste ändringsdagen), rankade på storlek
-    moves = rorelser_per_aktie(dagens)
-    vikt_rader = []
-    for tk, ms in sorted(moves.items()):
-        grupperade = set()
-        for riktning, verb, farg in ((1, "ökat", MOSS), (-1, "minskat", RUST)):
-            grupp = [m for m in ms if (m["delta"] > 0) == (riktning > 0)]
-            if len(grupp) >= 2:
-                antal = {2: "Två", 3: "Tre", 4: "Fyra", 5: "Fem"}.get(len(grupp), str(len(grupp)))
-                pil = "▲" if riktning > 0 else "▼"
-                storlek = max(abs(m["delta"]) for m in grupp)
-                vikt_rader.append((storlek + 100,   # sammanfallande rörelser först
-                    f'<span style="color:{farg}">{pil}</span> {antal} portföljer har {verb} **{tk}**'))
-                grupperade |= {m["profil"] for m in grupp}
-        for m in ms:
-            if m["profil"] in grupperade or m["typ"] != "VIKTÄNDRING" or abs(m["delta"]) < 3:
+        with st.popover("Så räknas poängen"):
+            st.caption(
+                "**Poängmodellen (§12, omviktad):** Trend 25 p · Momentum 20 p (inkl. relativ "
+                "styrka mot sektor-ETF) · Analytiker 20 p (uppsida — halverad vid hög "
+                "riktkursspridning — antal analytiker, köprekommendation, EPS-revidering) · "
+                "Konsensus 25 p (viktad konsensus, snittvikt, nettoflöde 30d) — delat med "
+                "√klusterstorlek om aktien samvarierar starkt (korr > 0,7) med andra "
+                "konsensusaktier · Värdering 10 p (forward P/E mot sektormedian, PEG). "
+                "**Poäng v1** är förra modellen (utan Värdering/RS/spridning) — kvar för "
+                "jämförelse tills --utvardera hunnit kalibrera de nya vikterna. "
+                "Aktier utan stigande trend rankas alltid sist, oavsett poäng."
+            )
+
+    # Senaste händelser — kondenserad översikt direkt under hjälten
+    log = data.get("historik", [])
+    if log:
+        from datetime import date as _d, timedelta as _td
+        cut30 = (_d.today() - _td(days=30)).isoformat()
+        senaste_datum = log[0]["datum"]
+        dagens = [e for e in log if e["datum"] == senaste_datum]
+
+        # Förändringar i listorna (30 dgr): in/ut konsensus + lämnat nära konsensus
+        lista_rader = []
+        for e in log:
+            if e["datum"] < cut30:
                 continue
-            pil = (f'<span style="color:{MOSS}">▲</span>' if m["delta"] > 0
-                   else f'<span style="color:{RUST}">▼</span>')
-            verb = "ökade" if m["delta"] > 0 else "minskade"
-            vikt_rader.append((abs(m["delta"]),
-                f'{pil} **{m["profil"]}** {verb} **{tk}** ({_pe(m["delta"])})'))
-    vikt_rader = [t for _, t in sorted(vikt_rader, key=lambda x: -x[0])][:6]
+            if e["typ"] == "IN I KONSENSUS":
+                lista_rader.append(f'<span style="color:{MOSS}">▲</span> **{e["ticker"]}** '
+                                   f'in i konsensus — {e["detalj"]}')
+            elif e["typ"] == "UT UR KONSENSUS":
+                lista_rader.append(f'<span style="color:{RUST}">▼</span> **{e["ticker"]}** '
+                                   f'lämnade konsensus — {e["detalj"]}')
+            elif e["typ"] == "UT UR NÄRA KONSENSUS":
+                lista_rader.append(f'<span style="color:{RUST}">▼</span> **{e["ticker"]}** '
+                                   f'lämnade nära konsensus')
 
-    if lista_rader or vikt_rader:
-        st.divider()
-        st.subheader("Senaste händelser")
-        kol1, kol2 = st.columns(2)
-        with kol1:
-            st.markdown("**Förändringar i listorna** · senaste 30 dagarna")
-            if lista_rader:
-                for rad in lista_rader[:6]:
-                    st.markdown(f"- {rad}", unsafe_allow_html=True)
-            else:
-                st.caption("Inga in- eller utträden den senaste månaden.")
-        with kol2:
-            st.markdown(f"**Största viktändringarna** · {senaste_datum}")
-            if vikt_rader:
-                for rad in vikt_rader:
-                    st.markdown(f"- {rad}", unsafe_allow_html=True)
-            else:
-                st.caption("Inga större viktändringar senaste ändringsdagen.")
-        st.caption("Fullständiga flöden finns under **Konsensus** och **Senaste ändringar** nedan.")
+        # Största viktändringarna (senaste ändringsdagen), rankade på storlek
+        moves = rorelser_per_aktie(dagens)
+        vikt_rader = []
+        for tk, ms in sorted(moves.items()):
+            grupperade = set()
+            for riktning, verb, farg in ((1, "ökat", MOSS), (-1, "minskat", RUST)):
+                grupp = [m for m in ms if (m["delta"] > 0) == (riktning > 0)]
+                if len(grupp) >= 2:
+                    antal = {2: "Två", 3: "Tre", 4: "Fyra", 5: "Fem"}.get(len(grupp), str(len(grupp)))
+                    pil = "▲" if riktning > 0 else "▼"
+                    storlek = max(abs(m["delta"]) for m in grupp)
+                    vikt_rader.append((storlek + 100,   # sammanfallande rörelser först
+                        f'<span style="color:{farg}">{pil}</span> {antal} portföljer har {verb} **{tk}**'))
+                    grupperade |= {m["profil"] for m in grupp}
+            for m in ms:
+                if m["profil"] in grupperade or m["typ"] != "VIKTÄNDRING" or abs(m["delta"]) < 3:
+                    continue
+                pil = (f'<span style="color:{MOSS}">▲</span>' if m["delta"] > 0
+                       else f'<span style="color:{RUST}">▼</span>')
+                verb = "ökade" if m["delta"] > 0 else "minskade"
+                vikt_rader.append((abs(m["delta"]),
+                    f'{pil} **{m["profil"]}** {verb} **{tk}** ({_pe(m["delta"])})'))
+        vikt_rader = [t for _, t in sorted(vikt_rader, key=lambda x: -x[0])][:6]
 
-# ======================================================================
-# Övriga vyer — diskret, numrerat dragspel (klickas fram)
-# ======================================================================
-st.markdown('<div class="hero-label" style="margin-top:2.6rem">Fördjupning</div>',
-            unsafe_allow_html=True)
-innehav = data.get("innehav", {})
+        if lista_rader or vikt_rader:
+            st.divider()
+            st.subheader("Senaste händelser")
+            kol1, kol2 = st.columns(2)
+            with kol1:
+                st.markdown("**Förändringar i listorna** · senaste 30 dagarna")
+                if lista_rader:
+                    for rad in lista_rader[:6]:
+                        st.markdown(f"- {rad}", unsafe_allow_html=True)
+                else:
+                    st.caption("Inga in- eller utträden den senaste månaden.")
+            with kol2:
+                st.markdown(f"**Största viktändringarna** · {senaste_datum}")
+                if vikt_rader:
+                    for rad in vikt_rader:
+                        st.markdown(f"- {rad}", unsafe_allow_html=True)
+                else:
+                    st.caption("Inga större viktändringar senaste ändringsdagen.")
+            st.caption("Fullständiga flöden finns under **Konsensus** och **Ändringar** i toppmenyn.")
 
-with st.expander("I · Konsensus"):
+if view == "Konsensus":
     trosklar = data.get("konsensus_trosklar") or {}
     _n = trosklar.get("n") or len(data["profiler"])
     _in_krav, _kvar_krav = trosklar.get("in"), trosklar.get("kvar")
@@ -758,7 +859,7 @@ with st.expander("I · Konsensus"):
         st.dataframe(pd.DataFrame(lamnat_rows), use_container_width=True, hide_index=True)
         st.caption("När investerare kliver av ett värdepapper kan det vara en tidig säljsignal.")
 
-with st.expander("II · Divergens"):
+if view == "Divergens":
     st.subheader("Divergens — signalgruppens unika övertygelser")
     divergens = data.get("divergens", {})
     bg_antal = data.get("bakgrund_antal", 0)
@@ -841,7 +942,7 @@ with st.expander("II · Divergens"):
                          use_container_width=True, hide_index=True,
                          column_config={"Bransch": st.column_config.ImageColumn("", width=36)})
 
-with st.expander("III · Claudes analys"):
+if view == "Claude":
     st.subheader("Claudes tekniska analys per aktie")
     if not claude:
         st.info("Ingen Claude-analys i senaste körningen. Bocka i rutan i sidopanelen och kör igen.")
@@ -910,7 +1011,7 @@ with st.expander("III · Claudes analys"):
             if c.get("genererad"):
                 st.caption(f"Analys genererad: {c['genererad']}")
 
-with st.expander("IV · Senaste ändringar"):
+if view == "Ändringar":
     st.subheader("Senaste ändringar i portföljerna")
     log = data.get("historik", [])
     if not log:
@@ -993,7 +1094,7 @@ with st.expander("IV · Senaste ändringar"):
 
         st.caption("Hela loggen över alla körningar finns under **Historik** nedan.")
 
-with st.expander("V · Historik"):
+if view == "Historik":
     st.subheader("Ändringar mellan körningar")
     log = data.get("historik", [])
     if not log:
@@ -1009,7 +1110,7 @@ with st.expander("V · Historik"):
             df = df[df["Typ"] == val]
         st.dataframe(df, use_container_width=True, hide_index=True)
 
-with st.expander("VI · Portföljer"):
+if view == "Portföljer":
     st.subheader("Innehav per profil")
     profil = st.selectbox("Välj profil", data["profiler"])
     positions = data["portfolios"][profil]
@@ -1024,9 +1125,112 @@ with st.expander("VI · Portföljer"):
         st.bar_chart(df.set_index("Aktie").head(15), color=MOSS)
         st.caption("De 15 största innehaven.")
 
+if view == "Sentiment":
+    st.markdown(
+        '<div class="hero-title">Marknadssentiment</div>'
+        '<div class="hero-sub">CNN:s Fear &amp; Greed-index — marknadens känsloläge från '
+        'extrem rädsla (0) till extrem girighet (100). Rent informationsfält, '
+        'ingen påverkan på poäng eller regim.</div>',
+        unsafe_allow_html=True,
+    )
+    fg = data.get("fear_greed")
+    if not fg or fg.get("varde") is None:
+        st.info("Fear & Greed-data saknas just nu — CNN-hämtningen har inte lyckats än "
+                "(inofficiell endpoint). Mätaren visas så snart ett värde finns.")
+    else:
+        varde = fg["varde"]
+        etikett = fg.get("etikett") or fg_zon(varde)[0]
+        farg = fg_zon(varde)[1]
+
+        # Åldrad/återanvänd data → tydlig notis (aldrig krasch)
+        notis = fg.get("notis")
+        if notis and notis.strip().startswith("⚠"):
+            st.warning(notis)
+        elif notis:
+            st.caption(f":material/history: {notis}")
+
+        gcol1, gcol2, gcol3 = st.columns([1, 2, 1])
+        with gcol2:
+            st.plotly_chart(fear_greed_gauge(varde), use_container_width=True,
+                            config={"displayModeBar": False})
+            st.markdown(f'<div class="fg-etikett" style="color:{farg}">{etikett}</div>',
+                        unsafe_allow_html=True)
+
+            # Kompakt historik-lista (CNN-stil): värde i färgad badge + etikett
+            rader = [
+                ("Föregående stängning", fg.get("foregaende_stangning")),
+                ("1 vecka sedan", fg.get("en_vecka_sedan")),
+                ("1 månad sedan", fg.get("en_manad_sedan")),
+                ("1 år sedan", fg.get("ett_ar_sedan")),
+            ]
+            bitar = ['<div class="fg-hist">']
+            for when, v in rader:
+                if v is None:
+                    bitar.append(f'<div class="fg-row"><span class="fg-when">{when}</span>'
+                                 f'<span class="fg-badge" style="background:{MUTED}">–</span>'
+                                 f'<span class="fg-cat">—</span></div>')
+                else:
+                    et, f2 = fg_zon(v)
+                    bitar.append(f'<div class="fg-row"><span class="fg-when">{when}</span>'
+                                 f'<span class="fg-badge" style="background:{f2}">{v:.0f}</span>'
+                                 f'<span class="fg-cat">{et}</span></div>')
+            bitar.append('</div>')
+            st.markdown("".join(bitar), unsafe_allow_html=True)
+
+            ts = fg.get("cnn_tidsstämpel") or fg.get("hämtad")
+            st.markdown(
+                f'<div class="fg-ts">Senast uppdaterad: {ts or "—"}'
+                f'<br>Källa: {fg.get("källa", "CNN Fear &amp; Greed Index")}</div>',
+                unsafe_allow_html=True,
+            )
+
 # ----------------------------------------------------------------------
-# Sidfot (ol.studio-inspirerad)
+# Sidfot: fullbreddslinje + kontroller (uppdatera/claude/bakgrund/excel) + info
 # ----------------------------------------------------------------------
+st.markdown('<hr class="fullrule">', unsafe_allow_html=True)
+
+
+def _sett_flagga(namn):
+    st.session_state[namn] = True
+
+
+fcol_l, fcol_r = st.columns([6, 4], vertical_alignment="center")
+with fcol_l:
+    st.markdown('<div class="footctrl-label">Verktyg</div>', unsafe_allow_html=True)
+with fcol_r:
+    f1, f2, f3, f4 = st.columns(4)
+    f1.button("Uppdatera", key="btn_upp", on_click=_sett_flagga, args=("kor_nu",),
+              use_container_width=True)
+    with f2.popover("Claude", use_container_width=True):
+        st.checkbox("Inkludera Claude-analys", key="with_claude",
+                    help="Claude körs max en gång per dag (drar API-credits) — annars återanvänds dagens analys.")
+        st.checkbox("Tvinga om Claude-analysen", key="force_claude",
+                    help="Kör Claude igen även om den redan körts idag. Drar credits!")
+    with f3.popover("Bakgrund", use_container_width=True):
+        def _fildatum(fil):
+            try:
+                with open(fil) as f:
+                    return json.load(f).get("datum")
+            except (OSError, json.JSONDecodeError):
+                return None
+
+        st.caption(f"Senast screenad: {_fildatum(ea.BG_MEMBERS_FILE) or 'aldrig'} · "
+                   f"portföljer hämtade: {_fildatum(ea.BG_CACHE_FILE) or 'aldrig'}")
+        st.caption("Körs även automatiskt: screener månadsvis, divergens varje lördag.")
+        st.button(":material/person_search: Kör screener", key="btn_scr",
+                  on_click=_sett_flagga, args=("kor_screener",), use_container_width=True,
+                  help="Väljer om vilka 50 traders som utgör bakgrundsgruppen. Snabbt (~10 s).")
+        st.button(":material/balance: Uppdatera divergens", key="btn_div",
+                  on_click=_sett_flagga, args=("kor_divergens",), use_container_width=True,
+                  help="Hämtar bakgrundsgruppens 50 portföljer och kör om analysen. Tar 3–5 minuter.")
+    if os.path.exists(ea.OUTPUT_FILE):
+        with open(ea.OUTPUT_FILE, "rb") as _xf:
+            f4.download_button(
+                "Excel", _xf.read(), file_name=ea.OUTPUT_FILE,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+
 from datetime import date as _date_fot
 
 _cd = data.get("claude_datum")
