@@ -58,10 +58,10 @@ st.markdown(f"""
   @keyframes vyfade {{ from {{ opacity: 0; transform: translateY(4px); }}
                        to {{ opacity: 1; transform: translateY(0); }} }}
 
-  /* Aktiv menypunkt i toppnavet — samma läckra serif som sidfotens verktyg */
-  .navactive {{ font-family: 'Newsreader', Georgia, serif; font-size: .84rem; color: {TEXT};
-      letter-spacing: .01em; padding: .3rem .3rem; border-bottom: 1px solid {TEXT};
-      display: inline-block; white-space: nowrap; }}
+  /* Aktiv menypunkt i toppnavet — mono-versal, exakt som fördjupnings-etiketterna */
+  .navactive {{ font-family: 'Space Grotesk', sans-serif; font-size: .74rem; color: {TEXT};
+      text-transform: uppercase; letter-spacing: .16em; padding: .3rem .2rem;
+      border-bottom: 1px solid {TEXT}; display: inline-block; white-space: nowrap; }}
 
   /* Typografi: serif-display i rubriker, resten grotesk */
   h1, h2, h3, h4 {{ font-family: 'Newsreader', Georgia, serif !important;
@@ -161,6 +161,17 @@ st.markdown(f"""
   .fg-ts {{ font-family: 'Space Grotesk', sans-serif; font-size: .66rem; color: {MUTED};
       letter-spacing: .04em; text-align: center; margin-top: 1.3rem; line-height: 1.6; }}
 
+  /* ---- Senaste händelser ---- */
+  .sh-rubrik {{ font-family: 'Newsreader', Georgia, serif; font-size: 1.75rem; color: {TEXT};
+      text-align: center; margin: .3rem 0 1.9rem; letter-spacing: -.01em; }}
+  .sh-kol {{ font-family: 'Space Grotesk', sans-serif; font-size: .64rem; text-transform: uppercase;
+      letter-spacing: .13em; color: {TEXT}; margin-bottom: .2rem; padding-bottom: .55rem;
+      border-bottom: 1px solid {HAIRLINE}; }}
+  .sh-kol span {{ color: {MUTED}; text-transform: none; letter-spacing: .02em; }}
+  .sh-post {{ font-family: 'Space Grotesk', sans-serif; font-size: .81rem; color: {TEXT};
+      line-height: 1.45; padding: .55rem 0; border-bottom: 1px solid {HAIRLINE}; }}
+  .sh-post b {{ font-weight: 500; }}
+
   /* --- Sidopanelen är dold; ersatt av diskret toppnavigering --- */
   section[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"] {{
       display: none !important; }}
@@ -185,6 +196,19 @@ st.markdown(f"""
   [data-testid="stMainBlockContainer"] [data-testid="stDownloadButton"] > button:hover,
   [data-testid="stMainBlockContainer"] [data-testid="stPopover"] button:hover {{
       color: {OLIV} !important; }}
+
+  /* Toppnavet: mono-versal, exakt fördjupnings-etiketternas stil (ej serifen) */
+  [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button {{
+      font-family: 'Space Grotesk', sans-serif !important; text-transform: uppercase;
+      letter-spacing: .16em; font-size: .74rem !important; color: {MUTED} !important;
+      padding: .3rem .2rem !important; white-space: nowrap; }}
+  [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button:hover {{
+      color: {OLIV} !important; }}
+  /* Menyn flödar som en rad och radbryter på smala skärmar (mobil) */
+  .st-key-navbox {{ flex-direction: row !important; flex-wrap: wrap !important;
+      align-items: center; gap: .2rem 1.1rem !important; }}
+  .st-key-navbox [data-testid="stElementContainer"], .st-key-navbox .stButton {{
+      width: auto !important; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -296,6 +320,19 @@ def nya_pa_listan(log, typ, dagar=7):
 def _pe(d):
     """Formatera procentenheter, svensk decimal: +2,3 pe."""
     return f"{d:+.1f}".replace(".", ",") + " pe"
+
+
+def _md_bold(s):
+    """Konvertera markdown-fetstil **text** → <b>text</b> för render i HTML-div."""
+    import re
+    return re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
+
+
+def _navslug(k):
+    """ASCII-slug för menynycklar → stabil widget-key + CSS-klassmatchning."""
+    tabell = str.maketrans({" ": "_", "ä": "a", "ö": "o", "å": "a",
+                            "Ä": "A", "Ö": "O", "Å": "A"})
+    return k.translate(tabell)
 
 
 def _delta_pe(e):
@@ -559,13 +596,20 @@ hcol1, hcol2 = st.columns([2, 8], vertical_alignment="center")
 with hcol1:
     st.markdown('<div class="wordmark">eToro Portföljanalys</div>', unsafe_allow_html=True)
 with hcol2:
-    navcols = st.columns(len(VYER))
-    for _c, (_key, _label) in zip(navcols, VYER):
-        if _key == st.session_state["view"]:
-            _c.markdown(f'<div class="navactive">{_label}</div>', unsafe_allow_html=True)
-        elif _c.button(_label, key=f"nav_{_key.replace(' ', '_')}"):
-            st.session_state["view"] = _key
-            st.rerun()
+    # Menypunkterna flödar som en rad (flex-wrap) — radbryter på smala skärmar.
+    with st.container(key="navbox"):
+        for _key, _label in VYER:
+            if st.button(_label, key=f"nav_{_navslug(_key)}"):
+                st.session_state["view"] = _key
+                st.rerun()
+
+# Understryk den aktiva menypunkten (dynamiskt per vy).
+_aktiv = _navslug(st.session_state["view"])
+st.markdown(
+    f"<style>div.st-key-nav_{_aktiv} button {{ color: {TEXT} !important; "
+    f"border-bottom: 1px solid {TEXT} !important; }}</style>",
+    unsafe_allow_html=True,
+)
 
 st.markdown('<hr class="fullrule">', unsafe_allow_html=True)
 
@@ -709,24 +753,31 @@ if view == "Bästa köp":
         vikt_rader = [t for _, t in sorted(vikt_rader, key=lambda x: -x[0])][:6]
 
         if lista_rader or vikt_rader:
-            st.divider()
-            st.subheader("Senaste händelser")
-            kol1, kol2 = st.columns(2)
-            with kol1:
-                st.markdown("**Förändringar i listorna** · senaste 30 dagarna")
-                if lista_rader:
-                    for rad in lista_rader[:6]:
-                        st.markdown(f"- {rad}", unsafe_allow_html=True)
-                else:
-                    st.caption("Inga in- eller utträden den senaste månaden.")
-            with kol2:
-                st.markdown(f"**Största viktändringarna** · {senaste_datum}")
-                if vikt_rader:
-                    for rad in vikt_rader:
-                        st.markdown(f"- {rad}", unsafe_allow_html=True)
-                else:
-                    st.caption("Inga större viktändringar senaste ändringsdagen.")
-            st.caption("Fullständiga flöden finns under **Konsensus** och **Ändringar** i toppmenyn.")
+            st.markdown('<hr class="fullrule" style="margin-top:2.4rem">', unsafe_allow_html=True)
+            _shl, _shc, _shr = st.columns([1, 7, 1])
+            with _shc:
+                st.markdown('<div class="sh-rubrik">Senaste händelser</div>',
+                            unsafe_allow_html=True)
+                kol1, kol2 = st.columns(2, gap="large")
+                with kol1:
+                    st.markdown('<div class="sh-kol">Förändringar i listorna '
+                                '<span>· senaste 30 dagarna</span></div>', unsafe_allow_html=True)
+                    if lista_rader:
+                        for rad in lista_rader[:6]:
+                            st.markdown(f'<div class="sh-post">{_md_bold(rad)}</div>',
+                                        unsafe_allow_html=True)
+                    else:
+                        st.caption("Inga in- eller utträden den senaste månaden.")
+                with kol2:
+                    st.markdown('<div class="sh-kol">Största viktändringarna '
+                                f'<span>· {senaste_datum}</span></div>', unsafe_allow_html=True)
+                    if vikt_rader:
+                        for rad in vikt_rader:
+                            st.markdown(f'<div class="sh-post">{_md_bold(rad)}</div>',
+                                        unsafe_allow_html=True)
+                    else:
+                        st.caption("Inga större viktändringar senaste ändringsdagen.")
+                st.caption("Fullständiga flöden finns under **Konsensus** och **Ändringar** i toppmenyn.")
 
 if view == "Konsensus":
     trosklar = data.get("konsensus_trosklar") or {}
