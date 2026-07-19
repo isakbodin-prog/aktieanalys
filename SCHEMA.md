@@ -16,6 +16,18 @@
 Notera datum + ändring varje gång ett fält som UI:t läser ändras
 (nytt/borttaget/omdöpt/typändrat). Nyast överst.
 
+- **2026-07-19** — Claude-analysens textformat: `analys` bytte stil från
+  "domslut" till en teknisk lägesbeskrivning i fast ordning (trendfas →
+  nyckelnivåer → momentum i trendens kontext → köptrigger → ogiltigt om →
+  rekommendationsraden). `rekommendation`/`rekommendation_visning`/
+  `genererad` oförändrade i sak (fortfarande KÖP/AVVAKTA/SÄLJ). Alla
+  gamla texter omanalyseras automatiskt en gång via ett nytt
+  `format_version`-fält i `claude[tk].indikator_snapshot` (internt, UI
+  behöver inte läsa det). `analyses`-entryn fick sex nya fält:
+  `bollinger_ovre`, `bollinger_nedre` (tidigare bara internt beräknade)
+  samt `swing_hog_20d`/`swing_lag_20d`/`swing_hog_60d`/`swing_lag_60d`
+  (senaste 20/60 handelsdagarnas högsta/lägsta stängning — nyckelnivåer
+  åt Claude-prompten). Inga tidigare fält togs bort.
 - **2026-07-17** — Regimhämtningens robusthet: `regim` fick två nya fält —
   `regim_kalla` (vilken ticker i fallbackkedjan SPY/^GSPC/VOO/IVV som
   lyckades) och `regim_datum` (datum för senaste LYCKADE beräkning, skiljs
@@ -173,9 +185,15 @@ Nyckel = ticker. Värdet har **två möjliga former**:
 | `MACD_signal` | float | nej | |
 | `MACD_över_signal` | bool | nej | |
 | `bollinger_position_%` | float \| null | ja | 0 = nedre bandet, 100 = övre. |
+| `bollinger_ovre` | float \| null | ja | Övre Bollingerband (pris). Sedan 2026-07-19 — tidigare bara internt beräknat. |
+| `bollinger_nedre` | float \| null | ja | Nedre Bollingerband (pris). |
 | `52v_högsta` | float | nej | |
 | `52v_lägsta` | float | nej | |
 | `avstånd_52v_högsta_%` | float | nej | Negativt = under toppen. |
+| `swing_hog_20d` | float \| null | ja | Högsta stängning senaste 20 handelsdagarna. `null` om < 20 dagars historik. Sedan 2026-07-19 — nyckelnivå åt Claude-prompten (§5), ärligare stöd/motstånd än enbart 52v. |
+| `swing_lag_20d` | float \| null | ja | Lägsta stängning senaste 20 handelsdagarna. |
+| `swing_hog_60d` | float \| null | ja | Högsta stängning senaste 60 handelsdagarna. `null` om < 60 dagars historik. |
+| `swing_lag_60d` | float \| null | ja | Lägsta stängning senaste 60 handelsdagarna. |
 | `avkastning_1m_%` | float \| null | ja | |
 | `avkastning_3m_%` | float \| null | ja | |
 | `volymtrend_20d_vs_3m_%` | float \| null | ja | |
@@ -223,7 +241,7 @@ Nyckel = ticker (endast konsensusaktier, och bara de som analyserats).
 | `analys_alder_dagar` | int \| null | Dagar sedan `genererad`, beräknat varje körning (även för återanvända texter). `null` om `genererad` saknas. |
 | `modell` | str \| null | Modellen som skrev texten: `"claude-opus-4-8"` (grundanalys — aktien var "ny på listan") eller `"claude-sonnet-4-6"` (omanalys av befintlig aktie). `null` på texter från före Claude-triggerfiltret (2026-07-16). |
 | `analys_orsak` | str \| null | Varför texten (om)genererades senast, t.ex. `"ny på listan"`, `"RSI korsade 70"`, `"poäng ändrad 65.2 → 78.9"`, `"force-claude"`. Loggas för att se vad som triggar flest omanalyser. `null` på gamla texter. |
-| `indikator_snapshot` | dict \| null | Ögonblicksbild av indikatorerna vid genereringstillfället — jämförs mot dagens värden nästa körning för att avgöra omanalys. `{rsi, pris, ma50, ma200, macd_diff, over_ma200, golden_cross, poang, viktad_konsensus, exit}` (alla nullbara). `null` på texter från före filtret — det UI:t behöver inte läsa, det är internt facit för backend. |
+| `indikator_snapshot` | dict \| null | Ögonblicksbild av indikatorerna vid genereringstillfället — jämförs mot dagens värden nästa körning för att avgöra omanalys. `{rsi, pris, ma50, ma200, macd_diff, over_ma200, golden_cross, poang, viktad_konsensus, exit, regim, format_version}` (alla nullbara utom `format_version`). `format_version` (int, sedan 2026-07-19) taggar vilken version av Claude-promptens textstruktur som genererade texten — höjs i koden (`CLAUDE_PROMPT_FORMAT_VERSION`) vid framtida omskrivningar av `analys`-textens format, vilket auto-triggar en engångsomanalys av ALLA texter (se `behover_ny_analys`). `null` på texter från före filtret — det UI:t behöver inte läsa, det är internt facit för backend. |
 
 → Saknas en konsensusaktie i `claude`: visa "ingen Claude-analys".
 

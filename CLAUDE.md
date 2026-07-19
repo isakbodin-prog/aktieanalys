@@ -162,16 +162,27 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
    om data helt saknas — aldrig 0, som annars är omöjligt att skilja från
    en genuint dyr aktie. Excel-kommentar flaggar cellen när detta slår till.
 5. Claude-analys: en tokensnål, explicit fältlista (ticker, pris, valuta,
-   RSI14, MA50/MA200, stigande_trend, MACD/golden-cross-status, Bollinger,
-   52v-läge, 1m/3m-momentum, poäng v2 + delpoäng, viktad konsensus,
-   divergens, EPS-rev, riktkurs+spridning, uppsida, innehavstid/vinst,
-   nästa rapport, EXIT) — ALDRIG hela indikator-dicten eller rå
-   yfinance-data — byggs av _bygg_claude_input() och skickas till Claude
-   API (anthropic-SDK) som skriver en analys på svenska (max ~120 ord,
-   naturligt språk utan råa fältnamn eller markdown) per konsensusaktie +
-   rekommendation (KÖP/AVVAKTA/SÄLJ). Regimen skickas INTE med i prompten
-   (visas redan i rapportheadern; en återanvänd text skulle annars bära en
-   inaktuell regim-etikett) — se i stället regimskifte-triggern nedan.
+   RSI14, MA50/MA200, stigande_trend, MACD/golden-cross-status, Bollinger
+   (band + position), 52v-läge, swing-nivåer 20d/60d (hög/låg — beräknas i
+   analyze_ticker(), ärligare stöd/motstånd än enbart 52v), 1m/3m-momentum,
+   poäng v2 + delpoäng, viktad konsensus, divergens, EPS-rev, riktkurs+
+   spridning, uppsida, innehavstid/vinst, nästa rapport, EXIT) — ALDRIG
+   hela indikator-dicten eller rå yfinance-data — byggs av
+   _bygg_claude_input() och skickas till Claude API (anthropic-SDK) som
+   skriver en TEKNISK LÄGESBESKRIVNING på svenska (max ~150 ord, löpande
+   prosa utan rubriker/markdown/råa fältnamn) i fast ordning: trendfas
+   (var i primärtrenden aktien befinner sig) → nyckelnivåer (stöd/motstånd,
+   ENDAST härledda ur nivåfälten ovan — hårt förbud mot påhittade nivåer)
+   → momentum i trendens kontext (samma RSI betyder olika saker i trend
+   vs. sidledes) → köptrigger (konkret villkor) → ogiltigt om (konkret
+   nedsidesvillkor), följt av rekommendationsraden (KÖP/AVVAKTA/SÄLJ).
+   2026-07-19: ersatte en tidigare "domslut"-stil där enskilda indikatorer
+   (t.ex. RSI översålt) kunde fälla en aktie med intakt trend till AVVAKTA/
+   SÄLJ — rekommendationen ska nu spegla HELHETEN (totalpoäng + trendfas);
+   en rekyl inom en stark trend beskrivs som köpläge med trigger, inte
+   bara varning. Regimen skickas INTE med i prompten (visas redan i
+   rapportheadern; en återanvänd text skulle annars bära en inaktuell
+   regim-etikett) — se i stället regimskifte-triggern nedan.
    Kräver ANTHROPIC_API_KEY i .env — saknas den hoppas steget över.
    Sonnet-omanalyser körs UTAN adaptive thinking (ren textbudget,
    max_tokens=600); Opus-grundanalyser ("ny på listan") behåller adaptive
@@ -189,9 +200,13 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
    sedan claude[tk].indikator_snapshot sparades (RSI korsat 30/70, pris
    korsat MA200, MACD korsat signallinjen, golden/death cross, EXIT-status
    ändrad, poäng ändrat >10, viktad konsensus ändrad >1.0, regimskifte
-   GRÖN↔RÖD (GUL/OKÄND triggar inte), eller text äldre än 7 dagar). Annars
-   återanvänds texten och claude[tk].analys_alder_dagar
-   uppdateras. Modellval: claude-opus-4-8 för grundanalys ("ny på listan" —
+   GRÖN↔RÖD (GUL/OKÄND triggar inte), gammalt textformat (indikator_
+   snapshot.format_version ≠ CLAUDE_PROMPT_FORMAT_VERSION — höjs manuellt
+   i koden vid framtida promptomskrivningar så ALLA texter omanalyseras
+   en gång automatiskt, ingen manuell --force-claude krävs), eller text
+   äldre än 7 dagar). Annars återanvänds texten och claude[tk].
+   analys_alder_dagar uppdateras. Modellval: claude-opus-4-8 för
+   grundanalys ("ny på listan" —
    aktien saknar sparad text), annars claude-sonnet-4-6 för omanalys av
    befintlig aktie (loggas i claude[tk].modell/.analys_orsak). Gamla texter
    utan indikator_snapshot omanalyseras en gång, sedan normalt.

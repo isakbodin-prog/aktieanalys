@@ -719,6 +719,13 @@ def analyze_ticker(ticker):
         ret_1m = (price / float(close.iloc[-21]) - 1) * 100 if len(close) >= 21 else None
         ret_3m = (price / float(close.iloc[-63]) - 1) * 100 if len(close) >= 63 else None
 
+        # Swing-nivåer (senaste 20/60 handelsdagars högsta/lägsta stängning)
+        # — mer ärliga stöd/motstånd åt Claude-prompten än enbart 52v-nivåerna
+        swing_hog_20 = round(float(close.tail(20).max()), 2) if len(close) >= 20 else None
+        swing_lag_20 = round(float(close.tail(20).min()), 2) if len(close) >= 20 else None
+        swing_hog_60 = round(float(close.tail(60).max()), 2) if len(close) >= 60 else None
+        swing_lag_60 = round(float(close.tail(60).min()), 2) if len(close) >= 60 else None
+
         # Volymtrend: snitt senaste 20 dagar mot snitt senaste 3 mån
         vol_20 = float(volume.tail(20).mean())
         vol_90 = float(volume.tail(63).mean())
@@ -789,9 +796,15 @@ def analyze_ticker(ticker):
             "MACD_signal": round(macd_sig, 2),
             "MACD_över_signal": macd_val > macd_sig,
             "bollinger_position_%": round(boll_pos, 1) if boll_pos is not None else None,
+            "bollinger_ovre": round(boll_upper, 2),
+            "bollinger_nedre": round(boll_lower, 2),
             "52v_högsta": round(high52, 2),
             "52v_lägsta": round(low52, 2),
             "avstånd_52v_högsta_%": round((price / high52 - 1) * 100, 1),
+            "swing_hog_20d": swing_hog_20,
+            "swing_lag_20d": swing_lag_20,
+            "swing_hog_60d": swing_hog_60,
+            "swing_lag_60d": swing_lag_60,
             "avkastning_1m_%": round(ret_1m, 1) if ret_1m is not None else None,
             "avkastning_3m_%": round(ret_3m, 1) if ret_3m is not None else None,
             "volymtrend_20d_vs_3m_%": round(vol_trend, 1) if vol_trend is not None else None,
@@ -1347,6 +1360,11 @@ KONSENSUS_TRIGGER_DIFF = 1.0
 # 2026-07-16 där 2000 utan uppdelning gav tomma svar för två aktier).
 CLAUDE_MAX_TOKENS_OMANALYS = 600
 CLAUDE_MAX_TOKENS_NY = 2000
+# Höjs varje gång textstrukturen/systemprompten ändras i grunden (senast:
+# 2026-07-18, domslut → teknisk lägesbeskrivning med trigger/ogiltigt-villkor)
+# så att ALLA befintliga texter omanalyseras en gång automatiskt — se
+# behover_ny_analys. Inget manuellt --force-claude krävs.
+CLAUDE_PROMPT_FORMAT_VERSION = 2
 
 
 def _bygg_indikator_snapshot(a, poang, viktad_konsensus, exit_flagga, regim_status=None):
@@ -1371,6 +1389,7 @@ def _bygg_indikator_snapshot(a, poang, viktad_konsensus, exit_flagga, regim_stat
         "viktad_konsensus": viktad_konsensus,
         "exit": exit_flagga,
         "regim": regim_status,
+        "format_version": CLAUDE_PROMPT_FORMAT_VERSION,
     }
 
 
@@ -1390,11 +1409,11 @@ def behover_ny_analys(ticker, dagens_data, senaste_analys):
     före detta filter) behandlas den likaså som saknad — engångsomanalys,
     därefter normal jämförelse.
 
-    Analyseras om ENDAST vid: saknad text, RSI-korsning av 30/70, pris-korsning
-    av MA200, MACD-korsning av signallinjen, golden/death cross, ändrad
-    EXIT-status, poängändring > 10, viktad konsensus-ändring > 1.0,
-    regimskifte GRÖN↔RÖD (GUL/OKÄND triggar inte — för brusigt), eller
-    text äldre än MAX_ANALYS_ALDER_DAGAR dagar.
+    Analyseras om ENDAST vid: saknad text, gammalt textformat, RSI-korsning
+    av 30/70, pris-korsning av MA200, MACD-korsning av signallinjen,
+    golden/death cross, ändrad EXIT-status, poängändring > 10, viktad
+    konsensus-ändring > 1.0, regimskifte GRÖN↔RÖD (GUL/OKÄND triggar inte
+    — för brusigt), eller text äldre än MAX_ANALYS_ALDER_DAGAR dagar.
     """
     from datetime import date
     if not senaste_analys or not senaste_analys.get("analys"):
@@ -1403,6 +1422,9 @@ def behover_ny_analys(ticker, dagens_data, senaste_analys):
     gammal = senaste_analys.get("indikator_snapshot")
     if not gammal:
         return True, "saknar indikatorsnapshot (gammal analys, engångsuppdatering)"
+
+    if gammal.get("format_version") != CLAUDE_PROMPT_FORMAT_VERSION:
+        return True, f"nytt textformat (v{CLAUDE_PROMPT_FORMAT_VERSION})"
 
     genererad = senaste_analys.get("genererad")
     if genererad:
@@ -1453,6 +1475,12 @@ def _bygg_claude_input(ticker, a, poäng, delpoäng, viktad_konsensus, divergens
     avrundas till 1–2 decimaler (långa decimaler kostar tokens utan att
     tillföra något); nyckar med None-värde utesluts helt.
 
+    Nivåfälten (MA50/MA200, Bollinger-band över/under, 52v-högsta/lägsta,
+    swing-högsta/lägsta 20/60 dagar) är HELA underlaget prompten tillåter
+    Claude att bygga nyckelnivåer/köptrigger/ogiltigt-nivå från (§ HÅRT
+    VILLKOR i claude_analysis) — lägg aldrig till ett nivåfält utan att
+    uppdatera den regeln i systemprompten också.
+
     Regim skickas INTE med (visas redan i rapportheadern, och en återanvänd
     text skulle annars bära en inaktuell regim-etikett) — regimskifte
     GRÖN↔RÖD är i stället en omanalys-trigger, se behover_ny_analys.
@@ -1470,8 +1498,16 @@ def _bygg_claude_input(ticker, a, poäng, delpoäng, viktad_konsensus, divergens
         "stigande_trend": a.get("stigande_trend"),
         "MACD_över_signal": a.get("MACD_över_signal"),
         "golden_cross": a.get("golden_cross"),
+        "bollinger_ovre": r(a.get("bollinger_ovre"), 2),
+        "bollinger_nedre": r(a.get("bollinger_nedre"), 2),
         "bollinger_position_%": r(a.get("bollinger_position_%")),
+        "52v_högsta": r(a.get("52v_högsta"), 2),
+        "52v_lägsta": r(a.get("52v_lägsta"), 2),
         "avstånd_52v_högsta_%": r(a.get("avstånd_52v_högsta_%")),
+        "swing_hog_20d": r(a.get("swing_hog_20d"), 2),
+        "swing_lag_20d": r(a.get("swing_lag_20d"), 2),
+        "swing_hog_60d": r(a.get("swing_hog_60d"), 2),
+        "swing_lag_60d": r(a.get("swing_lag_60d"), 2),
         "avkastning_1m_%": r(a.get("avkastning_1m_%")),
         "avkastning_3m_%": r(a.get("avkastning_3m_%")),
         "poäng": r(poäng),
@@ -1524,26 +1560,48 @@ def claude_analysis(jobb, körningsläge="standard"):
     system = (
         "Du är en erfaren teknisk analytiker på en svensk bank. Du får tekniska "
         "indikatorer och analytikerdata för en aktie i JSON-format (fälten är redan "
-        "urvalda — inga andra data finns). Skriv en koncis teknisk analys på svenska "
-        "(max ca 120 ord) som väger samman trend (MA50/MA200, golden cross), momentum "
-        "(RSI, MACD, 1m/3m-avkastning), volatilitet (Bollingerband, avstånd till "
-        "52-veckorsnivåer) och analytikernas riktkurs. Var konkret: nämn nivåer och "
-        "vad som skulle ändra bilden.\n\n"
-        "VIKTIGASTE KRITERIET för investeraren är stigande trend (fältet "
-        "stigande_trend). Är den false får rekommendationen ALDRIG vara KÖP — högst "
-        "AVVAKTA, och ange då tydligt vilken nivå som måste återtas för att "
-        "trendkriteriet ska vara uppfyllt. Är trendkriteriet uppfyllt, bedöm övriga "
-        "indikatorer som vanligt.\n\n"
+        "urvalda — inga andra data finns). Skriv en teknisk lägesbeskrivning på "
+        "svenska på HÖGST 150 ord totalt (räkna själv — det är en hård gräns, inte "
+        "en riktlinje: skriv 1–2 korta meningar per del nedan, inte fler), i löpande "
+        "prosa utan rubriker, punktlistor eller markdown, som täcker — i den "
+        "ordningen:\n"
+        "1) TRENDFAS: primärtrenden (MA50/MA200, golden cross) och var aktien "
+        "befinner sig i den just nu — utbrott, konsolidering, rekyl eller "
+        "toppbildning.\n"
+        "2) NYCKELNIVÅER: närmaste stöd och motstånd i konkreta priser.\n"
+        "3) MOMENTUM I TRENDENS KONTEXT: väg RSI/MACD/momentum mot trendfasen — "
+        "samma RSI-nivå betyder olika saker i en stark trend jämfört med en "
+        "sidledes rörelse.\n"
+        "4) KÖPTRIGGER: det konkreta villkoret (nivå, gärna med en bekräftelse som "
+        "volym eller en indikator) som skulle göra läget köpvärt.\n"
+        "5) OGILTIGT OM: villkoret som skulle sänka caset, t.ex. en stängning under "
+        "en angiven nivå.\n"
+        "Avsluta sedan med rekommendationsraden enligt formatet längst ner.\n\n"
+        "NIVÅER — HÅRT VILLKOR: nyckelnivåer, köptriggern och ogiltigt-nivån får "
+        "ENDAST byggas av nivåfälten du fått (pris, MA50, MA200, bollinger_ovre/"
+        "bollinger_nedre, 52v_högsta/52v_lägsta, swing_hog_/swing_lag_20d/60d). "
+        "Uppfinn ALDRIG nivåer, zoner eller historiska mönster som inte direkt kan "
+        "härledas ur de givna fälten — nämn hellre färre nivåer än att gissa.\n\n"
+        "REKOMMENDATIONEN ska spegla HELHETEN — totalpoängen (fältet poäng) och "
+        "trendfasen (fältet stigande_trend) — inte en enskild indikator. En aktie "
+        "med hög poäng och intakt trend (stigande_trend=true) ska INTE fällas till "
+        "AVVAKTA eller SÄLJ enbart för att en indikator som RSI tillfälligt pekar "
+        "överköpt eller översåld — en rekyl inom en stark trend är ofta ett "
+        "köpläge, inte ett säljläge; beskriv då rekylen och köptriggern i stället "
+        "för att bara varna. Är stigande_trend false får rekommendationen ALDRIG "
+        "vara KÖP — högst AVVAKTA, och OGILTIGT OM-fältet ska då i stället ange "
+        "vilken nivå som måste återtas för att trendkriteriet ska vara uppfyllt "
+        "igen.\n\n"
         "VINSTHEMTAGNINGSRISK: fälten investerarnas_innehavstid_dagar_* och "
         "investerarnas_upparbetade_vinst_pct_snitt visar hur länge eToro-investerarna "
         "ägt aktien och deras upparbetade vinst. Lång innehavstid i kombination med "
         "hög upparbetad vinst ökar risken att de börjar sälja och ta hem vinsten — "
-        "väg in det i bedömningen och kommentera det uttryckligen när risken är "
-        "förhöjd.\n\n"
+        "väg in det i bedömningen och nämn det i högst en halv mening när risken är "
+        "förhöjd, annars inte alls.\n\n"
         "DIVERGENS: fältet divergens_mot_bakgrundsgruppen_pp visar hur mycket mer "
         "(eller mindre) signalgruppen äger aktien jämfört med en bred referensgrupp "
         "(topp ~50 screenade traders). Hög divergens = unik övertygelse (starkare "
-        "signal); låg/negativ = flockbeteende. Nämn det kort.\n\n"
+        "signal); låg/negativ = flockbeteende. Nämn det i högst en halv mening.\n\n"
         "EXIT: fältet exit=true betyder att aktien har ett dödskors (pris och MA50 "
         "båda under MA200) — betona att trenden brutits även om andra indikatorer "
         "ser bra ut.\n\n"
@@ -1554,7 +1612,10 @@ def claude_analysis(jobb, körningsläge="standard"):
         "SPRÅK: skriv naturligt löpande språk, som till en investerare — använd "
         "ALDRIG råa fältnamn i texten (t.ex. 'stigande_trend är false' eller "
         "'exit=true'), skriv i stället vad det betyder i klartext. Använd heller "
-        "ingen markdown-formatering (inga **, #, listor) — ren löptext.\n\n"
+        "ingen markdown-formatering (inga **, #, listor, numrerade punkter) — ren "
+        "löptext.\n\n"
+        "Påminnelse: HELA texten (alla fem delar) får vara HÖGST 150 ord — räkna "
+        "efter innan du svarar, korta ner om det behövs.\n\n"
         "Svara EXAKT i detta format:\n"
         "REKOMMENDATION: <KÖP | AVVAKTA | SÄLJ>\n"
         "<själva analysen>"
