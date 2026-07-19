@@ -1268,6 +1268,109 @@ def _handelsdagar_mellan(datum1_str, datum2_str):
 
 
 # ----------------------------------------------------------------------
+# Fear & Greed-index (CNN, inofficiell endpoint) — rent informationsfält,
+# ingen poäng- eller regimkoppling.
+# ----------------------------------------------------------------------
+FEAR_GREED_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
+FEAR_GREED_ETIKETTER = {
+    "extreme fear": "Extreme Fear",
+    "fear": "Fear",
+    "neutral": "Neutral",
+    "greed": "Greed",
+    "extreme greed": "Extreme Greed",
+}
+FG_ALDER_VARNING_HANDELSDAGAR = 3
+
+
+def hamta_fear_greed():
+    """Ett hämtningsförsök av CNN Fear & Greed-index. Returnerar en dict vid
+    lyckad hämtning, annars None (statuskod/orsak loggas alltid — anropas
+    aldrig utan att synas i terminalen, så en framtida blockering/ändring
+    upptäcks direkt).
+
+    INOFFICIELL endpoint (inget publikt API-kontrakt från CNN) — kräver
+    browser-lika headers. En ren User-Agent räcker INTE (svarar 418);
+    Referer + Origin mot CNN:s egen sida krävdes vid verifiering
+    (2026-07-19). Kan sluta fungera utan förvarning om CNN ändrar sin
+    edge-konfiguration — därför alltid try/except och aldrig en krasch
+    här, bara None som anroparen (run_analysis) hanterar med reserv-
+    logiken i _fear_greed_med_reserv().
+    """
+    from datetime import date, datetime
+
+    headers = {
+        "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
+        "Accept": "application/json, text/plain, */*",
+        "Referer": "https://edition.cnn.com/markets/fear-and-greed",
+        "Origin": "https://edition.cnn.com",
+    }
+    try:
+        r = requests.get(FEAR_GREED_URL, headers=headers, timeout=10)
+        if r.status_code != 200:
+            print(f"    OBS: Fear & Greed-hämtning misslyckades: HTTP {r.status_code}")
+            return None
+        fg = (r.json() or {}).get("fear_and_greed") or {}
+        if fg.get("score") is None:
+            print("    OBS: Fear & Greed-hämtning gav oväntat svar (saknar fear_and_greed.score)")
+            return None
+        raw_etikett = str(fg.get("rating") or "").strip().lower()
+        etikett = FEAR_GREED_ETIKETTER.get(raw_etikett, fg.get("rating"))
+
+        def _r(v):
+            return round(float(v), 1) if v is not None else None
+
+        return {
+            "varde": _r(fg.get("score")),
+            "etikett": etikett,
+            "foregaende_stangning": _r(fg.get("previous_close")),
+            "en_vecka_sedan": _r(fg.get("previous_1_week")),
+            "en_manad_sedan": _r(fg.get("previous_1_month")),
+            "ett_ar_sedan": _r(fg.get("previous_1_year")),
+            "cnn_tidsstämpel": fg.get("timestamp"),
+            "källa": "CNN Fear & Greed Index (inofficiell endpoint)",
+            "hämtad": datetime.now().isoformat(timespec="minutes"),
+            "hämtad_datum": date.today().isoformat(),
+            "notis": None,
+        }
+    except requests.exceptions.RequestException as e:
+        print(f"    OBS: Fear & Greed-hämtning misslyckades: {type(e).__name__}: {e}")
+        return None
+    except (ValueError, KeyError, TypeError) as e:
+        print(f"    OBS: Fear & Greed-hämtning gav oväntat svar: {type(e).__name__}: {e}")
+        return None
+
+
+def _fear_greed_med_reserv(ny, prev_fg):
+    """Om `ny` (från hamta_fear_greed()) lyckades returneras den oförändrad.
+    Annars återanvänds `prev_fg` (förra körningens fear_greed-fält, ur
+    senaste_analys.json) med en notis — samma reservmönster som regimen
+    (se compute_market_regime/_handelsdagar_mellan). Är reservdatan äldre
+    än FG_ALDER_VARNING_HANDELSDAGAR handelsdagar eskaleras notisen till en
+    varning. Saknas både ny och tidigare data returneras None (inget
+    fear_greed-fält alls) — appen ska då dölja widgeten, inte visa noll.
+
+    Utbruten till egen funktion (i stället för inline i run_analysis, som
+    regimens motsvarande block) just för att kunna enhetstestas med
+    syntetisk data utan att röra run_analysis/gist_pull/gist_push.
+    """
+    from datetime import date
+
+    if ny is not None:
+        return ny
+    prev_fg = prev_fg or {}
+    if prev_fg.get("varde") is None:
+        return None
+    hämtad_datum = prev_fg.get("hämtad_datum")
+    alder = _handelsdagar_mellan(hämtad_datum, date.today().isoformat()) if hämtad_datum else None
+    if alder is not None and alder > FG_ALDER_VARNING_HANDELSDAGAR:
+        notis = f"⚠ Fear & Greed baserad på {alder} dagar gammal data"
+    else:
+        notis = "återanvänd — F&G-hämtning misslyckades"
+    return {**prev_fg, "notis": notis}
+
+
+# ----------------------------------------------------------------------
 # §B Exitregel (trendbrott) (UTBYGGNAD_regim_exit.md)
 # ----------------------------------------------------------------------
 EXIT_VILLKOR_TEXT = "Dödskors: pris < MA200 och MA50 < MA200"
@@ -2393,6 +2496,13 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     print(f"\nMarknadsregim: {regim['regim']} (SPY {regim['spy_pris']} vs MA200 {regim['spy_ma200']})"
           + (f"  — {regim['notis']}" if regim.get("notis") else ""))
 
+    # Fear & Greed-index (CNN, inofficiell) — oberoende av eToro-data, rent
+    # informationsfält (ingen poäng-/regimpåverkan). Reservlogik körs nedan
+    # efter att prev laddats.
+    fear_greed = hamta_fear_greed()
+    if fear_greed:
+        print(f"Fear & Greed: {fear_greed['varde']} ({fear_greed['etikett']})")
+
     print("\nTestar API-anslutning...")
     test = api_get("/market-data/search", {"query": "Apple"})
     if test is None:
@@ -2461,6 +2571,12 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
                   f"({alder if alder is not None else '?'} handelsdagar sedan): "
                   f"{prev_regim['regim']} — {notis}")
             regim = {**prev_regim, "regim_datum": regim_datum, "notis": notis}
+
+    # Fear & Greed: samma reservmönster som regimen ovan — misslyckad
+    # hämtning återanvänder senaste kända värde med notis/åldersvarning.
+    fear_greed = _fear_greed_med_reserv(fear_greed, prev.get("fear_greed"))
+    if fear_greed and fear_greed.get("notis"):
+        print(f"    Fear & Greed: {fear_greed['notis']}")
 
     # Teknisk analys + analytikerdata
     import time
@@ -2688,6 +2804,7 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
         "ranking": ranking,
         "exit_lista": exit_lista,
         "regim": regim,
+        "fear_greed": fear_greed,
         "historik": history_log,
         "innehav": holding_info,
         "divergens": divergence,

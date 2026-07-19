@@ -71,6 +71,15 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
     och gist-synka resultatet, så Render aldrig behöver nå Yahoo för just
     SPY/index-anropet. Samma idé kan i så fall appliceras på per-aktie-
     fälten om de också blir konsekvent blockerade, inte bara intermittent.
+- **CNN Fear & Greed-endpointen är INOFFICIELL** (production.dataviz.
+  cnn.io/index/fearandgreed/graphdata, inget publikt API-kontrakt från
+  CNN — kan ändras/blockeras utan förvarning). Kräver browser-lika headers
+  (User-Agent + Referer + Origin mot https://edition.cnn.com/markets/
+  fear-and-greed) — verifierat 2026-07-19 att enbart User-Agent INTE
+  räcker (svarar 418); Referer+Origin krävdes. hamta_fear_greed() loggar
+  alltid statuskod/feltyp vid miss så en framtida blockering syns direkt
+  i terminalen/Render-loggen, och kraschar aldrig körningen — se Pipeline
+  steg 0b för reservlogiken (samma mönster som regimen).
 
 ## Körlägen (CLI)
 - `python3 etoro_analys.py` — standardanalysen (signalgruppens 5 profiler).
@@ -121,6 +130,21 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
    OFÖRÄNDRADE. Pappersportföljerna (P1/P2/P4) gör inga nya köp i RÖD —
    kandidater som inte fanns i föregående ombalansering hålls i kassa
    (nya_i_kassa i pappersportfolj.json). Skrivs till result["regim"].
+0b. Fear & Greed-index (CNN, sedan 2026-07-19): hämtas oberoende av
+   eToro-data via hamta_fear_greed(), rent informationsfält — ingen
+   poäng- eller regimpåverkan. INOFFICIELL endpoint (production.dataviz.
+   cnn.io/index/fearandgreed/graphdata, inget publikt API-kontrakt) —
+   kräver browser-lika headers (User-Agent + Referer + Origin mot CNN:s
+   egen sida); en ren User-Agent räcker inte, ger 418 (se § Kända
+   miljöbegränsningar). Misslyckas hämtningen (statuskod/feltyp loggas
+   alltid, kraschar aldrig) återanvänds senaste kända värde via
+   _fear_greed_med_reserv() — samma reservmönster som regimen ovan:
+   notis "återanvänd — F&G-hämtning misslyckades", eskalerad till
+   "⚠ Fear & Greed baserad på X dagar gammal data" om reservdatan är
+   äldre än 3 handelsdagar (hämtad_datum, ej körningens eget datum).
+   Saknas både ny och tidigare data blir fältet null (appen döljer då
+   widgeten). Skrivs till result["fear_greed"]. Frontend bygger UI mot
+   SCHEMA.md, ingen UI-kod i backend-sessionen.
 1. Hämta 5 portföljer → aggregera investmentPct per instrumentId
 2. Konsensus: PROCENTUELLA trösklar med HYSTERES (ersatte MIN_PORTFOLIOS=3
    2026-07-13). KONSENSUS_ANDEL_IN=0.60 för att komma IN på listan,

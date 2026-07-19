@@ -16,6 +16,12 @@
 Notera datum + ändring varje gång ett fält som UI:t läser ändras
 (nytt/borttaget/omdöpt/typändrat). Nyast överst.
 
+- **2026-07-19** — Fear & Greed-index: ny toppnyckel `fear_greed` i
+  `senaste_analys.json` (CNN:s index, inofficiell endpoint, oberoende av
+  eToro-data). Rent informationsfält — ingen poäng- eller regimpåverkan.
+  Kan vara `null` om ingen data någonsin lyckats hämtas. Samma
+  reservmönster som `regim`: misslyckad hämtning återanvänder senaste
+  kända värde med notis, eskalerad varning efter 3 dagar gammal data.
 - **2026-07-19** — Claude-analysens textformat: `analys` bytte stil från
   "domslut" till en teknisk lägesbeskrivning i fast ordning (trendfas →
   nyckelnivåer → momentum i trendens kontext → köptrigger → ogiltigt om →
@@ -115,6 +121,7 @@ finns ALLTID (skrivs ovillkorligt). Tomma tillstånd representeras med `{}`,
 | `ranking` | list | ✅ | Rangordnade konsensusaktier, bästa köp först. Se **Ranking-entry**. Innehåller ALDRIG exit-aktier (se `exit_lista`). |
 | `exit_lista` | list | ✅ | Konsensusaktier i EXIT (§B trendbrott), uteslutna ur `ranking`/Bästa köp. Kan vara `[]`. Se **Exit-entry**. |
 | `regim` | dict | ✅ | Marknadsregim (§A). Se **Regim**. |
+| `fear_greed` | dict \| null | ✅ | CNN Fear & Greed-index, rent informationsfält (ingen poäng-/regimpåverkan). `null` om varken ny hämtning eller tidigare känd data finns — dölj widgeten då, visa inte noll. Se **Fear & Greed**. |
 | `historik` | list | ✅ | Ändringslogg, nyaste först. Se **Historik-entry**. |
 | `innehav` | dict | ✅ | Innehavstid/vinst per aktie (konsensus + nära + bubblare). Se **Innehav-entry**. |
 | `divergens` | dict | ✅ | Divergens per KONSENSUSAKTIE. Se **Divergens-entry**. Kan vara `{}`. |
@@ -303,6 +310,34 @@ se `regim_kalla`.
 > blockera på datafel. En återanvänd regim med `notis` som börjar på "⚠"
 > ska renderas som en synlig varning (t.ex. varningsfärg på regimbadgen) —
 > regimvärdet i sig fungerar som vanligt (GRÖN beter sig som GRÖN).
+
+### Fear & Greed (`fear_greed`)
+
+CNN Fear & Greed-index, hämtat från en INOFFICIELL CNN-endpoint
+(`production.dataviz.cnn.io/index/fearandgreed/graphdata`), oberoende av
+eToro-data. Rent informationsfält tills vidare — påverkar ingen poäng och
+är inte kopplat till marknadsregimen (§A). Samma reservmönster som
+`regim`: misslyckad hämtning återanvänder senaste kända värde.
+
+| Fält | Typ | Kan vara null? | Beskrivning |
+|---|---|---|---|
+| `varde` | float | nej | 0–100. Lägre = mer rädsla, högre = mer girighet. |
+| `etikett` | str \| null | ja | `"Extreme Fear"`, `"Fear"`, `"Neutral"`, `"Greed"` eller `"Extreme Greed"`. |
+| `foregaende_stangning` | float \| null | ja | Värdet vid föregående handelsdags stängning. |
+| `en_vecka_sedan` | float \| null | ja | Värdet för en vecka sedan. |
+| `en_manad_sedan` | float \| null | ja | Värdet för en månad sedan. |
+| `ett_ar_sedan` | float \| null | ja | Värdet för ett år sedan. |
+| `cnn_tidsstämpel` | str \| null | ja | CNN:s egen tidsstämpel för värdet (ISO 8601 med UTC-offset), skild från `hämtad`. |
+| `källa` | str | nej | `"CNN Fear & Greed Index (inofficiell endpoint)"`. |
+| `hämtad` | str | nej | ISO-datumtid (minutupplösning) för NÄR vi hämtade — kan vara en tidigare körning vid återanvändning. |
+| `hämtad_datum` | str | nej | ISO-datum för SENAST LYCKADE hämtning (skiljer sig från körningens eget datum vid återanvändning — samma roll som `regim_datum`). |
+| `notis` | str \| null | ja | `null` vid lyckad färsk hämtning. Vid återanvänt värde: `"återanvänd — F&G-hämtning misslyckades"` (≤3 handelsdagar sedan `hämtad_datum`) eller eskalerad varning `"⚠ Fear & Greed baserad på X dagar gammal data"` (>3 handelsdagar) — rendera den senare som synlig varning, samma mönster som regimens `notis`. |
+
+> Endpointen är INOFFICIELL (inget publikt API-kontrakt från CNN) och kräver
+> browser-lika headers (User-Agent + Referer + Origin mot CNN:s egen sida)
+> för att inte svara 418/403 — se § Kända miljöbegränsningar i CLAUDE.md.
+> Krashar aldrig körningen; ett misslyckande loggas med statuskod/feltyp i
+> terminalen och hanteras med samma reservlogik som regimen.
 
 ### Historik-entry (element i `historik`)
 
