@@ -48,7 +48,6 @@ st.markdown(f"""
      centreras i egna 900px-block. */
   [data-testid="stMainBlockContainer"], .block-container {{
       max-width: 100% !important; padding: 2rem 3.5rem 2rem !important; }}
-  [data-testid="stMainBlockContainer"] {{ overflow-x: clip; }}
 
   /* Fullbreddslinje vid sidhuvud/sidfot (bryter ut ur ytans padding) */
   .fullrule {{ border: none; border-top: 1px solid {HAIRLINE};
@@ -197,15 +196,17 @@ st.markdown(f"""
   [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button {{
       font-family: 'Space Grotesk', sans-serif !important; text-transform: uppercase;
       letter-spacing: .12em; font-size: .6rem !important; color: {MUTED} !important;
-      padding: .2rem .1rem !important; white-space: nowrap; }}
+      padding: .35rem .1rem !important; line-height: 1.9 !important;
+      height: auto !important; overflow: visible !important; white-space: nowrap; }}
   [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button:hover {{
       color: {OLIV} !important; }}
   /* Menyn flödar som en rad och radbryter på smala skärmar (mobil) */
   .st-key-navbox, .st-key-navbox [data-testid="stVerticalBlock"] {{
       flex-direction: row !important; flex-wrap: wrap !important;
-      align-items: center; gap: .2rem 1rem !important; }}
+      align-items: center; align-content: flex-start; gap: .1rem 1rem !important;
+      padding-top: .5rem !important; overflow: visible !important; }}
   .st-key-navbox [data-testid="stElementContainer"], .st-key-navbox .stButton {{
-      width: auto !important; }}
+      width: auto !important; overflow: visible !important; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -589,7 +590,7 @@ VYER = [
 ]
 st.session_state.setdefault("view", "Bästa köp")
 
-hcol1, hcol2 = st.columns([2, 8], vertical_alignment="center")
+hcol1, hcol2 = st.columns([2, 8], vertical_alignment="top")
 with hcol1:
     st.markdown('<div class="wordmark">eToro Portföljanalys</div>', unsafe_allow_html=True)
 with hcol2:
