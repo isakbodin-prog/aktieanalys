@@ -1,46 +1,46 @@
-# Git-arbetsflöde — två grenar (frontend / backend)
+# Git-arbetsflöde — isolerade worktrees (frontend / backend)
 
 Sessionerna är uppdelade (se CLAUDE.md): **frontend** äger `app.py`,
 **backend** äger `etoro_analys.py`, pipelinen, `SCHEMA.md` och `UTBYGGNAD_*.md`.
-För att de inte ska skriva över varandras commits på `main` jobbar de på var
-sin gren och slår ihop till `main` (som Render deployar från).
+För att de aldrig ska dela utcheckning och skriva över varandra jobbar de i
+**var sin katalog (git worktree)** på var sin gren, och deployar till `main`
+(som Render bygger från).
 
-## Grenar
+## Kataloger & grenar
 
-| Gren | Ägs av | Rör filer |
-|---|---|---|
-| `main` | (delad) | **deploy-gren** — Render bygger härifrån. Uppdateras bara via merge. |
-| `frontend` | frontend-sessionen | `app.py`, frontend-assets |
-| `backend` | backend-sessionen | `etoro_analys.py`, `SCHEMA.md`, `UTBYGGNAD_*.md`, datapipelinen |
+| Katalog | Gren | Session | Rör filer |
+|---|---|---|---|
+| `…/Aktieanalys` | `frontend` | frontend | `app.py`, frontend-assets |
+| `…/Aktieanalys-backend` | `backend` | backend | `etoro_analys.py`, `SCHEMA.md`, `UTBYGGNAD_*.md`, pipeline |
+| *(ingen)* | `main` | — | **deploy-gren** — Render bygger härifrån. Checkas inte ut; uppdateras bara via push. |
 
-Eftersom frontend och backend rör **olika filer** krockar deras merges till
-`main` inte i praktiken (git slår ihop icke-överlappande filer rent).
+Båda worktree:erna delar samma `.git`. Eftersom en gren bara kan vara utcheckad
+i **en** worktree kan sessionerna aldrig råka stå på samma gren — kollisionen som
+hände tidigare är nu omöjlig.
+
+**Backend-sessionen ska köras i `…/Aktieanalys-backend`.** Frontend-sessionen
+stannar i `…/Aktieanalys`.
 
 ## Så jobbar du (per session)
 
-1. Stå på din gren innan du börjar:
-   - frontend: `git checkout frontend`
-   - backend:  `git checkout backend`
-2. Gör dina ändringar och committa **på din gren** (aldrig direkt på `main`).
-3. När du vill driftsätta — slå ihop din gren till `main` och pusha:
+1. Jobba och committa i din egen katalog på din egen gren. Du behöver aldrig
+   byta gren — worktree:n är låst till din.
+2. **Deploya** (slår ihop din gren med `main` och triggar Render) — utan att
+   checka ut `main`:
    ```
-   git checkout main
-   git merge <din-gren>        # frontend eller backend
-   git push origin main        # → Render deployar
-   git checkout <din-gren>     # tillbaka till din gren
+   git fetch origin
+   git merge origin/main        # ta in andra sessionens senast deployade
+   git push origin HEAD:main     # deploya din gren → Render
    ```
-4. Håll din gren i synk med main när den andra sessionen deployat:
-   ```
-   git checkout <din-gren>
-   git merge main
-   ```
+   `merge origin/main` hämtar in den andra sessionens filer (olika filer →
+   ingen konflikt); `push origin HEAD:main` fast-forwardar `main` till din HEAD.
 
 ## Viktigt
 
-- **Committa aldrig direkt på `main`.** All main-uppdatering sker via merge —
-  då bevaras båda historikerna och ingen reset kan råka radera den andras arbete.
-- Sessionerna **delar samma arbetskatalog**: `git checkout` byter grenen för
-  BÅDA. Stå därför alltid på din egen gren innan du committar, och undvik att
-  köra båda sessionerna samtidigt mitt i osparade ändringar. (Vill man köra
-  parallellt helt isolerat: använd `git worktree` för en separat katalog per
-  gren.)
+- **Committa aldrig direkt genom att checka ut `main`.** All main-uppdatering
+  sker via `push origin HEAD:main` ovan — då bevaras båda historikerna och ingen
+  reset kan råka radera den andras arbete.
+- Frontend och backend rör **olika filer**, så deras merges krockar inte i praktiken.
+- Ny worktree skapas (om den saknas) med:
+  `git worktree add ../Aktieanalys-backend backend`
+  Lista dem med `git worktree list`.
