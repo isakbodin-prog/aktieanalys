@@ -58,10 +58,6 @@ st.markdown(f"""
   @keyframes vyfade {{ from {{ opacity: 0; transform: translateY(4px); }}
                        to {{ opacity: 1; transform: translateY(0); }} }}
 
-  /* Aktiv menypunkt i toppnavet — mono-versal, exakt som fördjupnings-etiketterna */
-  .navactive {{ font-family: 'Space Grotesk', sans-serif; font-size: .74rem; color: {TEXT};
-      text-transform: uppercase; letter-spacing: .16em; padding: .3rem .2rem;
-      border-bottom: 1px solid {TEXT}; display: inline-block; white-space: nowrap; }}
 
   /* Typografi: serif-display i rubriker, resten grotesk */
   h1, h2, h3, h4 {{ font-family: 'Newsreader', Georgia, serif !important;
@@ -73,8 +69,8 @@ st.markdown(f"""
   /* ---- Hjälte: Bästa köp ---- */
   .hero-label {{ font-family: 'Space Grotesk', sans-serif; text-transform: uppercase;
       letter-spacing: .24em; font-size: .68rem; color: {MUTED}; margin-bottom: .5rem; }}
-  .hero-title {{ font-family: 'Newsreader', serif; font-size: 3.4rem; line-height: 1;
-      letter-spacing: -.025em; color: {TEXT}; margin: 2rem auto .55rem; max-width: 900px; }}
+  .hero-title {{ font-family: 'Newsreader', serif; font-size: 2.3rem; line-height: 1.02;
+      letter-spacing: -.02em; color: {TEXT}; margin: 1.6rem auto .5rem; max-width: 900px; }}
   .hero-sub {{ font-family: 'Space Grotesk', sans-serif; font-size: .8rem; color: {MUTED};
       letter-spacing: .01em; margin: 0 auto 1.7rem; max-width: 900px; line-height: 1.5; }}
 
@@ -82,14 +78,14 @@ st.markdown(f"""
   .stock {{ border-top: 1px solid {HAIRLINE}; }}
   .stock:last-child {{ border-bottom: 1px solid {HAIRLINE}; }}
   .stoggle {{ position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }}
-  .rad {{ display: flex; align-items: center; gap: 1.1rem; padding: 1.15rem .3rem;
+  .rad {{ display: flex; align-items: center; gap: 1rem; padding: .8rem .3rem;
       cursor: pointer; transition: padding-left .28s ease; }}
   .stock:hover .rad {{ padding-left: .95rem; }}
-  .rang {{ font-family: 'Space Grotesk', sans-serif; font-size: .76rem; color: {MUTED};
-      width: 1.7rem; flex: 0 0 auto; }}
-  .bikon {{ width: 28px; height: 28px; opacity: .72; flex: 0 0 auto; }}
-  .tk {{ font-family: 'Newsreader', serif; font-size: 1.55rem; color: {TEXT};
-      min-width: 5.5rem; flex: 0 0 auto; }}
+  .rang {{ font-family: 'Space Grotesk', sans-serif; font-size: .72rem; color: {MUTED};
+      width: 1.6rem; flex: 0 0 auto; }}
+  .bikon {{ width: 32px; height: 32px; opacity: .75; flex: 0 0 auto; }}
+  .tk {{ font-family: 'Newsreader', serif; font-size: 1.2rem; color: {TEXT};
+      min-width: 4.2rem; flex: 0 0 auto; }}
   .meter {{ flex: 1 1 auto; height: 2px; background: {HAIRLINE}; position: relative; min-width: 50px; }}
   .meter .fill {{ position: absolute; inset: 0 auto 0 0; height: 100%; background: {TEXT}; }}
   .poang {{ font-family: 'Space Grotesk', sans-serif; font-size: 1rem; color: {TEXT};
@@ -197,16 +193,17 @@ st.markdown(f"""
   [data-testid="stMainBlockContainer"] [data-testid="stPopover"] button:hover {{
       color: {OLIV} !important; }}
 
-  /* Toppnavet: mono-versal, exakt fördjupnings-etiketternas stil (ej serifen) */
+  /* Toppnavet: liten, diskret mono-versal */
   [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button {{
       font-family: 'Space Grotesk', sans-serif !important; text-transform: uppercase;
-      letter-spacing: .16em; font-size: .74rem !important; color: {MUTED} !important;
-      padding: .3rem .2rem !important; white-space: nowrap; }}
+      letter-spacing: .12em; font-size: .6rem !important; color: {MUTED} !important;
+      padding: .2rem .1rem !important; white-space: nowrap; }}
   [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button:hover {{
       color: {OLIV} !important; }}
   /* Menyn flödar som en rad och radbryter på smala skärmar (mobil) */
-  .st-key-navbox {{ flex-direction: row !important; flex-wrap: wrap !important;
-      align-items: center; gap: .2rem 1.1rem !important; }}
+  .st-key-navbox, .st-key-navbox [data-testid="stVerticalBlock"] {{
+      flex-direction: row !important; flex-wrap: wrap !important;
+      align-items: center; gap: .2rem 1rem !important; }}
   .st-key-navbox [data-testid="stElementContainer"], .st-key-navbox .stButton {{
       width: auto !important; }}
 </style>
@@ -754,11 +751,11 @@ if view == "Bästa köp":
 
         if lista_rader or vikt_rader:
             st.markdown('<hr class="fullrule" style="margin-top:2.4rem">', unsafe_allow_html=True)
-            _shl, _shc, _shr = st.columns([1, 7, 1])
+            _shl, _shc, _shr = st.columns([1, 6, 1])
             with _shc:
                 st.markdown('<div class="sh-rubrik">Senaste händelser</div>',
                             unsafe_allow_html=True)
-                kol1, kol2 = st.columns(2, gap="large")
+                kol1, kol2 = st.columns(2, gap="medium")
                 with kol1:
                     st.markdown('<div class="sh-kol">Förändringar i listorna '
                                 '<span>· senaste 30 dagarna</span></div>', unsafe_allow_html=True)
