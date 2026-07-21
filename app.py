@@ -226,7 +226,8 @@ st.markdown(f"""
     .fg-mini {{ flex-wrap: wrap; }}
     .fg-mini-hint {{ display: none; }}   /* nå via VII · Sentiment i menyn */
     /* Mobil: dölj de breda tabellerna, visa kort i stället */
-    .st-key-konstab, .st-key-divtab {{ display: none !important; }}
+    .st-key-konstab, .st-key-divtab, .st-key-naratab,
+    .st-key-lamnattab, .st-key-bubbeltab {{ display: none !important; }}
   }}
 
   /* Aktiekort (mobil) — tabellersättning. Döljs på desktop. */
@@ -246,6 +247,9 @@ st.markdown(f"""
       padding: .3rem 0; border-bottom: 1px solid {HAIRLINE}; }}
   .mk-rader .kl {{ color: {MUTED}; white-space: nowrap; }}
   .mk-rader .kv {{ color: {TEXT}; text-align: right; }}
+  .mk-fot {{ font-family: 'Space Grotesk', sans-serif; font-size: .7rem; color: {MUTED};
+      line-height: 1.45; padding-top: .55rem; }}
+  .mk-fot b {{ font-weight: 500; color: {TEXT}; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -558,17 +562,20 @@ def _trend_mark(a):
 
 def mobilkort_html(korten):
     """Aktiekort för mobil (ersätter breda tabeller). Varje kort = dict med
-    ikon (html), tk, trend (html), claude, claudefarg, rader=[(etikett, värde), …]."""
+    ikon (html), tk, valfri trend (html), valfri claude/claudefarg,
+    rader=[(etikett, värde), …] och valfri fot=[html-rad, …] för långa fält."""
     out = ['<div class="mobilkort">']
     for k in korten:
         rader = "".join(
             f'<div><span class="kl">{lbl}</span><span class="kv">{val}</span></div>'
             for lbl, val in k["rader"])
+        fot = "".join(f'<div class="mk-fot">{f}</div>' for f in k.get("fot", []))
         out.append(
             f'<div class="mk-kort"><div class="mk-huvud">{k["ikon"]}'
             f'<span class="mk-tk">{k["tk"]}</span>{k.get("trend", "")}'
-            f'<span class="mk-claude" style="color:{k["claudefarg"]}">{k["claude"]}</span>'
-            f'</div><div class="mk-rader">{rader}</div></div>')
+            f'<span class="mk-claude" style="color:{k.get("claudefarg", MUTED)}">'
+            f'{k.get("claude", "")}</span>'
+            f'</div><div class="mk-rader">{rader}</div>{fot}</div>')
     out.append('</div>')
     return "".join(out)
 
@@ -965,7 +972,7 @@ if view == "Konsensus":
                    "en ägare till (eller färskare köp) tar dem över innivån.")
         nya_nara = nya_pa_listan(log, "IN I NÄRA KONSENSUS")
 
-        near_rows = []
+        near_rows, near_kort = [], []
         for tk, info in sorted(near.items(), key=lambda x: -_total_vikt(x[1])):
             h = innehav.get(tk, {})
             near_rows.append({
@@ -977,10 +984,25 @@ if view == "Konsensus":
                 "Ägd längst": format_innehavstid(h.get("längst_dagar")),
                 "Inv. vinst (%)": h.get("snitt_vinst_pct", "—"),
             })
-        st.dataframe(stylad(pd.DataFrame(near_rows), ["Aktie"]),
-                     use_container_width=True, hide_index=True,
-                     column_config={"Bransch": st.column_config.ImageColumn("", width=36)})
-        st.caption("Sorterad på total vikt — investerarnas sammanlagda portföljandel i aktien.")
+            ikon = bransch_ikon(tk, bransch)
+            img = f'<img class="mk-ikon" src="{ikon}">' if ikon else '<span class="mk-ikon"></span>'
+            holders = info.get("holders", [])
+            near_kort.append({
+                "ikon": img, "tk": tk + (" · ny" if tk in nya_nara else ""),
+                "rader": [
+                    ("Total vikt", _num(_total_vikt(info), " %")),
+                    ("Snittvikt", _num(info.get("avg_weight"), " %")),
+                    ("Ägd längst", format_innehavstid(h.get("längst_dagar"))),
+                    ("Inv. vinst", _num(h.get("snitt_vinst_pct"), " %")),
+                ],
+                "fot": ["<b>Ägs av</b> " + ", ".join(holders)] if holders else [],
+            })
+        with st.container(key="naratab"):
+            st.dataframe(stylad(pd.DataFrame(near_rows), ["Aktie"]),
+                         use_container_width=True, hide_index=True,
+                         column_config={"Bransch": st.column_config.ImageColumn("", width=36)})
+            st.caption("Sorterad på total vikt — investerarnas sammanlagda portföljandel i aktien.")
+        st.markdown(mobilkort_html(near_kort), unsafe_allow_html=True)
 
     # Lämnat listorna — när investerarna kliver av
     from datetime import date as _date, timedelta as _timedelta
@@ -999,8 +1021,18 @@ if view == "Konsensus":
             "Lämnade": "Konsensus" if e["typ"] == "UT UR KONSENSUS" else "Nära konsensus",
             "Detalj": e["detalj"],
         } for e in lamnat]
-        st.dataframe(pd.DataFrame(lamnat_rows), use_container_width=True, hide_index=True)
-        st.caption("När investerare kliver av ett värdepapper kan det vara en tidig säljsignal.")
+        with st.container(key="lamnattab"):
+            st.dataframe(pd.DataFrame(lamnat_rows), use_container_width=True, hide_index=True)
+            st.caption("När investerare kliver av ett värdepapper kan det vara en tidig säljsignal.")
+        lamnat_kort = [{
+            "ikon": "", "tk": e["ticker"],
+            "rader": [
+                ("Datum", e["datum"]),
+                ("Lämnade", "Konsensus" if e["typ"] == "UT UR KONSENSUS" else "Nära konsensus"),
+            ],
+            "fot": [e["detalj"]] if e.get("detalj") else [],
+        } for e in lamnat]
+        st.markdown(mobilkort_html(lamnat_kort), unsafe_allow_html=True)
 
 if view == "Divergens":
     st.subheader("Divergens — signalgruppens unika övertygelser")
@@ -1087,21 +1119,36 @@ if view == "Divergens":
             st.caption("Inga bubblare just nu — aktierna på bubblarnivån ägs redan brett av flocken.")
         else:
             nya_nara_b = nya_pa_listan(data.get("historik", []), "IN I NÄRA KONSENSUS")
-            bubbel_rows = []
+            bubbel_rows, bubbel_kort = [], []
             for tk, dv in bubblare:
                 info = bubbel_kalla.get(tk, {})
+                bakgr = (f"{dv['bakgrund_antal']}/{data.get('bakgrund_antal', '?')} "
+                         f"({dv['bakgrund_andel_pct']} %)")
                 bubbel_rows.append({
                     "Bransch": bransch_ikon(tk, bransch),
                     "Aktie": tk + (" · ny" if tk in nya_nara_b else ""),
                     "Ägs av": ", ".join(info.get("holders", [])),
                     "Total vikt (%)": info.get("total_weight"),
-                    "Bakgrund": f"{dv['bakgrund_antal']}/{data.get('bakgrund_antal', '?')} "
-                                f"({dv['bakgrund_andel_pct']} %)",
+                    "Bakgrund": bakgr,
                     "Divergens (pp)": dv["divergens_pp"],
                 })
-            st.dataframe(stylad(pd.DataFrame(bubbel_rows), ["Aktie"]),
-                         use_container_width=True, hide_index=True,
-                         column_config={"Bransch": st.column_config.ImageColumn("", width=36)})
+                ikon = bransch_ikon(tk, bransch)
+                img = f'<img class="mk-ikon" src="{ikon}">' if ikon else '<span class="mk-ikon"></span>'
+                holders = info.get("holders", [])
+                bubbel_kort.append({
+                    "ikon": img, "tk": tk + (" · ny" if tk in nya_nara_b else ""),
+                    "rader": [
+                        ("Total vikt", _num(info.get("total_weight"), " %")),
+                        ("Bakgrund", bakgr),
+                        ("Divergens", f"{dv['divergens_pp']:+.1f} pp".replace(".", ",")),
+                    ],
+                    "fot": ["<b>Ägs av</b> " + ", ".join(holders)] if holders else [],
+                })
+            with st.container(key="bubbeltab"):
+                st.dataframe(stylad(pd.DataFrame(bubbel_rows), ["Aktie"]),
+                             use_container_width=True, hide_index=True,
+                             column_config={"Bransch": st.column_config.ImageColumn("", width=36)})
+            st.markdown(mobilkort_html(bubbel_kort), unsafe_allow_html=True)
 
 if view == "Claude":
     st.subheader("Claudes tekniska analys per aktie")
