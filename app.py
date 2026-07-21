@@ -207,6 +207,25 @@ st.markdown(f"""
       padding-top: .5rem !important; overflow: visible !important; }}
   .st-key-navbox [data-testid="stElementContainer"], .st-key-navbox .stButton {{
       width: auto !important; overflow: visible !important; }}
+
+  /* ---- Mobil: mindre marginal, kompaktare Bästa köp-rad ---- */
+  @media (max-width: 640px) {{
+    [data-testid="stMainBlockContainer"], .block-container {{
+        padding-left: 1.1rem !important; padding-right: 1.1rem !important; }}
+    .fullrule {{ margin-left: -1.1rem; margin-right: -1.1rem; }}
+    .hero-title {{ font-size: 1.9rem; }}
+    .rad {{ gap: .55rem; padding: .7rem .05rem; }}
+    .meter {{ display: none; }}          /* poängsiffran räcker; frigör bredd */
+    .tk {{ flex: 1 1 auto; font-size: 1.05rem; min-width: 0; }}
+    .bikon {{ width: 26px; height: 26px; }}
+    .rang {{ width: 1.3rem; font-size: .68rem; }}
+    .poang {{ width: 2.7rem; font-size: .92rem; }}
+    .crek {{ width: auto; font-size: .56rem; letter-spacing: .05em; }}
+    .trend {{ width: .9rem; }}
+    .detalj-inner {{ padding-left: 2.4rem; }}
+    .fg-mini {{ flex-wrap: wrap; }}
+    .fg-mini-hint {{ display: none; }}   /* nå via VII · Sentiment i menyn */
+  }}
 </style>
 """, unsafe_allow_html=True)
 
