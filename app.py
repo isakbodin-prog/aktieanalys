@@ -74,6 +74,18 @@ st.markdown(f"""
       letter-spacing: .01em; margin: 0 auto 1.7rem; max-width: 900px; line-height: 1.5; }}
 
   .stocklist {{ margin: .2rem auto .5rem; max-width: 900px; }}
+  /* Sentiment-utfäll, rapportnotis och poäng-popover centreras med hjälten (900px) */
+  .st-key-fgexp, .st-key-rapportbadge, .st-key-poangexp {{
+      max-width: 900px; margin-left: auto !important; margin-right: auto !important; }}
+  .st-key-rapportbadge {{ text-align: center; }}
+  .st-key-rapportbadge [data-testid="stCaptionContainer"] {{ justify-content: center; }}
+  .st-key-poangexp {{ align-items: center; }}
+  /* Sentiment-expandern: diskret rad, ingen dragspels-hårlinje/versal-mono */
+  .st-key-fgexp [data-testid="stExpander"] details {{ border: none !important; }}
+  .st-key-fgexp summary {{ font-family: 'Space Grotesk', sans-serif !important;
+      text-transform: none !important; letter-spacing: .01em !important;
+      font-size: .82rem !important; justify-content: center; }}
+  .st-key-fgexp summary p {{ font-size: .82rem !important; }}
   .stock {{ border-top: 1px solid {HAIRLINE}; }}
   .stock:last-child {{ border-bottom: 1px solid {HAIRLINE}; }}
   .stoggle {{ position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }}
@@ -195,7 +207,7 @@ st.markdown(f"""
   /* Toppnavet: liten, diskret mono-versal */
   [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button {{
       font-family: 'Space Grotesk', sans-serif !important; text-transform: uppercase;
-      letter-spacing: .12em; font-size: .54rem !important; color: {TEXT} !important;
+      letter-spacing: .1em; font-size: .48rem !important; color: {TEXT} !important;
       padding: .35rem .1rem !important; line-height: 1.9 !important;
       height: auto !important; overflow: visible !important; white-space: nowrap; }}
   [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button:hover {{
@@ -764,18 +776,24 @@ st.markdown(
 # VY: Bästa köp — hjälte + senaste händelser
 # ======================================================================
 if view == "Bästa köp":
-    # Miniatyr av marknadssentimentet (Fear & Greed) — bara siffra + etikett.
+    # Marknadssentiment (Fear & Greed): sammanfattning på förstasidan, utfällbar mätare.
     _fg = data.get("fear_greed")
     if _fg and _fg.get("varde") is not None:
         _fgv = _fg["varde"]
         _fge = _fg.get("etikett") or fg_zon(_fgv)[0]
         _fgf = fg_zon(_fgv)[1]
-        st.markdown(
-            f'<div class="fg-mini"><span class="fg-dot" style="background:{_fgf}"></span>'
-            f'Marknadssentiment <b style="color:{_fgf}">{_fgv:.0f} · {_fge}</b>'
-            f'<span class="fg-mini-hint">→ VII · Sentiment</span></div>',
-            unsafe_allow_html=True,
-        )
+        with st.container(key="fgexp"):
+            with st.expander(f"Marknadssentiment · {_fgv:.0f} · {_fge}"):
+                _fgc = st.columns([1, 4, 1])
+                with _fgc[1]:
+                    st.plotly_chart(fear_greed_gauge(_fgv), use_container_width=True,
+                                    config={"displayModeBar": False})
+                    st.markdown(f'<div class="fg-etikett" style="color:{_fgf}">{_fge}</div>',
+                                unsafe_allow_html=True)
+                st.caption("Full vy med historik under **VII · Sentiment**.")
+        # Färga sammanfattningsraden i zonens färg.
+        st.markdown(f"<style>.st-key-fgexp summary {{ color: {_fgf} !important; }}</style>",
+                    unsafe_allow_html=True)
     st.markdown(
         '<div class="hero-title">Bästa köp</div>'
         '<div class="hero-sub">Sammanvägd poäng 0–100. Håll muspekaren över eller klicka '
@@ -800,11 +818,12 @@ if view == "Bästa köp":
                     pass
         if rapport_snart:
             badges = " · ".join(f"**{tk}** om {d} dgr" for tk, d in sorted(rapport_snart, key=lambda x: x[1]))
-            st.caption(f":material/event_upcoming: **Rapport inom en vecka:** {badges}")
+            with st.container(key="rapportbadge"):
+                st.caption(f":material/event_upcoming: **Rapport inom en vecka:** {badges}")
 
         st.markdown(hero_html(ranking, claude, consensus, bransch, KOMP_MAX), unsafe_allow_html=True)
 
-        with st.popover("Så räknas poängen"):
+        with st.container(key="poangexp"), st.popover("Så räknas poängen"):
             st.caption(
                 "**Poängmodellen (§12, omviktad):** Trend 25 p · Momentum 20 p (inkl. relativ "
                 "styrka mot sektor-ETF) · Analytiker 20 p (uppsida — halverad vid hög "
