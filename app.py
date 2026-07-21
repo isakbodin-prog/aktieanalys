@@ -225,14 +225,31 @@ st.markdown(f"""
     .detalj-inner {{ padding-left: 2.4rem; }}
     .fg-mini {{ flex-wrap: wrap; }}
     .fg-mini-hint {{ display: none; }}   /* nå via VII · Sentiment i menyn */
-    /* Mobil: dölj de breda tabellerna, visa kort i stället */
+    /* Mobil: dölj de breda tabellerna, visa kort/listor i stället */
     .st-key-konstab, .st-key-divtab, .st-key-naratab,
-    .st-key-lamnattab, .st-key-bubbeltab {{ display: none !important; }}
+    .st-key-lamnattab, .st-key-bubbeltab, .st-key-claudetop,
+    .st-key-histtab {{ display: none !important; }}
   }}
 
   /* Aktiekort (mobil) — tabellersättning. Döljs på desktop. */
   .mobilkort {{ margin: .2rem 0 .5rem; }}
-  @media (min-width: 641px) {{ .mobilkort {{ display: none; }} }}
+  /* Element som bara ska visas på mobil (döljs på desktop) */
+  @media (min-width: 641px) {{ .mobilkort, .mobilonly {{ display: none !important; }} }}
+
+  /* Historik-logg (mobil) — kompakt lista i stället för bred tabell */
+  .logglista {{ margin: .2rem 0 .5rem; }}
+  .logg-rad {{ border-top: 1px solid {HAIRLINE}; padding: .7rem .1rem; }}
+  .logg-rad:last-child {{ border-bottom: 1px solid {HAIRLINE}; }}
+  .logg-topp {{ display: flex; justify-content: space-between; align-items: baseline;
+      gap: .6rem; margin-bottom: .25rem; }}
+  .logg-datum {{ font-family: 'Space Grotesk', sans-serif; font-size: .68rem; color: {MUTED};
+      letter-spacing: .04em; }}
+  .logg-typ {{ font-family: 'Space Grotesk', sans-serif; font-size: .6rem; text-transform: uppercase;
+      letter-spacing: .1em; white-space: nowrap; }}
+  .logg-mitt {{ font-family: 'Space Grotesk', sans-serif; font-size: .82rem; color: {TEXT}; }}
+  .logg-mitt b {{ font-weight: 500; }}
+  .logg-detalj {{ font-family: 'Space Grotesk', sans-serif; font-size: .74rem; color: {MUTED};
+      line-height: 1.4; margin-top: .15rem; }}
   .mk-kort {{ border-top: 1px solid {HAIRLINE}; padding: .9rem .1rem 1rem; }}
   .mk-kort:last-child {{ border-bottom: 1px solid {HAIRLINE}; }}
   .mk-huvud {{ display: flex; align-items: center; gap: .6rem; margin-bottom: .7rem; }}
@@ -1163,19 +1180,40 @@ if view == "Claude":
         a = analyses.get(tk, {})
         c = claude.get(tk)
 
-        m1, m2, m3, m4, m5 = st.columns(5)
-        m1.metric("Pris", a.get("pris"))
-        m2.metric("RSI14", a.get("RSI14"))
-        m3.metric("MA200", a.get("MA200"))
         uppsida = a.get("uppsida_%")
-        m4.metric("Uppsida", f"{uppsida} %" if uppsida is not None else "—")
-        m5.metric("Stigande trend", trend_label(a))
+        # Nyckeltal + indikatorer (desktop). Döljs på mobil — ersätts av kompakt rutnät.
+        with st.container(key="claudetop"):
+            m1, m2, m3, m4, m5 = st.columns(5)
+            m1.metric("Pris", a.get("pris"))
+            m2.metric("RSI14", a.get("RSI14"))
+            m3.metric("MA200", a.get("MA200"))
+            m4.metric("Uppsida", f"{uppsida} %" if uppsida is not None else "—")
+            m5.metric("Stigande trend", trend_label(a))
 
-        i1, i2, i3, i4 = st.columns(4)
-        i1.markdown(f"Golden cross: {mark(a.get('golden_cross'))}", unsafe_allow_html=True)
-        i2.markdown(f"MACD över signal: {mark(a.get('MACD_över_signal'))}", unsafe_allow_html=True)
-        i3.markdown(f"1 mån: {a.get('avkastning_1m_%', '—')} %  ·  3 mån: {a.get('avkastning_3m_%', '—')} %")
-        i4.markdown(f"Från 52v-toppen: {a.get('avstånd_52v_högsta_%', '—')} %")
+            i1, i2, i3, i4 = st.columns(4)
+            i1.markdown(f"Golden cross: {mark(a.get('golden_cross'))}", unsafe_allow_html=True)
+            i2.markdown(f"MACD över signal: {mark(a.get('MACD_över_signal'))}", unsafe_allow_html=True)
+            i3.markdown(f"1 mån: {a.get('avkastning_1m_%', '—')} %  ·  3 mån: {a.get('avkastning_3m_%', '—')} %")
+            i4.markdown(f"Från 52v-toppen: {a.get('avstånd_52v_högsta_%', '—')} %")
+
+        # Kompakt rutnät för mobil (samma nyckeltal, tätare)
+        _grid = [
+            ("Pris", _num(a.get("pris"), "", 2)),
+            ("RSI14", _num(a.get("RSI14"))),
+            ("MA200", _num(a.get("MA200"))),
+            ("Uppsida", _num(uppsida, " %")),
+            ("Stigande trend", trend_label(a)),
+            ("Golden cross", mark(a.get("golden_cross"))),
+            ("MACD > signal", mark(a.get("MACD_över_signal"))),
+            ("1 mån", _num(a.get("avkastning_1m_%"), " %")),
+            ("3 mån", _num(a.get("avkastning_3m_%"), " %")),
+            ("Från 52v-topp", _num(a.get("avstånd_52v_högsta_%"), " %")),
+        ]
+        _celler = "".join(
+            f'<div><span class="kl">{lbl}</span><span class="kv">{val}</span></div>'
+            for lbl, val in _grid)
+        st.markdown(f'<div class="mobilonly mk-rader" style="margin:.2rem 0 .8rem">{_celler}</div>',
+                    unsafe_allow_html=True)
 
         epsr = a.get("eps_rev_90d_pct")
         if epsr is not None:
@@ -1316,7 +1354,33 @@ if view == "Historik":
         val = st.selectbox("Filtrera på typ", typer)
         if val != "Alla":
             df = df[df["Typ"] == val]
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        with st.container(key="histtab"):
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
+        # Kompakt logglista för mobil (inget döljs sidled)
+        def _logg_farg(typ):
+            if typ.startswith(("NYTT", "IN I", "ÅTER")):
+                return MOSS
+            if typ.startswith(("SÅLT", "UT UR", "EXIT")):
+                return RUST
+            return MUTED
+
+        rader = []
+        for r in df.head(100).to_dict("records"):
+            mitt = " · ".join(x for x in (f"<b>{r['Aktie']}</b>" if r["Aktie"] else "",
+                                          r["Profil"]) if x)
+            det = f'<div class="logg-detalj">{r["Detalj"]}</div>' if r["Detalj"] else ""
+            rader.append(
+                f'<div class="logg-rad"><div class="logg-topp">'
+                f'<span class="logg-datum">{r["Datum"]}</span>'
+                f'<span class="logg-typ" style="color:{_logg_farg(r["Typ"])}">{r["Typ"]}</span>'
+                f'</div>' + (f'<div class="logg-mitt">{mitt}</div>' if mitt else "") + f'{det}</div>')
+        st.markdown(f'<div class="logglista mobilonly">{"".join(rader)}</div>',
+                    unsafe_allow_html=True)
+        if len(df) > 100:
+            st.markdown('<div class="mobilonly" style="font-family:Space Grotesk;font-size:.7rem;'
+                        f'color:{MUTED};padding:.6rem 0">Visar de 100 senaste — filtrera på typ '
+                        'för att se fler.</div>', unsafe_allow_html=True)
 
 if view == "Portföljer":
     st.subheader("Innehav per profil")
