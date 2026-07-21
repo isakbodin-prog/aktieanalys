@@ -225,7 +225,27 @@ st.markdown(f"""
     .detalj-inner {{ padding-left: 2.4rem; }}
     .fg-mini {{ flex-wrap: wrap; }}
     .fg-mini-hint {{ display: none; }}   /* nå via VII · Sentiment i menyn */
+    /* Mobil: dölj de breda tabellerna, visa kort i stället */
+    .st-key-konstab, .st-key-divtab {{ display: none !important; }}
   }}
+
+  /* Aktiekort (mobil) — tabellersättning. Döljs på desktop. */
+  .mobilkort {{ margin: .2rem 0 .5rem; }}
+  @media (min-width: 641px) {{ .mobilkort {{ display: none; }} }}
+  .mk-kort {{ border-top: 1px solid {HAIRLINE}; padding: .9rem .1rem 1rem; }}
+  .mk-kort:last-child {{ border-bottom: 1px solid {HAIRLINE}; }}
+  .mk-huvud {{ display: flex; align-items: center; gap: .6rem; margin-bottom: .7rem; }}
+  .mk-ikon {{ width: 26px; height: 26px; opacity: .75; flex: 0 0 auto; }}
+  .mk-tk {{ font-family: 'Newsreader', serif; font-size: 1.3rem; color: {TEXT}; }}
+  .mk-trend {{ font-size: .85rem; }}
+  .mk-claude {{ margin-left: auto; font-family: 'Space Grotesk', sans-serif; font-size: .62rem;
+      text-transform: uppercase; letter-spacing: .1em; }}
+  .mk-rader {{ display: grid; grid-template-columns: 1fr 1fr; gap: .1rem .9rem; }}
+  .mk-rader > div {{ display: flex; justify-content: space-between; align-items: baseline;
+      gap: .5rem; font-family: 'Space Grotesk', sans-serif; font-size: .72rem;
+      padding: .3rem 0; border-bottom: 1px solid {HAIRLINE}; }}
+  .mk-rader .kl {{ color: {MUTED}; white-space: nowrap; }}
+  .mk-rader .kv {{ color: {TEXT}; text-align: right; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -527,6 +547,32 @@ def fear_greed_gauge(varde):
     return fig
 
 
+def _trend_mark(a):
+    """Trendpil (▲/▼/–) som färgad HTML-span för mobilkorten."""
+    t = a.get("stigande_trend")
+    if t is None:
+        return f'<span class="mk-trend" style="color:{MUTED}">–</span>'
+    farg = MOSS if t else RUST
+    return f'<span class="mk-trend" style="color:{farg}">{"▲" if t else "▼"}</span>'
+
+
+def mobilkort_html(korten):
+    """Aktiekort för mobil (ersätter breda tabeller). Varje kort = dict med
+    ikon (html), tk, trend (html), claude, claudefarg, rader=[(etikett, värde), …]."""
+    out = ['<div class="mobilkort">']
+    for k in korten:
+        rader = "".join(
+            f'<div><span class="kl">{lbl}</span><span class="kv">{val}</span></div>'
+            for lbl, val in k["rader"])
+        out.append(
+            f'<div class="mk-kort"><div class="mk-huvud">{k["ikon"]}'
+            f'<span class="mk-tk">{k["tk"]}</span>{k.get("trend", "")}'
+            f'<span class="mk-claude" style="color:{k["claudefarg"]}">{k["claude"]}</span>'
+            f'</div><div class="mk-rader">{rader}</div></div>')
+    out.append('</div>')
+    return "".join(out)
+
+
 # ----------------------------------------------------------------------
 # Körlogik — kontrollerna ligger i sidfoten. Deras klick sätter flaggor i
 # session_state (via on_click) som fångas här överst, så analysen hinner köras
@@ -810,75 +856,105 @@ if view == "Konsensus":
     def _total_vikt(info):
         return info.get("total_weight") or round(info["avg_weight"] * info["count"], 2)
 
-    # Slimmad översikt — klicka en rad för detaljerna (renderas under tabellen).
-    rows = []
-    for tk in consensus_order:
-        a = analyses.get(tk, {})
-        rows.append({
-            "Bransch": bransch_ikon(tk, bransch),
-            "Aktie": tk + (" · ny" if tk in nya_kons else ""),
-            "Stigande trend": trend_label(a),
-            "Portföljer": consensus[tk]["count"],
-            "Total vikt (%)": _total_vikt(consensus[tk]),
-            "Analytiker": a.get("rekommendation"),
-            "Claude": claude.get(tk, {}).get("rekommendation", "—"),
-        })
-    val = st.dataframe(
-        stylad(pd.DataFrame(rows), ["Aktie", "Stigande trend", "Claude"]),
-        use_container_width=True, hide_index=True,
-        on_select="rerun", selection_mode="single-row", key="kons_val",
-        column_config={"Bransch": st.column_config.ImageColumn("", width=36)})
+    # Slimmad tabell (desktop) + klickbar detalj. Döljs på mobil (ersätts av kort).
+    with st.container(key="konstab"):
+        rows = []
+        for tk in consensus_order:
+            a = analyses.get(tk, {})
+            rows.append({
+                "Bransch": bransch_ikon(tk, bransch),
+                "Aktie": tk + (" · ny" if tk in nya_kons else ""),
+                "Stigande trend": trend_label(a),
+                "Portföljer": consensus[tk]["count"],
+                "Total vikt (%)": _total_vikt(consensus[tk]),
+                "Analytiker": a.get("rekommendation"),
+                "Claude": claude.get(tk, {}).get("rekommendation", "—"),
+            })
+        val = st.dataframe(
+            stylad(pd.DataFrame(rows), ["Aktie", "Stigande trend", "Claude"]),
+            use_container_width=True, hide_index=True,
+            on_select="rerun", selection_mode="single-row", key="kons_val",
+            column_config={"Bransch": st.column_config.ImageColumn("", width=36)})
 
-    # Detaljkort för den markerade raden — konsensussignal, teknik, innehavstid.
-    markerade = val.selection.rows
-    if not markerade:
-        st.caption("Klicka på en rad ovan för konsensussignal, teknik, analytiker och innehavstid.")
-    else:
-        tk = consensus_order[markerade[0]]
+        # Detaljkort för den markerade raden — konsensussignal, teknik, innehavstid.
+        markerade = val.selection.rows
+        if not markerade:
+            st.caption("Klicka på en rad ovan för konsensussignal, teknik, analytiker och innehavstid.")
+        else:
+            tk = consensus_order[markerade[0]]
+            info = consensus[tk]
+            a = analyses.get(tk, {})
+            c = claude.get(tk, {})
+            h = innehav.get(tk, {})
+            crek = c.get("rekommendation", "—")
+            st.markdown(f"#### {tk} — {info['count']} portföljer · "
+                        f"trend {trend_label(a)} · Claude {crek}")
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Total vikt", _num(_total_vikt(info), " %"))
+            k2.metric("Viktad kons.", _num(info.get("viktad_konsensus")))
+            k3.metric("Senaste köp", _num(info.get("senaste_köp_dagar"), " dgr", 0))
+            k4.metric("Snittvikt", _num(info.get("avg_weight"), " %"))
+
+            if "error" in a:
+                st.caption(f"Marknadsdata saknas: {a['error']}")
+            else:
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Pris", _num(a.get("pris")))
+                m2.metric("RSI14", _num(a.get("RSI14")))
+                m3.metric("Riktkurs", _num(a.get("riktkurs")))
+                m4.metric("Uppsida", _num(a.get("uppsida_%"), " %"))
+
+            holders = info.get("holders", [])
+            if holders:
+                st.caption("Ägs av: " + ", ".join(holders))
+            if h:
+                st.caption(
+                    f"Ägd längst: **{format_innehavstid(h.get('längst_dagar'))}** "
+                    f"(av {h.get('längst_profil', '?')}) · snitt "
+                    f"**{format_innehavstid(h.get('snitt_dagar'))}** · upparbetad "
+                    f"snittvinst **{_num(h.get('snitt_vinst_pct'), ' %')}** — lång tid + "
+                    f"hög vinst = risk för vinsthemtagning."
+                )
+
+        st.caption(
+            "**Stigande trend** = priset över MA200 **och** MA200 stigande — utan den kan "
+            "Claude aldrig ge KÖP. **Viktad kons.** väger varje ägare efter hur färskt köpet "
+            "är (aktivt nyköp 1,5 · 6 mån 1,0 · äldre 0,5) och måste nå samma tal som "
+            "antalskravet — hysteresen gäller även den. Låg viktad konsensus = gammal, passiv "
+            "signal. *· ny* = ny på listan senaste 7 dagarna. **Ägd längst** = äldsta öppna "
+            "positionen bland investerarna; **upparbetad snittvinst** = deras genomsnittliga "
+            "vinst — lång tid + hög vinst = risk för vinsthemtagning."
+        )
+        st.caption(BRANSCH_TEXT)
+
+    # Mobilvänliga kort (visas i stället för tabellen på små skärmar)
+    kons_kort = []
+    for tk in consensus_order:
         info = consensus[tk]
         a = analyses.get(tk, {})
-        c = claude.get(tk, {})
-        h = innehav.get(tk, {})
-        crek = c.get("rekommendation", "—")
-        st.markdown(f"#### {tk} — {info['count']} portföljer · "
-                    f"trend {trend_label(a)} · Claude {crek}")
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Total vikt", _num(_total_vikt(info), " %"))
-        k2.metric("Viktad kons.", _num(info.get("viktad_konsensus")))
-        k3.metric("Senaste köp", _num(info.get("senaste_köp_dagar"), " dgr", 0))
-        k4.metric("Snittvikt", _num(info.get("avg_weight"), " %"))
-
-        if "error" in a:
-            st.caption(f"Marknadsdata saknas: {a['error']}")
-        else:
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Pris", _num(a.get("pris")))
-            m2.metric("RSI14", _num(a.get("RSI14")))
-            m3.metric("Riktkurs", _num(a.get("riktkurs")))
-            m4.metric("Uppsida", _num(a.get("uppsida_%"), " %"))
-
-        holders = info.get("holders", [])
-        if holders:
-            st.caption("Ägs av: " + ", ".join(holders))
-        if h:
-            st.caption(
-                f"Ägd längst: **{format_innehavstid(h.get('längst_dagar'))}** "
-                f"(av {h.get('längst_profil', '?')}) · snitt "
-                f"**{format_innehavstid(h.get('snitt_dagar'))}** · upparbetad "
-                f"snittvinst **{_num(h.get('snitt_vinst_pct'), ' %')}** — lång tid + "
-                f"hög vinst = risk för vinsthemtagning."
-            )
-
-    st.caption(
-        "**Stigande trend** = priset över MA200 **och** MA200 stigande — utan den kan "
-        "Claude aldrig ge KÖP. **Viktad kons.** väger varje ägare efter hur färskt köpet "
-        "är (aktivt nyköp 1,5 · 6 mån 1,0 · äldre 0,5) och måste nå samma tal som "
-        "antalskravet — hysteresen gäller även den. Låg viktad konsensus = gammal, passiv "
-        "signal. *· ny* = ny på listan senaste 7 dagarna. **Ägd längst** = äldsta öppna "
-        "positionen bland investerarna; **upparbetad snittvinst** = deras genomsnittliga "
-        "vinst — lång tid + hög vinst = risk för vinsthemtagning."
-    )
-    st.caption(BRANSCH_TEXT)
+        crek = claude.get(tk, {}).get("rekommendation", "—")
+        ikon = bransch_ikon(tk, bransch)
+        img = f'<img class="mk-ikon" src="{ikon}">' if ikon else '<span class="mk-ikon"></span>'
+        rader = [
+            ("Portföljer", info["count"]),
+            ("Total vikt", _num(_total_vikt(info), " %")),
+            ("Snittvikt", _num(info.get("avg_weight"), " %")),
+            ("Viktad kons.", _num(info.get("viktad_konsensus"))),
+            ("Senaste köp", _num(info.get("senaste_köp_dagar"), " dgr", 0)),
+            ("Analytiker", a.get("rekommendation") or "—"),
+        ]
+        if "error" not in a:
+            rader += [
+                ("Pris", _num(a.get("pris"))),
+                ("RSI14", _num(a.get("RSI14"))),
+                ("Riktkurs", _num(a.get("riktkurs"))),
+                ("Uppsida", _num(a.get("uppsida_%"), " %")),
+            ]
+        kons_kort.append({
+            "ikon": img, "tk": tk + (" · ny" if tk in nya_kons else ""),
+            "trend": _trend_mark(a), "claude": crek,
+            "claudefarg": REK_FARG.get(crek, MUTED), "rader": rader})
+    st.markdown(mobilkort_html(kons_kort), unsafe_allow_html=True)
 
     # Nära konsensus — en portfölj från att kvala in
     near = data.get("nara_konsensus", {})
@@ -940,39 +1016,57 @@ if view == "Divergens":
             f"**Hög divergens** = få i den breda gruppen äger aktien → signalgruppens egen idé. "
             f"**Låg/negativ** = flockbeteende — 'alla' äger den redan."
         )
-        div_rows = []
+        def _tolkning(pp):
+            return "Unik övertygelse" if pp >= 40 else "Viss egen idé" if pp >= 15 else "Flockbeteende"
+
+        # Tabell (desktop). Döljs på mobil — ersätts av kort.
+        with st.container(key="divtab"):
+            div_rows = []
+            for tk, dv in sorted(divergens.items(), key=lambda x: -x[1]["divergens_pp"]):
+                c = claude.get(tk, {})
+                div_rows.append({
+                    "Bransch": bransch_ikon(tk, bransch),
+                    "Aktie": tk,
+                    "Signalgrupp": f"{dv['signal_antal']}/{len(data['profiler'])} ({dv['signal_andel_pct']} %)",
+                    "Bakgrund": f"{dv['bakgrund_antal']}/{bg_antal} ({dv['bakgrund_andel_pct']} %)",
+                    "Divergens (pp)": dv["divergens_pp"],
+                    "Bakgrundens snittvikt (%)": dv["bakgrund_snittvikt"],
+                    "Tolkning": _tolkning(dv["divergens_pp"]),
+                    "Claude": c.get("rekommendation", "—"),
+                })
+            st.dataframe(
+                stylad(pd.DataFrame(div_rows), ["Tolkning", "Claude"]),
+                use_container_width=True, hide_index=True,
+                column_config={
+                    "Bransch": st.column_config.ImageColumn("", width=36),
+                    "Divergens (pp)": st.column_config.ProgressColumn(
+                        "Divergens (pp)", min_value=-100, max_value=100, format="%+.1f"
+                    ),
+                },
+            )
+            st.caption(
+                "Divergens = signalgruppens ägarandel minus bakgrundsgruppens, i procentenheter. "
+                "Bakgrundsgruppen används som brusfilter — inte som köpsignal."
+            )
+
+        # Mobilvänliga kort (visas i stället för tabellen på små skärmar)
+        div_kort = []
         for tk, dv in sorted(divergens.items(), key=lambda x: -x[1]["divergens_pp"]):
-            c = claude.get(tk, {})
-            if dv["divergens_pp"] >= 40:
-                tolk = "Unik övertygelse"
-            elif dv["divergens_pp"] >= 15:
-                tolk = "Viss egen idé"
-            else:
-                tolk = "Flockbeteende"
-            div_rows.append({
-                "Bransch": bransch_ikon(tk, bransch),
-                "Aktie": tk,
-                "Signalgrupp": f"{dv['signal_antal']}/{len(data['profiler'])} ({dv['signal_andel_pct']} %)",
-                "Bakgrund": f"{dv['bakgrund_antal']}/{bg_antal} ({dv['bakgrund_andel_pct']} %)",
-                "Divergens (pp)": dv["divergens_pp"],
-                "Bakgrundens snittvikt (%)": dv["bakgrund_snittvikt"],
-                "Tolkning": tolk,
-                "Claude": c.get("rekommendation", "—"),
-            })
-        st.dataframe(
-            stylad(pd.DataFrame(div_rows), ["Tolkning", "Claude"]),
-            use_container_width=True, hide_index=True,
-            column_config={
-                "Bransch": st.column_config.ImageColumn("", width=36),
-                "Divergens (pp)": st.column_config.ProgressColumn(
-                    "Divergens (pp)", min_value=-100, max_value=100, format="%+.1f"
-                ),
-            },
-        )
-        st.caption(
-            "Divergens = signalgruppens ägarandel minus bakgrundsgruppens, i procentenheter. "
-            "Bakgrundsgruppen används som brusfilter — inte som köpsignal."
-        )
+            crek = claude.get(tk, {}).get("rekommendation", "—")
+            pp = dv["divergens_pp"]
+            ikon = bransch_ikon(tk, bransch)
+            img = f'<img class="mk-ikon" src="{ikon}">' if ikon else '<span class="mk-ikon"></span>'
+            div_kort.append({
+                "ikon": img, "tk": tk, "claude": crek,
+                "claudefarg": REK_FARG.get(crek, MUTED),
+                "rader": [
+                    ("Signalgrupp", f"{dv['signal_antal']}/{len(data['profiler'])} ({dv['signal_andel_pct']} %)"),
+                    ("Bakgrund", f"{dv['bakgrund_antal']}/{bg_antal} ({dv['bakgrund_andel_pct']} %)"),
+                    ("Divergens", f"{pp:+.1f} pp".replace(".", ",")),
+                    ("Bakgr. snittvikt", _num(dv["bakgrund_snittvikt"], " %")),
+                    ("Tolkning", _tolkning(pp)),
+                ]})
+        st.markdown(mobilkort_html(div_kort), unsafe_allow_html=True)
 
         # Bubblare: bubblarnivån (en ägare under kvarnivån) + hög divergens
         div_nara = data.get("divergens_nara", {})
