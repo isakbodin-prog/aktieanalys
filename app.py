@@ -195,7 +195,7 @@ st.markdown(f"""
   /* Toppnavet: liten, diskret mono-versal */
   [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button {{
       font-family: 'Space Grotesk', sans-serif !important; text-transform: uppercase;
-      letter-spacing: .12em; font-size: .6rem !important; color: {MUTED} !important;
+      letter-spacing: .12em; font-size: .54rem !important; color: {TEXT} !important;
       padding: .35rem .1rem !important; line-height: 1.9 !important;
       height: auto !important; overflow: visible !important; white-space: nowrap; }}
   [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button:hover {{
@@ -752,29 +752,28 @@ if view == "Bästa köp":
 
         if lista_rader or vikt_rader:
             st.markdown('<hr class="fullrule" style="margin-top:2.4rem">', unsafe_allow_html=True)
-            _shl, _shc, _shr = st.columns([1, 6, 1])
+            _shl, _shc, _shr = st.columns([1, 4, 1])
             with _shc:
                 st.markdown('<div class="sh-rubrik">Senaste händelser</div>',
                             unsafe_allow_html=True)
-                kol1, kol2 = st.columns(2, gap="medium")
-                with kol1:
-                    st.markdown('<div class="sh-kol">Förändringar i listorna '
-                                '<span>· senaste 30 dagarna</span></div>', unsafe_allow_html=True)
-                    if lista_rader:
-                        for rad in lista_rader[:6]:
-                            st.markdown(f'<div class="sh-post">{_md_bold(rad)}</div>',
-                                        unsafe_allow_html=True)
-                    else:
-                        st.caption("Inga in- eller utträden den senaste månaden.")
-                with kol2:
-                    st.markdown('<div class="sh-kol">Största viktändringarna '
-                                f'<span>· {senaste_datum}</span></div>', unsafe_allow_html=True)
-                    if vikt_rader:
-                        for rad in vikt_rader:
-                            st.markdown(f'<div class="sh-post">{_md_bold(rad)}</div>',
-                                        unsafe_allow_html=True)
-                    else:
-                        st.caption("Inga större viktändringar senaste ändringsdagen.")
+                # 1. Förändringar i listorna
+                st.markdown('<div class="sh-kol">Förändringar i listorna '
+                            '<span>· senaste 30 dagarna</span></div>', unsafe_allow_html=True)
+                if lista_rader:
+                    for rad in lista_rader[:6]:
+                        st.markdown(f'<div class="sh-post">{_md_bold(rad)}</div>',
+                                    unsafe_allow_html=True)
+                else:
+                    st.caption("Inga in- eller utträden den senaste månaden.")
+                # 2. Största viktändringarna
+                st.markdown('<div class="sh-kol" style="margin-top:1.9rem">Största viktändringarna '
+                            f'<span>· {senaste_datum}</span></div>', unsafe_allow_html=True)
+                if vikt_rader:
+                    for rad in vikt_rader:
+                        st.markdown(f'<div class="sh-post">{_md_bold(rad)}</div>',
+                                    unsafe_allow_html=True)
+                else:
+                    st.caption("Inga större viktändringar senaste ändringsdagen.")
                 st.caption("Fullständiga flöden finns under **Konsensus** och **Ändringar** i toppmenyn.")
 
 if view == "Konsensus":
