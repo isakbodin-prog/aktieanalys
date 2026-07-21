@@ -228,7 +228,7 @@ st.markdown(f"""
     /* Mobil: dölj de breda tabellerna, visa kort/listor i stället */
     .st-key-konstab, .st-key-divtab, .st-key-naratab,
     .st-key-lamnattab, .st-key-bubbeltab, .st-key-claudetop,
-    .st-key-histtab {{ display: none !important; }}
+    .st-key-histtab, .st-key-andrtab {{ display: none !important; }}
   }}
 
   /* Aktiekort (mobil) — tabellersättning. Döljs på desktop. */
@@ -595,6 +595,31 @@ def mobilkort_html(korten):
             f'</div><div class="mk-rader">{rader}</div>{fot}</div>')
     out.append('</div>')
     return "".join(out)
+
+
+def _logg_farg(typ):
+    """Färg per historik-/ändringstyp (grönt in, rött ut, neutralt övrigt)."""
+    if typ.startswith(("NYTT", "IN I", "ÅTER")):
+        return MOSS
+    if typ.startswith(("SÅLT", "UT UR", "EXIT")):
+        return RUST
+    return MUTED
+
+
+def logglista_html(records):
+    """Kompakt mobil-logglista av historik-/ändringsposter. records = list av
+    dict med Datum, Typ, Profil, Aktie, Detalj."""
+    rader = []
+    for r in records:
+        mitt = " · ".join(x for x in (f'<b>{r["Aktie"]}</b>' if r.get("Aktie") else "",
+                                      r.get("Profil") or "") if x)
+        det = f'<div class="logg-detalj">{r["Detalj"]}</div>' if r.get("Detalj") else ""
+        rader.append(
+            f'<div class="logg-rad"><div class="logg-topp">'
+            f'<span class="logg-datum">{r["Datum"]}</span>'
+            f'<span class="logg-typ" style="color:{_logg_farg(r["Typ"])}">{r["Typ"]}</span>'
+            f'</div>' + (f'<div class="logg-mitt">{mitt}</div>' if mitt else "") + det + '</div>')
+    return f'<div class="logglista mobilonly">{"".join(rader)}</div>'
 
 
 # ----------------------------------------------------------------------
@@ -1336,7 +1361,10 @@ if view == "Ändringar":
         df = pd.DataFrame(dagens).rename(columns={
             "datum": "Datum", "typ": "Typ", "profil": "Profil",
             "ticker": "Aktie", "detalj": "Detalj"})
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        with st.container(key="andrtab"):
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        # Kompakt logglista för mobil (inget döljs i sidled)
+        st.markdown(logglista_html(df.to_dict("records")), unsafe_allow_html=True)
 
         st.caption("Hela loggen över alla körningar finns under **Historik** nedan.")
 
@@ -1357,26 +1385,8 @@ if view == "Historik":
         with st.container(key="histtab"):
             st.dataframe(df, use_container_width=True, hide_index=True)
 
-        # Kompakt logglista för mobil (inget döljs sidled)
-        def _logg_farg(typ):
-            if typ.startswith(("NYTT", "IN I", "ÅTER")):
-                return MOSS
-            if typ.startswith(("SÅLT", "UT UR", "EXIT")):
-                return RUST
-            return MUTED
-
-        rader = []
-        for r in df.head(100).to_dict("records"):
-            mitt = " · ".join(x for x in (f"<b>{r['Aktie']}</b>" if r["Aktie"] else "",
-                                          r["Profil"]) if x)
-            det = f'<div class="logg-detalj">{r["Detalj"]}</div>' if r["Detalj"] else ""
-            rader.append(
-                f'<div class="logg-rad"><div class="logg-topp">'
-                f'<span class="logg-datum">{r["Datum"]}</span>'
-                f'<span class="logg-typ" style="color:{_logg_farg(r["Typ"])}">{r["Typ"]}</span>'
-                f'</div>' + (f'<div class="logg-mitt">{mitt}</div>' if mitt else "") + f'{det}</div>')
-        st.markdown(f'<div class="logglista mobilonly">{"".join(rader)}</div>',
-                    unsafe_allow_html=True)
+        # Kompakt logglista för mobil (inget döljs i sidled)
+        st.markdown(logglista_html(df.head(100).to_dict("records")), unsafe_allow_html=True)
         if len(df) > 100:
             st.markdown('<div class="mobilonly" style="font-family:Space Grotesk;font-size:.7rem;'
                         f'color:{MUTED};padding:.6rem 0">Visar de 100 senaste — filtrera på typ '
