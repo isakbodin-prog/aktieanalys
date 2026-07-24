@@ -80,9 +80,14 @@ st.markdown(f"""
   .st-key-rapportbadge {{ text-align: center; }}
   .st-key-rapportbadge [data-testid="stCaptionContainer"] {{ justify-content: center; }}
   .st-key-poangexp {{ align-items: center; }}
-  /* Sentiment-expandern: diskret rad, ingen dragspels-hårlinje/versal-mono */
-  .st-key-fgexp [data-testid="stExpander"] details {{ border: none !important; }}
-  .st-key-fgexp summary {{ font-family: 'Space Grotesk', sans-serif !important;
+  /* Sentiment-expandern på Bästa köp ska INTE ärva dragspelets topp-hårlinje.
+     Den globala dragspelsregeln nedan har prefixet stMainBlockContainer och
+     högre specificitet — matcha samma prefix + .st-key-fgexp för att vinna. */
+  [data-testid="stMainBlockContainer"] .st-key-fgexp [data-testid="stExpander"],
+  [data-testid="stMainBlockContainer"] .st-key-fgexp [data-testid="stExpander"] details,
+  [data-testid="stMainBlockContainer"] .st-key-fgexp [data-testid="stExpanderDetails"] {{
+      border: none !important; border-top: none !important; box-shadow: none !important; }}
+  [data-testid="stMainBlockContainer"] .st-key-fgexp [data-testid="stExpander"] summary {{
       text-transform: none !important; letter-spacing: .01em !important;
       font-size: .82rem !important; justify-content: center; }}
   .st-key-fgexp summary p {{ font-size: .82rem !important; }}
