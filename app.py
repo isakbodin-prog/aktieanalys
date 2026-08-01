@@ -619,7 +619,9 @@ def fear_greed_gauge(varde):
         },
         domain={"x": [0, 1], "y": [0, 1]},
     ))
-    fig.update_layout(height=270, margin=dict(l=24, r=24, t=6, b=0),
+    # t-marginalen måste rymma de översta zonetiketterna (45/55) — annars klipps
+    # de av figurkanten. Höjden höjs lika mycket så själva bågen behåller storleken.
+    fig.update_layout(height=300, margin=dict(l=24, r=24, t=34, b=0),
                       paper_bgcolor="rgba(0,0,0,0)", font={"family": "Space Grotesk"})
     return fig
 
