@@ -48,7 +48,6 @@ st.markdown(f"""
      centreras i egna 900px-block. */
   [data-testid="stMainBlockContainer"], .block-container {{
       max-width: 100% !important; padding: 2rem 3.5rem 2rem !important; }}
-  [data-testid="stMainBlockContainer"] {{ overflow-x: clip; }}
 
   /* Fullbreddslinje vid sidhuvud/sidfot (bryter ut ur ytans padding) */
   .fullrule {{ border: none; border-top: 1px solid {HAIRLINE};
@@ -58,10 +57,6 @@ st.markdown(f"""
   @keyframes vyfade {{ from {{ opacity: 0; transform: translateY(4px); }}
                        to {{ opacity: 1; transform: translateY(0); }} }}
 
-  /* Aktiv menypunkt i toppnavet — mono-versal, exakt som fördjupnings-etiketterna */
-  .navactive {{ font-family: 'Space Grotesk', sans-serif; font-size: .74rem; color: {TEXT};
-      text-transform: uppercase; letter-spacing: .16em; padding: .3rem .2rem;
-      border-bottom: 1px solid {TEXT}; display: inline-block; white-space: nowrap; }}
 
   /* Typografi: serif-display i rubriker, resten grotesk */
   h1, h2, h3, h4 {{ font-family: 'Newsreader', Georgia, serif !important;
@@ -73,23 +68,40 @@ st.markdown(f"""
   /* ---- Hjälte: Bästa köp ---- */
   .hero-label {{ font-family: 'Space Grotesk', sans-serif; text-transform: uppercase;
       letter-spacing: .24em; font-size: .68rem; color: {MUTED}; margin-bottom: .5rem; }}
-  .hero-title {{ font-family: 'Newsreader', serif; font-size: 3.4rem; line-height: 1;
-      letter-spacing: -.025em; color: {TEXT}; margin: 2rem auto .55rem; max-width: 900px; }}
+  .hero-title {{ font-family: 'Newsreader', serif; font-size: 2.3rem; line-height: 1.02;
+      letter-spacing: -.02em; color: {TEXT}; margin: 1.6rem auto .5rem; max-width: 900px; }}
   .hero-sub {{ font-family: 'Space Grotesk', sans-serif; font-size: .8rem; color: {MUTED};
       letter-spacing: .01em; margin: 0 auto 1.7rem; max-width: 900px; line-height: 1.5; }}
 
   .stocklist {{ margin: .2rem auto .5rem; max-width: 900px; }}
+  /* Sentiment-utfäll, rapportnotis och poäng-popover centreras med hjälten (900px) */
+  .st-key-fgexp, .st-key-rapportbadge, .st-key-poangexp {{
+      max-width: 900px; margin-left: auto !important; margin-right: auto !important; }}
+  .st-key-rapportbadge {{ text-align: center; }}
+  .st-key-rapportbadge [data-testid="stCaptionContainer"] {{ justify-content: center; }}
+  .st-key-poangexp {{ align-items: center; }}
+  /* Sentiment-expandern på Bästa köp ska INTE ärva dragspelets topp-hårlinje.
+     Den globala dragspelsregeln nedan har prefixet stMainBlockContainer och
+     högre specificitet — matcha samma prefix + .st-key-fgexp för att vinna. */
+  [data-testid="stMainBlockContainer"] .st-key-fgexp [data-testid="stExpander"],
+  [data-testid="stMainBlockContainer"] .st-key-fgexp [data-testid="stExpander"] details,
+  [data-testid="stMainBlockContainer"] .st-key-fgexp [data-testid="stExpanderDetails"] {{
+      border: none !important; border-top: none !important; box-shadow: none !important; }}
+  [data-testid="stMainBlockContainer"] .st-key-fgexp [data-testid="stExpander"] summary {{
+      text-transform: none !important; letter-spacing: .01em !important;
+      font-size: .82rem !important; justify-content: center; }}
+  .st-key-fgexp summary p {{ font-size: .82rem !important; }}
   .stock {{ border-top: 1px solid {HAIRLINE}; }}
   .stock:last-child {{ border-bottom: 1px solid {HAIRLINE}; }}
   .stoggle {{ position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }}
-  .rad {{ display: flex; align-items: center; gap: 1.1rem; padding: 1.15rem .3rem;
+  .rad {{ display: flex; align-items: center; gap: 1rem; padding: .8rem .3rem;
       cursor: pointer; transition: padding-left .28s ease; }}
   .stock:hover .rad {{ padding-left: .95rem; }}
-  .rang {{ font-family: 'Space Grotesk', sans-serif; font-size: .76rem; color: {MUTED};
-      width: 1.7rem; flex: 0 0 auto; }}
-  .bikon {{ width: 28px; height: 28px; opacity: .72; flex: 0 0 auto; }}
-  .tk {{ font-family: 'Newsreader', serif; font-size: 1.55rem; color: {TEXT};
-      min-width: 5.5rem; flex: 0 0 auto; }}
+  .rang {{ font-family: 'Space Grotesk', sans-serif; font-size: .72rem; color: {MUTED};
+      width: 1.6rem; flex: 0 0 auto; }}
+  .bikon {{ width: 32px; height: 32px; opacity: .75; flex: 0 0 auto; }}
+  .tk {{ font-family: 'Newsreader', serif; font-size: 1.2rem; color: {TEXT};
+      min-width: 4.2rem; flex: 0 0 auto; }}
   .meter {{ flex: 1 1 auto; height: 2px; background: {HAIRLINE}; position: relative; min-width: 50px; }}
   .meter .fill {{ position: absolute; inset: 0 auto 0 0; height: 100%; background: {TEXT}; }}
   .poang {{ font-family: 'Space Grotesk', sans-serif; font-size: 1rem; color: {TEXT};
@@ -197,18 +209,81 @@ st.markdown(f"""
   [data-testid="stMainBlockContainer"] [data-testid="stPopover"] button:hover {{
       color: {OLIV} !important; }}
 
-  /* Toppnavet: mono-versal, exakt fördjupnings-etiketternas stil (ej serifen) */
+  /* Toppnavet: liten, diskret mono-versal */
   [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button {{
       font-family: 'Space Grotesk', sans-serif !important; text-transform: uppercase;
-      letter-spacing: .16em; font-size: .74rem !important; color: {MUTED} !important;
-      padding: .3rem .2rem !important; white-space: nowrap; }}
+      letter-spacing: .1em; font-size: .48rem !important; color: {TEXT} !important;
+      padding: .35rem .1rem !important; line-height: 1.9 !important;
+      height: auto !important; overflow: visible !important; white-space: nowrap; }}
   [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button:hover {{
       color: {OLIV} !important; }}
   /* Menyn flödar som en rad och radbryter på smala skärmar (mobil) */
-  .st-key-navbox {{ flex-direction: row !important; flex-wrap: wrap !important;
-      align-items: center; gap: .2rem 1.1rem !important; }}
+  .st-key-navbox, .st-key-navbox [data-testid="stVerticalBlock"] {{
+      flex-direction: row !important; flex-wrap: wrap !important;
+      align-items: center; align-content: flex-start; gap: .1rem 1rem !important;
+      padding-top: .5rem !important; overflow: visible !important; }}
   .st-key-navbox [data-testid="stElementContainer"], .st-key-navbox .stButton {{
-      width: auto !important; }}
+      width: auto !important; overflow: visible !important; }}
+
+  /* ---- Mobil: mindre marginal, kompaktare Bästa köp-rad ---- */
+  @media (max-width: 640px) {{
+    [data-testid="stMainBlockContainer"], .block-container {{
+        padding-left: 1.1rem !important; padding-right: 1.1rem !important; }}
+    .fullrule {{ margin-left: -1.1rem; margin-right: -1.1rem; }}
+    .hero-title {{ font-size: 1.9rem; }}
+    .rad {{ gap: .55rem; padding: .7rem .05rem; }}
+    .meter {{ display: none; }}          /* poängsiffran räcker; frigör bredd */
+    .tk {{ flex: 1 1 auto; font-size: 1.05rem; min-width: 0; }}
+    .bikon {{ width: 26px; height: 26px; }}
+    .rang {{ width: 1.3rem; font-size: .68rem; }}
+    .poang {{ width: 2.7rem; font-size: .92rem; }}
+    .crek {{ width: auto; font-size: .56rem; letter-spacing: .05em; }}
+    .trend {{ width: .9rem; }}
+    .detalj-inner {{ padding-left: 2.4rem; }}
+    .fg-mini {{ flex-wrap: wrap; }}
+    .fg-mini-hint {{ display: none; }}   /* nå via VII · Sentiment i menyn */
+    /* Mobil: dölj de breda tabellerna, visa kort/listor i stället */
+    .st-key-konstab, .st-key-divtab, .st-key-naratab,
+    .st-key-lamnattab, .st-key-bubbeltab, .st-key-claudetop,
+    .st-key-histtab, .st-key-andrtab {{ display: none !important; }}
+  }}
+
+  /* Aktiekort (mobil) — tabellersättning. Döljs på desktop. */
+  .mobilkort {{ margin: .2rem 0 .5rem; }}
+  /* Element som bara ska visas på mobil (döljs på desktop) */
+  @media (min-width: 641px) {{ .mobilkort, .mobilonly {{ display: none !important; }} }}
+
+  /* Historik-logg (mobil) — kompakt lista i stället för bred tabell */
+  .logglista {{ margin: .2rem 0 .5rem; }}
+  .logg-rad {{ border-top: 1px solid {HAIRLINE}; padding: .7rem .1rem; }}
+  .logg-rad:last-child {{ border-bottom: 1px solid {HAIRLINE}; }}
+  .logg-topp {{ display: flex; justify-content: space-between; align-items: baseline;
+      gap: .6rem; margin-bottom: .25rem; }}
+  .logg-datum {{ font-family: 'Space Grotesk', sans-serif; font-size: .68rem; color: {MUTED};
+      letter-spacing: .04em; }}
+  .logg-typ {{ font-family: 'Space Grotesk', sans-serif; font-size: .6rem; text-transform: uppercase;
+      letter-spacing: .1em; white-space: nowrap; }}
+  .logg-mitt {{ font-family: 'Space Grotesk', sans-serif; font-size: .82rem; color: {TEXT}; }}
+  .logg-mitt b {{ font-weight: 500; }}
+  .logg-detalj {{ font-family: 'Space Grotesk', sans-serif; font-size: .74rem; color: {MUTED};
+      line-height: 1.4; margin-top: .15rem; }}
+  .mk-kort {{ border-top: 1px solid {HAIRLINE}; padding: .9rem .1rem 1rem; }}
+  .mk-kort:last-child {{ border-bottom: 1px solid {HAIRLINE}; }}
+  .mk-huvud {{ display: flex; align-items: center; gap: .6rem; margin-bottom: .7rem; }}
+  .mk-ikon {{ width: 26px; height: 26px; opacity: .75; flex: 0 0 auto; }}
+  .mk-tk {{ font-family: 'Newsreader', serif; font-size: 1.3rem; color: {TEXT}; }}
+  .mk-trend {{ font-size: .85rem; }}
+  .mk-claude {{ margin-left: auto; font-family: 'Space Grotesk', sans-serif; font-size: .62rem;
+      text-transform: uppercase; letter-spacing: .1em; }}
+  .mk-rader {{ display: grid; grid-template-columns: 1fr 1fr; gap: .1rem .9rem; }}
+  .mk-rader > div {{ display: flex; justify-content: space-between; align-items: baseline;
+      gap: .5rem; font-family: 'Space Grotesk', sans-serif; font-size: .72rem;
+      padding: .3rem 0; border-bottom: 1px solid {HAIRLINE}; }}
+  .mk-rader .kl {{ color: {MUTED}; white-space: nowrap; }}
+  .mk-rader .kv {{ color: {TEXT}; text-align: right; }}
+  .mk-fot {{ font-family: 'Space Grotesk', sans-serif; font-size: .7rem; color: {MUTED};
+      line-height: 1.45; padding-top: .55rem; }}
+  .mk-fot b {{ font-weight: 500; color: {TEXT}; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -510,6 +585,60 @@ def fear_greed_gauge(varde):
     return fig
 
 
+def _trend_mark(a):
+    """Trendpil (▲/▼/–) som färgad HTML-span för mobilkorten."""
+    t = a.get("stigande_trend")
+    if t is None:
+        return f'<span class="mk-trend" style="color:{MUTED}">–</span>'
+    farg = MOSS if t else RUST
+    return f'<span class="mk-trend" style="color:{farg}">{"▲" if t else "▼"}</span>'
+
+
+def mobilkort_html(korten):
+    """Aktiekort för mobil (ersätter breda tabeller). Varje kort = dict med
+    ikon (html), tk, valfri trend (html), valfri claude/claudefarg,
+    rader=[(etikett, värde), …] och valfri fot=[html-rad, …] för långa fält."""
+    out = ['<div class="mobilkort">']
+    for k in korten:
+        rader = "".join(
+            f'<div><span class="kl">{lbl}</span><span class="kv">{val}</span></div>'
+            for lbl, val in k["rader"])
+        fot = "".join(f'<div class="mk-fot">{f}</div>' for f in k.get("fot", []))
+        out.append(
+            f'<div class="mk-kort"><div class="mk-huvud">{k["ikon"]}'
+            f'<span class="mk-tk">{k["tk"]}</span>{k.get("trend", "")}'
+            f'<span class="mk-claude" style="color:{k.get("claudefarg", MUTED)}">'
+            f'{k.get("claude", "")}</span>'
+            f'</div><div class="mk-rader">{rader}</div>{fot}</div>')
+    out.append('</div>')
+    return "".join(out)
+
+
+def _logg_farg(typ):
+    """Färg per historik-/ändringstyp (grönt in, rött ut, neutralt övrigt)."""
+    if typ.startswith(("NYTT", "IN I", "ÅTER")):
+        return MOSS
+    if typ.startswith(("SÅLT", "UT UR", "EXIT")):
+        return RUST
+    return MUTED
+
+
+def logglista_html(records):
+    """Kompakt mobil-logglista av historik-/ändringsposter. records = list av
+    dict med Datum, Typ, Profil, Aktie, Detalj."""
+    rader = []
+    for r in records:
+        mitt = " · ".join(x for x in (f'<b>{r["Aktie"]}</b>' if r.get("Aktie") else "",
+                                      r.get("Profil") or "") if x)
+        det = f'<div class="logg-detalj">{r["Detalj"]}</div>' if r.get("Detalj") else ""
+        rader.append(
+            f'<div class="logg-rad"><div class="logg-topp">'
+            f'<span class="logg-datum">{r["Datum"]}</span>'
+            f'<span class="logg-typ" style="color:{_logg_farg(r["Typ"])}">{r["Typ"]}</span>'
+            f'</div>' + (f'<div class="logg-mitt">{mitt}</div>' if mitt else "") + det + '</div>')
+    return f'<div class="logglista mobilonly">{"".join(rader)}</div>'
+
+
 # ----------------------------------------------------------------------
 # Körlogik — kontrollerna ligger i sidfoten. Deras klick sätter flaggor i
 # session_state (via on_click) som fångas här överst, så analysen hinner köras
@@ -592,7 +721,7 @@ VYER = [
 ]
 st.session_state.setdefault("view", "Bästa köp")
 
-hcol1, hcol2 = st.columns([2, 8], vertical_alignment="center")
+hcol1, hcol2 = st.columns([2, 8], vertical_alignment="top")
 with hcol1:
     st.markdown('<div class="wordmark">eToro Portföljanalys</div>', unsafe_allow_html=True)
 with hcol2:
@@ -652,18 +781,24 @@ st.markdown(
 # VY: Bästa köp — hjälte + senaste händelser
 # ======================================================================
 if view == "Bästa köp":
-    # Miniatyr av marknadssentimentet (Fear & Greed) — bara siffra + etikett.
+    # Marknadssentiment (Fear & Greed): sammanfattning på förstasidan, utfällbar mätare.
     _fg = data.get("fear_greed")
     if _fg and _fg.get("varde") is not None:
         _fgv = _fg["varde"]
         _fge = _fg.get("etikett") or fg_zon(_fgv)[0]
         _fgf = fg_zon(_fgv)[1]
-        st.markdown(
-            f'<div class="fg-mini"><span class="fg-dot" style="background:{_fgf}"></span>'
-            f'Marknadssentiment <b style="color:{_fgf}">{_fgv:.0f} · {_fge}</b>'
-            f'<span class="fg-mini-hint">→ VII · Sentiment</span></div>',
-            unsafe_allow_html=True,
-        )
+        with st.container(key="fgexp"):
+            with st.expander(f"Marknadssentiment · {_fgv:.0f} · {_fge}"):
+                _fgc = st.columns([1, 4, 1])
+                with _fgc[1]:
+                    st.plotly_chart(fear_greed_gauge(_fgv), use_container_width=True,
+                                    config={"displayModeBar": False})
+                    st.markdown(f'<div class="fg-etikett" style="color:{_fgf}">{_fge}</div>',
+                                unsafe_allow_html=True)
+                st.caption("Full vy med historik under **VII · Sentiment**.")
+        # Färga sammanfattningsraden i zonens färg.
+        st.markdown(f"<style>.st-key-fgexp summary {{ color: {_fgf} !important; }}</style>",
+                    unsafe_allow_html=True)
     st.markdown(
         '<div class="hero-title">Bästa köp</div>'
         '<div class="hero-sub">Sammanvägd poäng 0–100. Håll muspekaren över eller klicka '
@@ -688,11 +823,12 @@ if view == "Bästa köp":
                     pass
         if rapport_snart:
             badges = " · ".join(f"**{tk}** om {d} dgr" for tk, d in sorted(rapport_snart, key=lambda x: x[1]))
-            st.caption(f":material/event_upcoming: **Rapport inom en vecka:** {badges}")
+            with st.container(key="rapportbadge"):
+                st.caption(f":material/event_upcoming: **Rapport inom en vecka:** {badges}")
 
         st.markdown(hero_html(ranking, claude, consensus, bransch, KOMP_MAX), unsafe_allow_html=True)
 
-        with st.popover("Så räknas poängen"):
+        with st.container(key="poangexp"), st.popover("Så räknas poängen"):
             st.caption(
                 "**Poängmodellen (§12, omviktad):** Trend 25 p · Momentum 20 p (inkl. relativ "
                 "styrka mot sektor-ETF) · Analytiker 20 p (uppsida — halverad vid hög "
@@ -754,29 +890,28 @@ if view == "Bästa köp":
 
         if lista_rader or vikt_rader:
             st.markdown('<hr class="fullrule" style="margin-top:2.4rem">', unsafe_allow_html=True)
-            _shl, _shc, _shr = st.columns([1, 7, 1])
+            _shl, _shc, _shr = st.columns([1, 4, 1])
             with _shc:
                 st.markdown('<div class="sh-rubrik">Senaste händelser</div>',
                             unsafe_allow_html=True)
-                kol1, kol2 = st.columns(2, gap="large")
-                with kol1:
-                    st.markdown('<div class="sh-kol">Förändringar i listorna '
-                                '<span>· senaste 30 dagarna</span></div>', unsafe_allow_html=True)
-                    if lista_rader:
-                        for rad in lista_rader[:6]:
-                            st.markdown(f'<div class="sh-post">{_md_bold(rad)}</div>',
-                                        unsafe_allow_html=True)
-                    else:
-                        st.caption("Inga in- eller utträden den senaste månaden.")
-                with kol2:
-                    st.markdown('<div class="sh-kol">Största viktändringarna '
-                                f'<span>· {senaste_datum}</span></div>', unsafe_allow_html=True)
-                    if vikt_rader:
-                        for rad in vikt_rader:
-                            st.markdown(f'<div class="sh-post">{_md_bold(rad)}</div>',
-                                        unsafe_allow_html=True)
-                    else:
-                        st.caption("Inga större viktändringar senaste ändringsdagen.")
+                # 1. Förändringar i listorna
+                st.markdown('<div class="sh-kol">Förändringar i listorna '
+                            '<span>· senaste 30 dagarna</span></div>', unsafe_allow_html=True)
+                if lista_rader:
+                    for rad in lista_rader[:6]:
+                        st.markdown(f'<div class="sh-post">{_md_bold(rad)}</div>',
+                                    unsafe_allow_html=True)
+                else:
+                    st.caption("Inga in- eller utträden den senaste månaden.")
+                # 2. Största viktändringarna
+                st.markdown('<div class="sh-kol" style="margin-top:1.9rem">Största viktändringarna '
+                            f'<span>· {senaste_datum}</span></div>', unsafe_allow_html=True)
+                if vikt_rader:
+                    for rad in vikt_rader:
+                        st.markdown(f'<div class="sh-post">{_md_bold(rad)}</div>',
+                                    unsafe_allow_html=True)
+                else:
+                    st.caption("Inga större viktändringar senaste ändringsdagen.")
                 st.caption("Fullständiga flöden finns under **Konsensus** och **Ändringar** i toppmenyn.")
 
 if view == "Konsensus":
@@ -794,75 +929,105 @@ if view == "Konsensus":
     def _total_vikt(info):
         return info.get("total_weight") or round(info["avg_weight"] * info["count"], 2)
 
-    # Slimmad översikt — klicka en rad för detaljerna (renderas under tabellen).
-    rows = []
-    for tk in consensus_order:
-        a = analyses.get(tk, {})
-        rows.append({
-            "Bransch": bransch_ikon(tk, bransch),
-            "Aktie": tk + (" · ny" if tk in nya_kons else ""),
-            "Stigande trend": trend_label(a),
-            "Portföljer": consensus[tk]["count"],
-            "Total vikt (%)": _total_vikt(consensus[tk]),
-            "Analytiker": a.get("rekommendation"),
-            "Claude": claude.get(tk, {}).get("rekommendation", "—"),
-        })
-    val = st.dataframe(
-        stylad(pd.DataFrame(rows), ["Aktie", "Stigande trend", "Claude"]),
-        use_container_width=True, hide_index=True,
-        on_select="rerun", selection_mode="single-row", key="kons_val",
-        column_config={"Bransch": st.column_config.ImageColumn("", width=36)})
+    # Slimmad tabell (desktop) + klickbar detalj. Döljs på mobil (ersätts av kort).
+    with st.container(key="konstab"):
+        rows = []
+        for tk in consensus_order:
+            a = analyses.get(tk, {})
+            rows.append({
+                "Bransch": bransch_ikon(tk, bransch),
+                "Aktie": tk + (" · ny" if tk in nya_kons else ""),
+                "Stigande trend": trend_label(a),
+                "Portföljer": consensus[tk]["count"],
+                "Total vikt (%)": _total_vikt(consensus[tk]),
+                "Analytiker": a.get("rekommendation"),
+                "Claude": claude.get(tk, {}).get("rekommendation", "—"),
+            })
+        val = st.dataframe(
+            stylad(pd.DataFrame(rows), ["Aktie", "Stigande trend", "Claude"]),
+            use_container_width=True, hide_index=True,
+            on_select="rerun", selection_mode="single-row", key="kons_val",
+            column_config={"Bransch": st.column_config.ImageColumn("", width=36)})
 
-    # Detaljkort för den markerade raden — konsensussignal, teknik, innehavstid.
-    markerade = val.selection.rows
-    if not markerade:
-        st.caption("Klicka på en rad ovan för konsensussignal, teknik, analytiker och innehavstid.")
-    else:
-        tk = consensus_order[markerade[0]]
+        # Detaljkort för den markerade raden — konsensussignal, teknik, innehavstid.
+        markerade = val.selection.rows
+        if not markerade:
+            st.caption("Klicka på en rad ovan för konsensussignal, teknik, analytiker och innehavstid.")
+        else:
+            tk = consensus_order[markerade[0]]
+            info = consensus[tk]
+            a = analyses.get(tk, {})
+            c = claude.get(tk, {})
+            h = innehav.get(tk, {})
+            crek = c.get("rekommendation", "—")
+            st.markdown(f"#### {tk} — {info['count']} portföljer · "
+                        f"trend {trend_label(a)} · Claude {crek}")
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Total vikt", _num(_total_vikt(info), " %"))
+            k2.metric("Viktad kons.", _num(info.get("viktad_konsensus")))
+            k3.metric("Senaste köp", _num(info.get("senaste_köp_dagar"), " dgr", 0))
+            k4.metric("Snittvikt", _num(info.get("avg_weight"), " %"))
+
+            if "error" in a:
+                st.caption(f"Marknadsdata saknas: {a['error']}")
+            else:
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Pris", _num(a.get("pris")))
+                m2.metric("RSI14", _num(a.get("RSI14")))
+                m3.metric("Riktkurs", _num(a.get("riktkurs")))
+                m4.metric("Uppsida", _num(a.get("uppsida_%"), " %"))
+
+            holders = info.get("holders", [])
+            if holders:
+                st.caption("Ägs av: " + ", ".join(holders))
+            if h:
+                st.caption(
+                    f"Ägd längst: **{format_innehavstid(h.get('längst_dagar'))}** "
+                    f"(av {h.get('längst_profil', '?')}) · snitt "
+                    f"**{format_innehavstid(h.get('snitt_dagar'))}** · upparbetad "
+                    f"snittvinst **{_num(h.get('snitt_vinst_pct'), ' %')}** — lång tid + "
+                    f"hög vinst = risk för vinsthemtagning."
+                )
+
+        st.caption(
+            "**Stigande trend** = priset över MA200 **och** MA200 stigande — utan den kan "
+            "Claude aldrig ge KÖP. **Viktad kons.** väger varje ägare efter hur färskt köpet "
+            "är (aktivt nyköp 1,5 · 6 mån 1,0 · äldre 0,5) och måste nå samma tal som "
+            "antalskravet — hysteresen gäller även den. Låg viktad konsensus = gammal, passiv "
+            "signal. *· ny* = ny på listan senaste 7 dagarna. **Ägd längst** = äldsta öppna "
+            "positionen bland investerarna; **upparbetad snittvinst** = deras genomsnittliga "
+            "vinst — lång tid + hög vinst = risk för vinsthemtagning."
+        )
+        st.caption(BRANSCH_TEXT)
+
+    # Mobilvänliga kort (visas i stället för tabellen på små skärmar)
+    kons_kort = []
+    for tk in consensus_order:
         info = consensus[tk]
         a = analyses.get(tk, {})
-        c = claude.get(tk, {})
-        h = innehav.get(tk, {})
-        crek = c.get("rekommendation", "—")
-        st.markdown(f"#### {tk} — {info['count']} portföljer · "
-                    f"trend {trend_label(a)} · Claude {crek}")
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Total vikt", _num(_total_vikt(info), " %"))
-        k2.metric("Viktad kons.", _num(info.get("viktad_konsensus")))
-        k3.metric("Senaste köp", _num(info.get("senaste_köp_dagar"), " dgr", 0))
-        k4.metric("Snittvikt", _num(info.get("avg_weight"), " %"))
-
-        if "error" in a:
-            st.caption(f"Marknadsdata saknas: {a['error']}")
-        else:
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Pris", _num(a.get("pris")))
-            m2.metric("RSI14", _num(a.get("RSI14")))
-            m3.metric("Riktkurs", _num(a.get("riktkurs")))
-            m4.metric("Uppsida", _num(a.get("uppsida_%"), " %"))
-
-        holders = info.get("holders", [])
-        if holders:
-            st.caption("Ägs av: " + ", ".join(holders))
-        if h:
-            st.caption(
-                f"Ägd längst: **{format_innehavstid(h.get('längst_dagar'))}** "
-                f"(av {h.get('längst_profil', '?')}) · snitt "
-                f"**{format_innehavstid(h.get('snitt_dagar'))}** · upparbetad "
-                f"snittvinst **{_num(h.get('snitt_vinst_pct'), ' %')}** — lång tid + "
-                f"hög vinst = risk för vinsthemtagning."
-            )
-
-    st.caption(
-        "**Stigande trend** = priset över MA200 **och** MA200 stigande — utan den kan "
-        "Claude aldrig ge KÖP. **Viktad kons.** väger varje ägare efter hur färskt köpet "
-        "är (aktivt nyköp 1,5 · 6 mån 1,0 · äldre 0,5) och måste nå samma tal som "
-        "antalskravet — hysteresen gäller även den. Låg viktad konsensus = gammal, passiv "
-        "signal. *· ny* = ny på listan senaste 7 dagarna. **Ägd längst** = äldsta öppna "
-        "positionen bland investerarna; **upparbetad snittvinst** = deras genomsnittliga "
-        "vinst — lång tid + hög vinst = risk för vinsthemtagning."
-    )
-    st.caption(BRANSCH_TEXT)
+        crek = claude.get(tk, {}).get("rekommendation", "—")
+        ikon = bransch_ikon(tk, bransch)
+        img = f'<img class="mk-ikon" src="{ikon}">' if ikon else '<span class="mk-ikon"></span>'
+        rader = [
+            ("Portföljer", info["count"]),
+            ("Total vikt", _num(_total_vikt(info), " %")),
+            ("Snittvikt", _num(info.get("avg_weight"), " %")),
+            ("Viktad kons.", _num(info.get("viktad_konsensus"))),
+            ("Senaste köp", _num(info.get("senaste_köp_dagar"), " dgr", 0)),
+            ("Analytiker", a.get("rekommendation") or "—"),
+        ]
+        if "error" not in a:
+            rader += [
+                ("Pris", _num(a.get("pris"))),
+                ("RSI14", _num(a.get("RSI14"))),
+                ("Riktkurs", _num(a.get("riktkurs"))),
+                ("Uppsida", _num(a.get("uppsida_%"), " %")),
+            ]
+        kons_kort.append({
+            "ikon": img, "tk": tk + (" · ny" if tk in nya_kons else ""),
+            "trend": _trend_mark(a), "claude": crek,
+            "claudefarg": REK_FARG.get(crek, MUTED), "rader": rader})
+    st.markdown(mobilkort_html(kons_kort), unsafe_allow_html=True)
 
     # Nära konsensus — en portfölj från att kvala in
     near = data.get("nara_konsensus", {})
@@ -873,7 +1038,7 @@ if view == "Konsensus":
                    "en ägare till (eller färskare köp) tar dem över innivån.")
         nya_nara = nya_pa_listan(log, "IN I NÄRA KONSENSUS")
 
-        near_rows = []
+        near_rows, near_kort = [], []
         for tk, info in sorted(near.items(), key=lambda x: -_total_vikt(x[1])):
             h = innehav.get(tk, {})
             near_rows.append({
@@ -885,10 +1050,25 @@ if view == "Konsensus":
                 "Ägd längst": format_innehavstid(h.get("längst_dagar")),
                 "Inv. vinst (%)": h.get("snitt_vinst_pct", "—"),
             })
-        st.dataframe(stylad(pd.DataFrame(near_rows), ["Aktie"]),
-                     use_container_width=True, hide_index=True,
-                     column_config={"Bransch": st.column_config.ImageColumn("", width=36)})
-        st.caption("Sorterad på total vikt — investerarnas sammanlagda portföljandel i aktien.")
+            ikon = bransch_ikon(tk, bransch)
+            img = f'<img class="mk-ikon" src="{ikon}">' if ikon else '<span class="mk-ikon"></span>'
+            holders = info.get("holders", [])
+            near_kort.append({
+                "ikon": img, "tk": tk + (" · ny" if tk in nya_nara else ""),
+                "rader": [
+                    ("Total vikt", _num(_total_vikt(info), " %")),
+                    ("Snittvikt", _num(info.get("avg_weight"), " %")),
+                    ("Ägd längst", format_innehavstid(h.get("längst_dagar"))),
+                    ("Inv. vinst", _num(h.get("snitt_vinst_pct"), " %")),
+                ],
+                "fot": ["<b>Ägs av</b> " + ", ".join(holders)] if holders else [],
+            })
+        with st.container(key="naratab"):
+            st.dataframe(stylad(pd.DataFrame(near_rows), ["Aktie"]),
+                         use_container_width=True, hide_index=True,
+                         column_config={"Bransch": st.column_config.ImageColumn("", width=36)})
+            st.caption("Sorterad på total vikt — investerarnas sammanlagda portföljandel i aktien.")
+        st.markdown(mobilkort_html(near_kort), unsafe_allow_html=True)
 
     # Lämnat listorna — när investerarna kliver av
     from datetime import date as _date, timedelta as _timedelta
@@ -907,8 +1087,18 @@ if view == "Konsensus":
             "Lämnade": "Konsensus" if e["typ"] == "UT UR KONSENSUS" else "Nära konsensus",
             "Detalj": e["detalj"],
         } for e in lamnat]
-        st.dataframe(pd.DataFrame(lamnat_rows), use_container_width=True, hide_index=True)
-        st.caption("När investerare kliver av ett värdepapper kan det vara en tidig säljsignal.")
+        with st.container(key="lamnattab"):
+            st.dataframe(pd.DataFrame(lamnat_rows), use_container_width=True, hide_index=True)
+            st.caption("När investerare kliver av ett värdepapper kan det vara en tidig säljsignal.")
+        lamnat_kort = [{
+            "ikon": "", "tk": e["ticker"],
+            "rader": [
+                ("Datum", e["datum"]),
+                ("Lämnade", "Konsensus" if e["typ"] == "UT UR KONSENSUS" else "Nära konsensus"),
+            ],
+            "fot": [e["detalj"]] if e.get("detalj") else [],
+        } for e in lamnat]
+        st.markdown(mobilkort_html(lamnat_kort), unsafe_allow_html=True)
 
 if view == "Divergens":
     st.subheader("Divergens — signalgruppens unika övertygelser")
@@ -924,39 +1114,57 @@ if view == "Divergens":
             f"**Hög divergens** = få i den breda gruppen äger aktien → signalgruppens egen idé. "
             f"**Låg/negativ** = flockbeteende — 'alla' äger den redan."
         )
-        div_rows = []
+        def _tolkning(pp):
+            return "Unik övertygelse" if pp >= 40 else "Viss egen idé" if pp >= 15 else "Flockbeteende"
+
+        # Tabell (desktop). Döljs på mobil — ersätts av kort.
+        with st.container(key="divtab"):
+            div_rows = []
+            for tk, dv in sorted(divergens.items(), key=lambda x: -x[1]["divergens_pp"]):
+                c = claude.get(tk, {})
+                div_rows.append({
+                    "Bransch": bransch_ikon(tk, bransch),
+                    "Aktie": tk,
+                    "Signalgrupp": f"{dv['signal_antal']}/{len(data['profiler'])} ({dv['signal_andel_pct']} %)",
+                    "Bakgrund": f"{dv['bakgrund_antal']}/{bg_antal} ({dv['bakgrund_andel_pct']} %)",
+                    "Divergens (pp)": dv["divergens_pp"],
+                    "Bakgrundens snittvikt (%)": dv["bakgrund_snittvikt"],
+                    "Tolkning": _tolkning(dv["divergens_pp"]),
+                    "Claude": c.get("rekommendation", "—"),
+                })
+            st.dataframe(
+                stylad(pd.DataFrame(div_rows), ["Tolkning", "Claude"]),
+                use_container_width=True, hide_index=True,
+                column_config={
+                    "Bransch": st.column_config.ImageColumn("", width=36),
+                    "Divergens (pp)": st.column_config.ProgressColumn(
+                        "Divergens (pp)", min_value=-100, max_value=100, format="%+.1f"
+                    ),
+                },
+            )
+            st.caption(
+                "Divergens = signalgruppens ägarandel minus bakgrundsgruppens, i procentenheter. "
+                "Bakgrundsgruppen används som brusfilter — inte som köpsignal."
+            )
+
+        # Mobilvänliga kort (visas i stället för tabellen på små skärmar)
+        div_kort = []
         for tk, dv in sorted(divergens.items(), key=lambda x: -x[1]["divergens_pp"]):
-            c = claude.get(tk, {})
-            if dv["divergens_pp"] >= 40:
-                tolk = "Unik övertygelse"
-            elif dv["divergens_pp"] >= 15:
-                tolk = "Viss egen idé"
-            else:
-                tolk = "Flockbeteende"
-            div_rows.append({
-                "Bransch": bransch_ikon(tk, bransch),
-                "Aktie": tk,
-                "Signalgrupp": f"{dv['signal_antal']}/{len(data['profiler'])} ({dv['signal_andel_pct']} %)",
-                "Bakgrund": f"{dv['bakgrund_antal']}/{bg_antal} ({dv['bakgrund_andel_pct']} %)",
-                "Divergens (pp)": dv["divergens_pp"],
-                "Bakgrundens snittvikt (%)": dv["bakgrund_snittvikt"],
-                "Tolkning": tolk,
-                "Claude": c.get("rekommendation", "—"),
-            })
-        st.dataframe(
-            stylad(pd.DataFrame(div_rows), ["Tolkning", "Claude"]),
-            use_container_width=True, hide_index=True,
-            column_config={
-                "Bransch": st.column_config.ImageColumn("", width=36),
-                "Divergens (pp)": st.column_config.ProgressColumn(
-                    "Divergens (pp)", min_value=-100, max_value=100, format="%+.1f"
-                ),
-            },
-        )
-        st.caption(
-            "Divergens = signalgruppens ägarandel minus bakgrundsgruppens, i procentenheter. "
-            "Bakgrundsgruppen används som brusfilter — inte som köpsignal."
-        )
+            crek = claude.get(tk, {}).get("rekommendation", "—")
+            pp = dv["divergens_pp"]
+            ikon = bransch_ikon(tk, bransch)
+            img = f'<img class="mk-ikon" src="{ikon}">' if ikon else '<span class="mk-ikon"></span>'
+            div_kort.append({
+                "ikon": img, "tk": tk, "claude": crek,
+                "claudefarg": REK_FARG.get(crek, MUTED),
+                "rader": [
+                    ("Signalgrupp", f"{dv['signal_antal']}/{len(data['profiler'])} ({dv['signal_andel_pct']} %)"),
+                    ("Bakgrund", f"{dv['bakgrund_antal']}/{bg_antal} ({dv['bakgrund_andel_pct']} %)"),
+                    ("Divergens", f"{pp:+.1f} pp".replace(".", ",")),
+                    ("Bakgr. snittvikt", _num(dv["bakgrund_snittvikt"], " %")),
+                    ("Tolkning", _tolkning(pp)),
+                ]})
+        st.markdown(mobilkort_html(div_kort), unsafe_allow_html=True)
 
         # Bubblare: bubblarnivån (en ägare under kvarnivån) + hög divergens
         div_nara = data.get("divergens_nara", {})
@@ -977,21 +1185,36 @@ if view == "Divergens":
             st.caption("Inga bubblare just nu — aktierna på bubblarnivån ägs redan brett av flocken.")
         else:
             nya_nara_b = nya_pa_listan(data.get("historik", []), "IN I NÄRA KONSENSUS")
-            bubbel_rows = []
+            bubbel_rows, bubbel_kort = [], []
             for tk, dv in bubblare:
                 info = bubbel_kalla.get(tk, {})
+                bakgr = (f"{dv['bakgrund_antal']}/{data.get('bakgrund_antal', '?')} "
+                         f"({dv['bakgrund_andel_pct']} %)")
                 bubbel_rows.append({
                     "Bransch": bransch_ikon(tk, bransch),
                     "Aktie": tk + (" · ny" if tk in nya_nara_b else ""),
                     "Ägs av": ", ".join(info.get("holders", [])),
                     "Total vikt (%)": info.get("total_weight"),
-                    "Bakgrund": f"{dv['bakgrund_antal']}/{data.get('bakgrund_antal', '?')} "
-                                f"({dv['bakgrund_andel_pct']} %)",
+                    "Bakgrund": bakgr,
                     "Divergens (pp)": dv["divergens_pp"],
                 })
-            st.dataframe(stylad(pd.DataFrame(bubbel_rows), ["Aktie"]),
-                         use_container_width=True, hide_index=True,
-                         column_config={"Bransch": st.column_config.ImageColumn("", width=36)})
+                ikon = bransch_ikon(tk, bransch)
+                img = f'<img class="mk-ikon" src="{ikon}">' if ikon else '<span class="mk-ikon"></span>'
+                holders = info.get("holders", [])
+                bubbel_kort.append({
+                    "ikon": img, "tk": tk + (" · ny" if tk in nya_nara_b else ""),
+                    "rader": [
+                        ("Total vikt", _num(info.get("total_weight"), " %")),
+                        ("Bakgrund", bakgr),
+                        ("Divergens", f"{dv['divergens_pp']:+.1f} pp".replace(".", ",")),
+                    ],
+                    "fot": ["<b>Ägs av</b> " + ", ".join(holders)] if holders else [],
+                })
+            with st.container(key="bubbeltab"):
+                st.dataframe(stylad(pd.DataFrame(bubbel_rows), ["Aktie"]),
+                             use_container_width=True, hide_index=True,
+                             column_config={"Bransch": st.column_config.ImageColumn("", width=36)})
+            st.markdown(mobilkort_html(bubbel_kort), unsafe_allow_html=True)
 
 if view == "Claude":
     st.subheader("Claudes tekniska analys per aktie")
@@ -1006,19 +1229,40 @@ if view == "Claude":
         a = analyses.get(tk, {})
         c = claude.get(tk)
 
-        m1, m2, m3, m4, m5 = st.columns(5)
-        m1.metric("Pris", a.get("pris"))
-        m2.metric("RSI14", a.get("RSI14"))
-        m3.metric("MA200", a.get("MA200"))
         uppsida = a.get("uppsida_%")
-        m4.metric("Uppsida", f"{uppsida} %" if uppsida is not None else "—")
-        m5.metric("Stigande trend", trend_label(a))
+        # Nyckeltal + indikatorer (desktop). Döljs på mobil — ersätts av kompakt rutnät.
+        with st.container(key="claudetop"):
+            m1, m2, m3, m4, m5 = st.columns(5)
+            m1.metric("Pris", a.get("pris"))
+            m2.metric("RSI14", a.get("RSI14"))
+            m3.metric("MA200", a.get("MA200"))
+            m4.metric("Uppsida", f"{uppsida} %" if uppsida is not None else "—")
+            m5.metric("Stigande trend", trend_label(a))
 
-        i1, i2, i3, i4 = st.columns(4)
-        i1.markdown(f"Golden cross: {mark(a.get('golden_cross'))}", unsafe_allow_html=True)
-        i2.markdown(f"MACD över signal: {mark(a.get('MACD_över_signal'))}", unsafe_allow_html=True)
-        i3.markdown(f"1 mån: {a.get('avkastning_1m_%', '—')} %  ·  3 mån: {a.get('avkastning_3m_%', '—')} %")
-        i4.markdown(f"Från 52v-toppen: {a.get('avstånd_52v_högsta_%', '—')} %")
+            i1, i2, i3, i4 = st.columns(4)
+            i1.markdown(f"Golden cross: {mark(a.get('golden_cross'))}", unsafe_allow_html=True)
+            i2.markdown(f"MACD över signal: {mark(a.get('MACD_över_signal'))}", unsafe_allow_html=True)
+            i3.markdown(f"1 mån: {a.get('avkastning_1m_%', '—')} %  ·  3 mån: {a.get('avkastning_3m_%', '—')} %")
+            i4.markdown(f"Från 52v-toppen: {a.get('avstånd_52v_högsta_%', '—')} %")
+
+        # Kompakt rutnät för mobil (samma nyckeltal, tätare)
+        _grid = [
+            ("Pris", _num(a.get("pris"), "", 2)),
+            ("RSI14", _num(a.get("RSI14"))),
+            ("MA200", _num(a.get("MA200"))),
+            ("Uppsida", _num(uppsida, " %")),
+            ("Stigande trend", trend_label(a)),
+            ("Golden cross", mark(a.get("golden_cross"))),
+            ("MACD > signal", mark(a.get("MACD_över_signal"))),
+            ("1 mån", _num(a.get("avkastning_1m_%"), " %")),
+            ("3 mån", _num(a.get("avkastning_3m_%"), " %")),
+            ("Från 52v-topp", _num(a.get("avstånd_52v_högsta_%"), " %")),
+        ]
+        _celler = "".join(
+            f'<div><span class="kl">{lbl}</span><span class="kv">{val}</span></div>'
+            for lbl, val in _grid)
+        st.markdown(f'<div class="mobilonly mk-rader" style="margin:.2rem 0 .8rem">{_celler}</div>',
+                    unsafe_allow_html=True)
 
         epsr = a.get("eps_rev_90d_pct")
         if epsr is not None:
@@ -1141,7 +1385,10 @@ if view == "Ändringar":
         df = pd.DataFrame(dagens).rename(columns={
             "datum": "Datum", "typ": "Typ", "profil": "Profil",
             "ticker": "Aktie", "detalj": "Detalj"})
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        with st.container(key="andrtab"):
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        # Kompakt logglista för mobil (inget döljs i sidled)
+        st.markdown(logglista_html(df.to_dict("records")), unsafe_allow_html=True)
 
         st.caption("Hela loggen över alla körningar finns under **Historik** nedan.")
 
@@ -1159,7 +1406,15 @@ if view == "Historik":
         val = st.selectbox("Filtrera på typ", typer)
         if val != "Alla":
             df = df[df["Typ"] == val]
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        with st.container(key="histtab"):
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
+        # Kompakt logglista för mobil (inget döljs i sidled)
+        st.markdown(logglista_html(df.head(100).to_dict("records")), unsafe_allow_html=True)
+        if len(df) > 100:
+            st.markdown('<div class="mobilonly" style="font-family:Space Grotesk;font-size:.7rem;'
+                        f'color:{MUTED};padding:.6rem 0">Visar de 100 senaste — filtrera på typ '
+                        'för att se fler.</div>', unsafe_allow_html=True)
 
 if view == "Portföljer":
     st.subheader("Innehav per profil")
