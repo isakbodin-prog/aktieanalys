@@ -131,27 +131,76 @@ def _snygga_bolagsnamn(display_name):
         namn = namn[:-4].strip()
     return namn or None
 
+INSTRUMENT_CACHE_FIL = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "instrument_cache.json")
+INSTRUMENT_CACHE_TTL_TIMMAR = 24
+
+
+def _ladda_instrument_cache_fil():
+    """Fyll de tre uppslagscacharna från lokal fil om den finns och är färsk
+    (< INSTRUMENT_CACHE_TTL_TIMMAR). Returnerar True vid träff, annars False.
+
+    Instrumentlistan ändras sällan, så en dygnsfärsk fil sparar ~2 s API-hämtning
+    per kall process (lokala körningar/CLI). Trasig/gammal fil ignoreras tyst och
+    faller tillbaka på API-hämtningen. (På Renders tillfälliga disk finns filen
+    sällan kvar mellan kallstarter — där är detta i praktiken en no-op.)
+    """
+    from datetime import datetime
+    try:
+        with open(INSTRUMENT_CACHE_FIL, encoding="utf-8") as f:
+            d = json.load(f)
+        alder_h = (datetime.now() - datetime.fromisoformat(d["sparad"])).total_seconds() / 3600
+        if alder_h > INSTRUMENT_CACHE_TTL_TIMMAR:
+            return False
+        _instrument_cache.update({int(k): v for k, v in d["instrument"].items()})
+        _industry_cache.update(d.get("industri") or {})
+        _name_cache.update(d.get("namn") or {})
+        return bool(_instrument_cache)
+    except (OSError, KeyError, ValueError, TypeError, json.JSONDecodeError):
+        return False
+
+
+def _spara_instrument_cache_fil():
+    """Spara de tre cacharna + tidsstämpel lokalt. Fel sväljs — cachen är en ren
+    optimering, en misslyckad skrivning får aldrig fälla körningen."""
+    from datetime import datetime
+    try:
+        with open(INSTRUMENT_CACHE_FIL, "w", encoding="utf-8") as f:
+            json.dump({"sparad": datetime.now().isoformat(),
+                       "instrument": {str(k): v for k, v in _instrument_cache.items()},
+                       "industri": _industry_cache,
+                       "namn": _name_cache}, f, ensure_ascii=False)
+    except OSError:
+        pass
+
+
 def resolve_instruments(instrument_ids):
     """Översätt instrument-ID:n till tickers.
 
     /market-data/instruments utan parametrar returnerar HELA instrumentlistan
     (~15 500 st) med symbolFull — kommaseparerade instrumentIds ger 500, så vi
-    hämtar allt en gång och slår upp lokalt.
+    hämtar allt en gång och slår upp lokalt. Listan cachas dessutom till en lokal
+    fil (INSTRUMENT_CACHE_FIL, TTL 24 h) så en kall process slipper API-anropet.
     """
     if not _instrument_cache:
-        print("  Hämtar hela instrumentlistan (en gång)...")
-        data = api_get("/market-data/instruments")
-        for item in (data or {}).get("instrumentDisplayDatas", []):
-            iid = item.get("instrumentID")
-            ticker = item.get("symbolFull")
-            if iid is not None and ticker:
-                _instrument_cache[int(iid)] = str(ticker)
-                if item.get("stocksIndustryID") is not None:
-                    _industry_cache[str(ticker)] = item["stocksIndustryID"]
-                namn = _snygga_bolagsnamn(item.get("instrumentDisplayName"))
-                if namn:
-                    _name_cache[str(ticker)] = namn
-        print(f"  {len(_instrument_cache)} instrument i uppslagstabellen.")
+        if _ladda_instrument_cache_fil():
+            print(f"  {len(_instrument_cache)} instrument från lokal cache (< {INSTRUMENT_CACHE_TTL_TIMMAR} h).")
+        else:
+            print("  Hämtar hela instrumentlistan (en gång)...")
+            data = api_get("/market-data/instruments")
+            for item in (data or {}).get("instrumentDisplayDatas", []):
+                iid = item.get("instrumentID")
+                ticker = item.get("symbolFull")
+                if iid is not None and ticker:
+                    _instrument_cache[int(iid)] = str(ticker)
+                    if item.get("stocksIndustryID") is not None:
+                        _industry_cache[str(ticker)] = item["stocksIndustryID"]
+                    namn = _snygga_bolagsnamn(item.get("instrumentDisplayName"))
+                    if namn:
+                        _name_cache[str(ticker)] = namn
+            print(f"  {len(_instrument_cache)} instrument i uppslagstabellen.")
+            if _instrument_cache:          # spara bara en faktiskt fylld cache
+                _spara_instrument_cache_fil()
 
     missing = [int(i) for i in instrument_ids if int(i) not in _instrument_cache]
     if missing:
@@ -2601,17 +2650,14 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     # Hämta beständig historik (Render har tillfällig disk)
     gist_pull()
 
-    # §A Marknadsregim (SPY vs MA200) — oberoende av eToro-data, 1 yfinance-anrop
-    regim = compute_market_regime()
-    print(f"\nMarknadsregim: {regim['regim']} (SPY {regim['spy_pris']} vs MA200 {regim['spy_ma200']})"
-          + (f"  — {regim['notis']}" if regim.get("notis") else ""))
-
-    # Fear & Greed-index (CNN, inofficiell) — oberoende av eToro-data, rent
-    # informationsfält (ingen poäng-/regimpåverkan). Reservlogik körs nedan
-    # efter att prev laddats.
-    fear_greed = hamta_fear_greed()
-    if fear_greed:
-        print(f"Fear & Greed: {fear_greed['varde']} ({fear_greed['etikett']})")
+    # §A Marknadsregim och §0b Fear & Greed är oberoende av eToro-data — starta
+    # dem i bakgrunden så deras nätverksanrop (regim ~2,6 s yfinance, F&G ~0,2 s
+    # CNN) överlappar eToro-testet + portföljhämtningen nedan i stället för att
+    # köras före dem. Resultaten hämtas in efter portföljerna, före första bruk.
+    from concurrent.futures import ThreadPoolExecutor
+    _preamble_pool = ThreadPoolExecutor(max_workers=2)
+    regim_future = _preamble_pool.submit(compute_market_regime)
+    fear_greed_future = _preamble_pool.submit(hamta_fear_greed)
 
     print("\nTestar API-anslutning...")
     test = api_get("/market-data/search", {"query": "Apple"})
@@ -2628,7 +2674,6 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     # Portföljerna hämtas parallellt (6 sekventiella eToro-anrop ~17 s → ~3 s).
     # eToros 429/Retry-After hanteras redan i api_get. pool.map bevarar
     # PROFILES-ordningen så resultatet blir deterministiskt.
-    from concurrent.futures import ThreadPoolExecutor
     portfolios = {}
     port_meta = {}
     with ThreadPoolExecutor(max_workers=len(PROFILES)) as pool:
@@ -2640,6 +2685,15 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
             print(f"  {username}: {len(p)} innehav")
         else:
             print(f"  {username}: portföljen kunde inte hämtas")
+
+    # Hämta in bakgrundsresultaten (regim + F&G) som räknades under eToro-anropen.
+    regim = regim_future.result()
+    print(f"\nMarknadsregim: {regim['regim']} (SPY {regim['spy_pris']} vs MA200 {regim['spy_ma200']})"
+          + (f"  — {regim['notis']}" if regim.get("notis") else ""))
+    fear_greed = fear_greed_future.result()
+    if fear_greed:
+        print(f"Fear & Greed: {fear_greed['varde']} ({fear_greed['etikett']})")
+    _preamble_pool.shutdown()
 
     if not portfolios:
         raise RuntimeError("Inga portföljer kunde hämtas via eToro-API:et.")

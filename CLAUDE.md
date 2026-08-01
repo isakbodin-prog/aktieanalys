@@ -114,7 +114,12 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
 ## Pipeline (i skriptet)
 0. Marknadsregim (§A, UTBYGGNAD_regim_exit.md): index vs dess MA200 → GRÖN
    (över + stigande) / RÖD (under + fallande) / GUL (blandat, bara
-   varning) / OKÄND (hela kedjan missade, behandlas som GRÖN). REGIM_TICKER_
+   varning) / OKÄND (hela kedjan missade, behandlas som GRÖN).
+   PRESTANDA: regimen (§0) och Fear & Greed (§0b) är oberoende av eToro-data
+   och startas därför i en bakgrunds-ThreadPoolExecutor direkt efter gist_pull;
+   deras nätverksanrop (regim ~2,6 s yfinance, F&G ~0,2 s CNN) överlappar
+   eToro-testet + portföljhämtningen och hämtas in (.result()) efter
+   portföljerna, före första bruk. REGIM_TICKER_
    KEDJA provas i tur och ordning (SPY → ^GSPC → VOO → IVV, alla S&P 500 —
    identisk MA200-regim) så att en enskild blockerad ticker inte slår ut
    hela beräkningen (se § Kända miljöbegränsningar); regim_kalla anger
@@ -149,6 +154,11 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
    PRESTANDA: portföljerna hämtas parallellt (ThreadPoolExecutor, ~17 s
    sekventiellt → ~0,3 s). Instrumentlistan primas EN gång före loopen
    (resolve_instruments([])) så trådarna inte race:ar på cache-fyllningen.
+   Instrumentlistan cachas dessutom till lokal fil (INSTRUMENT_CACHE_FIL =
+   instrument_cache.json, TTL 24 h, gitignorerad) så en kall process laddar
+   de tre uppslagen från disk (~0,01 s) i stället för ~2 s API-hämtning;
+   trasig/gammal fil ignoreras tyst och faller tillbaka på API:et. På Renders
+   tillfälliga disk finns filen sällan kvar mellan kallstarter → där no-op.
 2. Konsensus: PROCENTUELLA trösklar med HYSTERES (ersatte MIN_PORTFOLIOS=3
    2026-07-13). KONSENSUS_ANDEL_IN=0.60 för att komma IN på listan,
    KONSENSUS_ANDEL_KVAR=0.50 för att LIGGA KVAR (kvarnivån gäller bara
@@ -339,5 +349,5 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
 - thomaspj_portfolio.xlsx — äldre manuell version (ersatt av Historik-fliken)
 
 ## Nästa steg
-1. Ev. cacha instrumentlistan lokalt (JSON-fil) för snabbare körningar
-2. Ev. schemalagd körning (cron/launchd) så historiken fylls på automatiskt
+1. Ev. schemalagd körning (cron/launchd) så historiken fylls på automatiskt
+   (klart: instrumentlistan cachas lokalt, se Pipeline steg 1)
