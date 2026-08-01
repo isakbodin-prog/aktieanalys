@@ -247,7 +247,12 @@ st.markdown(f"""
     .poang {{ width: 2.7rem; font-size: .92rem; }}
     .crek {{ width: auto; font-size: .56rem; letter-spacing: .05em; }}
     .trend {{ width: .9rem; }}
-    .detalj-inner {{ padding-left: 2.4rem; }}
+    .detalj-inner {{ padding-left: 2.4rem; padding-bottom: 1rem; }}
+    /* Tightare mobilrytm: mindre glapp mellan delarna */
+    [data-testid="stMainBlockContainer"] [data-testid="stVerticalBlock"] {{ gap: .6rem; }}
+    .hero-sub {{ margin-bottom: .9rem; }}
+    .nyckeltal {{ gap: .7rem 1.6rem; margin-bottom: .9rem; }}
+    .delpoang {{ gap: .35rem; }}
     .fg-mini {{ flex-wrap: wrap; }}
     .fg-mini-hint {{ display: none; }}   /* nå via VII · Sentiment i menyn */
     /* Mobil: dölj de breda tabellerna, visa kort/listor i stället */
