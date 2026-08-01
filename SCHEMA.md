@@ -16,6 +16,13 @@
 Notera datum + ändring varje gång ett fält som UI:t läser ändras
 (nytt/borttaget/omdöpt/typändrat). Nyast överst.
 
+- **2026-08-01** — Claude-analys: nytt fält `claude[tk].sammanfattning`
+  (str | null) — kort 1–2-menings-TL;DR om läget just nu, tänkt att visas
+  under en utfälld aktie på Bästa köp-fliken. Genereras i samma API-anrop
+  som den långa `analys`-texten (ingen extra kostnad). `CLAUDE_PROMPT_FORMAT_VERSION`
+  höjdes 2→3, så alla befintliga texter omanalyseras en gång automatiskt och
+  får fältet; `null` bara om modellen hoppade raden eller på texter som ännu
+  inte omanalyserats.
 - **2026-08-01** — Claude-triggerfilter: `claude[tk].indikator_snapshot`
   fick sex nya frysta nivåfält (`swing_hog_20d/60d`, `swing_lag_20d/60d`,
   `hog_52v`, `lag_52v`). Bryter dagens pris igenom en av dem omanalyseras
@@ -249,7 +256,8 @@ Nyckel = ticker (endast konsensusaktier, och bara de som analyserats).
 |---|---|---|
 | `rekommendation` | str | RÅ rekommendation: `"KÖP"`, `"AVVAKTA"`, `"SÄLJ"` eller `"?"`. Ändras ALDRIG av regimfiltret (mätserier/facit läser detta fältet). |
 | `rekommendation_visning` | str | **Visa detta i UI**, inte `rekommendation`. Identisk med `rekommendation` UTOM i RÖD regim på en Bästa köp-aktie med `"KÖP"` → blir `"KÖP (vänta på marknaden)"`. |
-| `analys` | str | Fri text (markdown-vänlig). |
+| `sammanfattning` | str \| null | Kort TL;DR på 1–2 meningar om läget just nu (trendfas + vad man ska göra) — kan läsas fristående utan den långa `analys`-texten, t.ex. under en utfälld aktie på Bästa köp-fliken. Sedan 2026-08-01. `null` på texter genererade före fältet (visa då inget, eller fall tillbaka på `analys`). Följer samma nivå-/valutaregler som `analys`. |
+| `analys` | str | Fri text (markdown-vänlig). Den fullständiga tekniska lägesbeskrivningen (fem delar); `sammanfattning` ovan är den korta versionen. |
 | `genererad` | str | ISO-datum då texten senast (om)genererades. |
 | `analys_alder_dagar` | int \| null | Dagar sedan `genererad`, beräknat varje körning (även för återanvända texter). `null` om `genererad` saknas. |
 | `modell` | str \| null | Modellen som skrev texten: `"claude-opus-4-8"` (grundanalys — aktien var "ny på listan") eller `"claude-sonnet-4-6"` (omanalys av befintlig aktie). `null` på texter från före Claude-triggerfiltret (2026-07-16). |

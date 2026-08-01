@@ -200,6 +200,11 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
    → momentum i trendens kontext (samma RSI betyder olika saker i trend
    vs. sidledes) → köptrigger (konkret villkor) → ogiltigt om (konkret
    nedsidesvillkor), följt av rekommendationsraden (KÖP/AVVAKTA/SÄLJ).
+   Samma anrop producerar även en kort SAMMANFATTNING (1–2 meningar om läget
+   just nu, ~30 ord) som parsas ut till claude[tk].sammanfattning (2026-08-01,
+   ingen extra tokenkostnad) — en fristående TL;DR för t.ex. Bästa köp-flikens
+   utfällda vy; skild från den långa analys-texten (se SCHEMA.md). Fältet är
+   backend-data; frontend renderar det.
    2026-07-19: ersatte en tidigare "domslut"-stil där enskilda indikatorer
    (t.ex. RSI översålt) kunde fälla en aktie med intakt trend till AVVAKTA/
    SÄLJ — rekommendationen ska nu spegla HELHETEN (totalpoäng + trendfas);

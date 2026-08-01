@@ -1472,7 +1472,7 @@ CLAUDE_MAX_TOKENS_NY = 2000
 # 2026-07-18, domslut → teknisk lägesbeskrivning med trigger/ogiltigt-villkor)
 # så att ALLA befintliga texter omanalyseras en gång automatiskt — se
 # behover_ny_analys. Inget manuellt --force-claude krävs.
-CLAUDE_PROMPT_FORMAT_VERSION = 2
+CLAUDE_PROMPT_FORMAT_VERSION = 3   # v3: kort SAMMANFATTNING-fält lades till (2026-08-01)
 
 
 def _bygg_indikator_snapshot(a, poang, viktad_konsensus, exit_flagga, regim_status=None):
@@ -1699,8 +1699,11 @@ def claude_analysis(jobb, körningsläge="standard"):
     tokenförbrukningspost (se logga_forbrukning).
 
     Returnerar (results, forbrukning):
-    - results: {ticker: {"rekommendation", "analys", "genererad", "modell",
-      "analys_orsak", "indikator_snapshot"}}.
+    - results: {ticker: {"rekommendation", "sammanfattning", "analys",
+      "genererad", "modell", "analys_orsak", "indikator_snapshot"}}.
+      "sammanfattning": 1–2 meningar om läget just nu (null om modellen
+      hoppade raden) — kort TL;DR för t.ex. Bästa köp-fliken, skild från
+      den långa "analys"-texten.
     - forbrukning: lista med en tokenförbrukningspost per lyckat anrop
       (se logga_forbrukning för fältformat). Saknas usage-objektet i
       API-svaret (äldre SDK e.d.) loggas posten ändå, med tokenfälten null
@@ -1774,9 +1777,15 @@ def claude_analysis(jobb, körningsläge="standard"):
         "löptext.\n\n"
         "Påminnelse: HELA texten (alla fem delar) får vara HÖGST 150 ord — räkna "
         "efter innan du svarar, korta ner om det behövs.\n\n"
-        "Svara EXAKT i detta format:\n"
+        "SAMMANFATTNING: skriv dessutom en fristående kortsammanfattning på HÖGST "
+        "två meningar (~30 ord) som fångar läget just nu — trendfasen plus vad man "
+        "ska göra (avvakta/köpläge vid X/sälj). Den ska kunna läsas ensam utan den "
+        "långa texten, följa samma nivå- och valutaregler, och räknas INTE in i "
+        "150-ordsgränsen ovan.\n\n"
+        "Svara EXAKT i detta format (tre delar, i denna ordning):\n"
         "REKOMMENDATION: <KÖP | AVVAKTA | SÄLJ>\n"
-        "<själva analysen>"
+        "SAMMANFATTNING: <högst två meningar om läget just nu>\n"
+        "<själva analysen (de fem delarna, löpande prosa)>"
     )
 
     from datetime import date, datetime
@@ -1806,12 +1815,23 @@ def claude_analysis(jobb, körningsläge="standard"):
             )
             text = next((b.text for b in resp.content if b.type == "text"), "").strip()
             rating = "?"
-            if text.upper().startswith("REKOMMENDATION:"):
-                first, _, rest = text.partition("\n")
-                rating = first.split(":", 1)[1].strip()
+            sammanfattning = None
+            # Konsumera ledande header-rader (REKOMMENDATION / SAMMANFATTNING) i
+            # valfri ordning och antal; resten är själva lägesbeskrivningen. Saknas
+            # SAMMANFATTNING (t.ex. modellen hoppade den) blir fältet null.
+            while True:
+                rad, _, rest = text.partition("\n")
+                övre = rad.upper()
+                if övre.startswith("REKOMMENDATION:"):
+                    rating = rad.split(":", 1)[1].strip()
+                elif övre.startswith("SAMMANFATTNING:"):
+                    sammanfattning = rad.split(":", 1)[1].strip() or None
+                else:
+                    break
                 text = rest.strip()
             results[ticker] = {
-                "rekommendation": rating, "analys": text, "genererad": idag,
+                "rekommendation": rating, "sammanfattning": sammanfattning,
+                "analys": text, "genererad": idag,
                 "modell": modell, "analys_orsak": orsak,
                 "indikator_snapshot": job.get("snapshot"),
             }
