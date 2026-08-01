@@ -10,6 +10,7 @@ Den öppnas i webbläsaren på http://localhost:8501.
 Nycklarna läses från .env-filen precis som för etoro_analys.py.
 """
 
+import html
 import json
 import os
 
@@ -127,6 +128,10 @@ st.markdown(f"""
   .dp .dpval {{ width: 3rem; text-align: right; color: {MUTED}; flex: 0 0 auto; }}
   .detalj .meta {{ margin-top: 1.1rem; font-family: 'Space Grotesk', sans-serif;
       font-size: .68rem; letter-spacing: .03em; color: {MUTED}; }}
+  /* Claudes korta TL;DR (claude[tk].sammanfattning) längst ner i utfällningen */
+  .detalj .ctldr {{ margin-top: 1.4rem; padding-left: .9rem;
+      border-left: 2px solid {HAIRLINE}; font-family: 'Newsreader', serif;
+      font-size: 1.02rem; line-height: 1.5; color: {TEXT}; max-width: 620px; }}
 
   /* ---- Diskret, numrerat dragspel för övriga vyer ---- */
   [data-testid="stMainBlockContainer"] [data-testid="stExpander"] {{ border: none !important; }}
@@ -467,7 +472,7 @@ def _sv1(v):
     return f"{v:.1f}".replace(".", ",")
 
 
-def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max):
+def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max, analys_map):
     """Bästa köp som redaktionell hover/klick-lista (ren HTML/CSS, inga widgets).
 
     Varje aktie visar bara ticker, poängmätare och Claude-rek; detaljerna
@@ -478,7 +483,8 @@ def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max):
     for i, r in enumerate(ranking, start=1):
         tk = r["ticker"]
         poang = r["poäng"]
-        crek = (claude_map.get(tk) or {}).get("rekommendation", "—")
+        cl = claude_map.get(tk) or {}
+        crek = cl.get("rekommendation", "—")
         farg = rek_farg.get(crek, MUTED)
         if r["trend_ok"]:
             trendmark = f'<span class="trend" style="color:{MOSS}">▲</span>'
@@ -515,6 +521,35 @@ def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max):
         else:
             meta = "Kluster: ensam"
 
+        # Claudes korta TL;DR (SCHEMA: claude[tk].sammanfattning, str | null).
+        # null → visa inget (fältet fylls i vid nästa backend-körning).
+        sammanfattning = cl.get("sammanfattning")
+        tldr_html = ""
+        if sammanfattning:
+            a = analys_map.get(tk) or {}
+            pris = a.get("pris")
+            kurs = (_num(pris, f" {a.get('valuta') or ''}".rstrip(), dec=2)
+                    if pris is not None else None)
+            bolagsnamn = a.get("bolagsnamn")  # SCHEMA: analyses[tk].bolagsnamn (str | null)
+            if bolagsnamn:
+                # Inled alltid med bolagsnamnet (+ kurs inom parentes). Släng en
+                # inledande ticker/namn-dubblett ur prosan så det inte upprepas.
+                forsta, _, resten = sammanfattning.partition(" ")
+                forsta_ren = forsta.strip(".,:;").upper()
+                droppa = forsta_ren in (tk.upper(), bolagsnamn.split(" ")[0].upper())
+                kropp = resten if (droppa and resten) else sammanfattning
+                prefix = f"{bolagsnamn} ({kurs})" if kurs else bolagsnamn
+                text = f"{prefix} {kropp}"
+            elif kurs:
+                # Inget bolagsnamnsfält ännu → kurs inom parentes efter inledande ordet.
+                ord_delar = sammanfattning.split(" ", 1)
+                text = (f"{ord_delar[0]} ({kurs}) {ord_delar[1]}"
+                        if len(ord_delar) == 2 else f"{sammanfattning} ({kurs})")
+            else:
+                text = sammanfattning
+            tldr_html = (f'<div class="ctldr" style="border-color:{farg}">'
+                         f'{html.escape(text)}</div>')
+
         rader.append(
             f'<div class="stock">'
             f'<input type="checkbox" id="st_{tk}" class="stoggle">'
@@ -529,6 +564,7 @@ def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max):
             f'<div class="nyckeltal">{nyckel_html}</div>'
             f'<div class="delpoang">{dp_html}</div>'
             f'<div class="meta">{meta}</div>'
+            f'{tldr_html}'
             f'</div></div></div>')
     return f'<div class="stocklist">{"".join(rader)}</div>'
 
@@ -826,7 +862,7 @@ if view == "Bästa köp":
             with st.container(key="rapportbadge"):
                 st.caption(f":material/event_upcoming: **Rapport inom en vecka:** {badges}")
 
-        st.markdown(hero_html(ranking, claude, consensus, bransch, KOMP_MAX), unsafe_allow_html=True)
+        st.markdown(hero_html(ranking, claude, consensus, bransch, KOMP_MAX, analyses), unsafe_allow_html=True)
 
         with st.container(key="poangexp"), st.popover("Så räknas poängen"):
             st.caption(
