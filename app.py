@@ -472,7 +472,7 @@ def _sv1(v):
     return f"{v:.1f}".replace(".", ",")
 
 
-def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max):
+def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max, analys_map):
     """Bästa köp som redaktionell hover/klick-lista (ren HTML/CSS, inga widgets).
 
     Varje aktie visar bara ticker, poängmätare och Claude-rek; detaljerna
@@ -526,8 +526,19 @@ def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max):
         sammanfattning = cl.get("sammanfattning")
         tldr_html = ""
         if sammanfattning:
+            text = sammanfattning
+            # Senaste kurs inom parentes direkt efter det inledande kortnamnet.
+            a = analys_map.get(tk) or {}
+            pris = a.get("pris")
+            if pris is not None:
+                kurs = _num(pris, f" {a.get('valuta') or ''}".rstrip(), dec=2)
+                ord_delar = text.split(" ", 1)
+                if len(ord_delar) == 2:
+                    text = f"{ord_delar[0]} ({kurs}) {ord_delar[1]}"
+                else:
+                    text = f"{text} ({kurs})"
             tldr_html = (f'<div class="ctldr" style="border-color:{farg}">'
-                         f'{html.escape(sammanfattning)}</div>')
+                         f'{html.escape(text)}</div>')
 
         rader.append(
             f'<div class="stock">'
@@ -841,7 +852,7 @@ if view == "Bästa köp":
             with st.container(key="rapportbadge"):
                 st.caption(f":material/event_upcoming: **Rapport inom en vecka:** {badges}")
 
-        st.markdown(hero_html(ranking, claude, consensus, bransch, KOMP_MAX), unsafe_allow_html=True)
+        st.markdown(hero_html(ranking, claude, consensus, bransch, KOMP_MAX, analyses), unsafe_allow_html=True)
 
         with st.container(key="poangexp"), st.popover("Så räknas poängen"):
             st.caption(
