@@ -823,24 +823,6 @@ if view == "Bästa köp":
         'på en aktie för poänguppdelning och nyckeltal.</div>',
         unsafe_allow_html=True,
     )
-    # Marknadssentiment (Fear & Greed): precis under rubriken, utfällbar mätare.
-    _fg = data.get("fear_greed")
-    if _fg and _fg.get("varde") is not None:
-        _fgv = _fg["varde"]
-        _fge = _fg.get("etikett") or fg_zon(_fgv)[0]
-        _fgf = fg_zon(_fgv)[1]
-        with st.container(key="fgexp"):
-            with st.expander(f"Marknadssentiment · {_fgv:.0f} · {_fge}"):
-                _fgc = st.columns([1, 4, 1])
-                with _fgc[1]:
-                    st.plotly_chart(fear_greed_gauge(_fgv), use_container_width=True,
-                                    config={"displayModeBar": False})
-                    st.markdown(f'<div class="fg-etikett" style="color:{_fgf}">{_fge}</div>',
-                                unsafe_allow_html=True)
-                st.caption("Full vy med historik under **VII · Sentiment**.")
-        # Färga sammanfattningsraden i zonens färg.
-        st.markdown(f"<style>.st-key-fgexp summary {{ color: {_fgf} !important; }}</style>",
-                    unsafe_allow_html=True)
 
     if not ranking:
         st.info("Ingen rangordning i senaste körningen — kör en ny analys.")
@@ -863,6 +845,25 @@ if view == "Bästa köp":
                 st.caption(f":material/event_upcoming: **Rapport inom en vecka:** {badges}")
 
         st.markdown(hero_html(ranking, claude, consensus, bransch, KOMP_MAX, analyses), unsafe_allow_html=True)
+
+        # Marknadssentiment (Fear & Greed): direkt under aktielistan, utfällbar mätare.
+        _fg = data.get("fear_greed")
+        if _fg and _fg.get("varde") is not None:
+            _fgv = _fg["varde"]
+            _fge = _fg.get("etikett") or fg_zon(_fgv)[0]
+            _fgf = fg_zon(_fgv)[1]
+            with st.container(key="fgexp"):
+                with st.expander(f"Marknadssentiment · {_fgv:.0f} · {_fge}"):
+                    _fgc = st.columns([1, 4, 1])
+                    with _fgc[1]:
+                        st.plotly_chart(fear_greed_gauge(_fgv), use_container_width=True,
+                                        config={"displayModeBar": False})
+                        st.markdown(f'<div class="fg-etikett" style="color:{_fgf}">{_fge}</div>',
+                                    unsafe_allow_html=True)
+                    st.caption("Full vy med historik under **VII · Sentiment**.")
+            # Färga sammanfattningsraden i zonens färg.
+            st.markdown(f"<style>.st-key-fgexp summary {{ color: {_fgf} !important; }}</style>",
+                        unsafe_allow_html=True)
 
         with st.container(key="poangexp"), st.popover("Så räknas poängen"):
             st.caption(
