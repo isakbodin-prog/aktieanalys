@@ -817,7 +817,13 @@ st.markdown(
 # VY: Bästa köp — hjälte + senaste händelser
 # ======================================================================
 if view == "Bästa köp":
-    # Marknadssentiment (Fear & Greed): sammanfattning på förstasidan, utfällbar mätare.
+    st.markdown(
+        '<div class="hero-title">Bästa köp</div>'
+        '<div class="hero-sub">Sammanvägd poäng 0–100. Håll muspekaren över eller klicka '
+        'på en aktie för poänguppdelning och nyckeltal.</div>',
+        unsafe_allow_html=True,
+    )
+    # Marknadssentiment (Fear & Greed): precis under rubriken, utfällbar mätare.
     _fg = data.get("fear_greed")
     if _fg and _fg.get("varde") is not None:
         _fgv = _fg["varde"]
@@ -835,12 +841,6 @@ if view == "Bästa köp":
         # Färga sammanfattningsraden i zonens färg.
         st.markdown(f"<style>.st-key-fgexp summary {{ color: {_fgf} !important; }}</style>",
                     unsafe_allow_html=True)
-    st.markdown(
-        '<div class="hero-title">Bästa köp</div>'
-        '<div class="hero-sub">Sammanvägd poäng 0–100. Håll muspekaren över eller klicka '
-        'på en aktie för poänguppdelning och nyckeltal.</div>',
-        unsafe_allow_html=True,
-    )
 
     if not ranking:
         st.info("Ingen rangordning i senaste körningen — kör en ny analys.")
