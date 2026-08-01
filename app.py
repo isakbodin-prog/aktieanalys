@@ -75,17 +75,22 @@ st.markdown(f"""
       letter-spacing: .01em; margin: 0 auto 1.7rem; max-width: 900px; line-height: 1.5; }}
 
   .stocklist {{ margin: .2rem auto .5rem; max-width: 900px; }}
-  /* Sentiment-utfäll, rapportnotis och poäng-popover centreras med hjälten (900px) */
-  .st-key-fgexp, .st-key-rapportbadge, .st-key-poangexp {{
+  /* Sentiment-utfäll och rapportnotis centreras med hjälten (900px) */
+  .st-key-fgexp, .st-key-rapportbadge {{
       max-width: 900px; margin-left: auto !important; margin-right: auto !important; }}
   .st-key-rapportbadge {{ text-align: center; }}
   .st-key-rapportbadge [data-testid="stCaptionContainer"] {{ justify-content: center; }}
-  /* "Så räknas poängen": vänsterställd, samma typsnitt/storlek som hero-sub. */
-  .st-key-poangexp {{ align-items: flex-start; }}
-  [data-testid="stMainBlockContainer"] .st-key-poangexp [data-testid="stPopover"] button {{
-      font-family: 'Space Grotesk', sans-serif !important;
-      font-size: .8rem !important; letter-spacing: .01em !important;
-      padding-left: .1rem !important; }}
+  /* "Så räknas poängen" — inline i underrubriken (native details/summary),
+     samma typsnitt/storlek (ärvs från .hero-sub), understruken som en länk. */
+  .hero-sub .poang-inline {{ display: inline; }}
+  .hero-sub .poang-inline > summary {{ display: inline; cursor: pointer; list-style: none;
+      text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }}
+  .hero-sub .poang-inline > summary::-webkit-details-marker {{ display: none; }}
+  .hero-sub .poang-inline > summary::marker {{ content: ""; }}
+  .hero-sub .poang-inline[open] > summary {{ color: {TEXT}; }}
+  .hero-sub .poang-text {{ display: block; margin-top: .7rem; max-width: 640px;
+      font-size: .74rem; line-height: 1.55; letter-spacing: 0; }}
+  .hero-sub .poang-text strong {{ color: {TEXT}; font-weight: 500; }}
   /* Sentiment-expandern på Bästa köp ska INTE ärva dragspelets topp-hårlinje.
      Den globala dragspelsregeln nedan har prefixet stMainBlockContainer och
      högre specificitet — matcha samma prefix + .st-key-fgexp för att vinna. */
@@ -230,12 +235,22 @@ st.markdown(f"""
       padding-top: .5rem !important; overflow: visible !important; }}
   .st-key-navbox [data-testid="stElementContainer"], .st-key-navbox .stButton {{
       width: auto !important; overflow: visible !important; }}
+  /* Hamburgerknappen (bara mobil) — diskret, textlik. */
+  .st-key-mobtoggle button {{ font-family: 'Space Grotesk', sans-serif !important;
+      text-transform: uppercase; letter-spacing: .14em; font-size: .72rem !important;
+      color: {TEXT} !important; background: transparent !important; border: none !important;
+      box-shadow: none !important; padding: .3rem .1rem !important; min-height: 0 !important; }}
 
   /* ---- Mobil: mindre marginal, kompaktare Bästa köp-rad ---- */
   @media (max-width: 640px) {{
     [data-testid="stMainBlockContainer"], .block-container {{
         padding-left: 1.1rem !important; padding-right: 1.1rem !important; }}
     .fullrule {{ margin-left: -1.1rem; margin-right: -1.1rem; }}
+    /* Hopfällbar meny: navbox dold tills hamburgaren öppnar den → vertikal lista */
+    .st-key-navbox {{ display: none !important; flex-direction: column !important;
+        align-items: flex-start !important; gap: .1rem !important; }}
+    [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button {{
+        font-size: .82rem !important; letter-spacing: .1em; padding: .5rem .1rem !important; }}
     .hero-title {{ font-size: 1.9rem; }}
     .rad {{ gap: .55rem; padding: .7rem .05rem; }}
     .meter {{ display: none; }}          /* poängsiffran räcker; frigör bredd */
@@ -262,7 +277,7 @@ st.markdown(f"""
   /* Aktiekort (mobil) — tabellersättning. Döljs på desktop. */
   .mobilkort {{ margin: .2rem 0 .5rem; }}
   /* Element som bara ska visas på mobil (döljs på desktop) */
-  @media (min-width: 641px) {{ .mobilkort, .mobilonly {{ display: none !important; }} }}
+  @media (min-width: 641px) {{ .mobilkort, .mobilonly, .st-key-mobtoggle {{ display: none !important; }} }}
 
   /* Historik-logg (mobil) — kompakt lista i stället för bred tabell */
   .logglista {{ margin: .2rem 0 .5rem; }}
@@ -764,16 +779,25 @@ VYER = [
     ("Sentiment", "VII · Sentiment"),
 ]
 st.session_state.setdefault("view", "Bästa köp")
+st.session_state.setdefault("mobmeny_open", False)
 
 hcol1, hcol2 = st.columns([2, 8], vertical_alignment="top")
 with hcol1:
     st.markdown('<div class="wordmark">eToro Portföljanalys</div>', unsafe_allow_html=True)
 with hcol2:
+    # Hamburgerknapp — bara synlig på mobil (CSS); togglar navbox.
+    with st.container(key="mobtoggle"):
+        if st.button("✕  Meny" if st.session_state["mobmeny_open"] else "☰  Meny",
+                     key="mobmeny_btn"):
+            st.session_state["mobmeny_open"] = not st.session_state["mobmeny_open"]
+            st.rerun()
     # Menypunkterna flödar som en rad (flex-wrap) — radbryter på smala skärmar.
+    # På mobil dold som standard; visas när mobmeny_open (stil injiceras nedan).
     with st.container(key="navbox"):
         for _key, _label in VYER:
             if st.button(_label, key=f"nav_{_navslug(_key)}"):
                 st.session_state["view"] = _key
+                st.session_state["mobmeny_open"] = False   # fäll ihop efter val
                 st.rerun()
 
 # Understryk den aktiva menypunkten (dynamiskt per vy).
@@ -783,6 +807,12 @@ st.markdown(
     f"border-bottom: 1px solid {TEXT} !important; }}</style>",
     unsafe_allow_html=True,
 )
+# Fäll ut mobilmenyn när den är öppen (bara mobil).
+if st.session_state["mobmeny_open"]:
+    st.markdown(
+        "<style>@media (max-width: 640px) { .st-key-navbox { display: flex !important; } }</style>",
+        unsafe_allow_html=True,
+    )
 
 st.markdown('<hr class="fullrule">', unsafe_allow_html=True)
 
@@ -825,25 +855,26 @@ st.markdown(
 # VY: Bästa köp — hjälte + senaste händelser
 # ======================================================================
 if view == "Bästa köp":
+    # "Så räknas poängen" ligger inline direkt efter underrubriken (native
+    # <details>/<summary> → samma rad, expanderar poängförklaringen utan rerun).
     st.markdown(
         '<div class="hero-title">Bästa köp</div>'
         '<div class="hero-sub">Sammanvägd poäng 0–100. Håll muspekaren över eller klicka '
-        'på en aktie för poänguppdelning och nyckeltal.</div>',
+        'på en aktie för poänguppdelning och nyckeltal. '
+        '<details class="poang-inline"><summary>Så räknas poängen</summary>'
+        '<span class="poang-text">'
+        '<strong>Poängmodellen (§12, omviktad):</strong> Trend 25 p · Momentum 20 p '
+        '(inkl. relativ styrka mot sektor-ETF) · Analytiker 20 p (uppsida — halverad vid '
+        'hög riktkursspridning — antal analytiker, köprekommendation, EPS-revidering) · '
+        'Konsensus 25 p (viktad konsensus, snittvikt, nettoflöde 30d) — delat med '
+        '√klusterstorlek om aktien samvarierar starkt (korr &gt; 0,7) med andra '
+        'konsensusaktier · Värdering 10 p (forward P/E mot sektormedian, PEG). '
+        '<strong>Poäng v1</strong> är förra modellen (utan Värdering/RS/spridning) — kvar '
+        'för jämförelse tills --utvardera hunnit kalibrera de nya vikterna. '
+        'Aktier utan stigande trend rankas alltid sist, oavsett poäng.'
+        '</span></details></div>',
         unsafe_allow_html=True,
     )
-    # "Så räknas poängen" direkt under underrubriken, samma typsnitt/storlek.
-    with st.container(key="poangexp"), st.popover("Så räknas poängen"):
-        st.caption(
-            "**Poängmodellen (§12, omviktad):** Trend 25 p · Momentum 20 p (inkl. relativ "
-            "styrka mot sektor-ETF) · Analytiker 20 p (uppsida — halverad vid hög "
-            "riktkursspridning — antal analytiker, köprekommendation, EPS-revidering) · "
-            "Konsensus 25 p (viktad konsensus, snittvikt, nettoflöde 30d) — delat med "
-            "√klusterstorlek om aktien samvarierar starkt (korr > 0,7) med andra "
-            "konsensusaktier · Värdering 10 p (forward P/E mot sektormedian, PEG). "
-            "**Poäng v1** är förra modellen (utan Värdering/RS/spridning) — kvar för "
-            "jämförelse tills --utvardera hunnit kalibrera de nya vikterna. "
-            "Aktier utan stigande trend rankas alltid sist, oavsett poäng."
-        )
 
     if not ranking:
         st.info("Ingen rangordning i senaste körningen — kör en ny analys.")
