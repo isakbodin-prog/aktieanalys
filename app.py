@@ -146,14 +146,10 @@ st.markdown(f"""
       text-transform: uppercase; letter-spacing: .16em; font-size: .74rem; color: {TEXT}; }}
   [data-testid="stMainBlockContainer"] [data-testid="stExpander"] summary:hover {{ color: {OLIV}; }}
 
-  /* sidfoten */
-  .appfot {{ display: flex; justify-content: space-between; flex-wrap: wrap;
-      gap: .5rem 2rem; margin: 1.4rem 0 1rem; color: {MUTED};
-      font-family: 'Space Grotesk', sans-serif; font-size: .72rem; letter-spacing: .06em;
+  /* sidfoten — en diskret, centrerad rad (bara datafärskhet) */
+  .appfot {{ text-align: center; margin: 1.4rem 0 1.6rem; color: {MUTED};
+      font-family: 'Space Grotesk', sans-serif; font-size: .68rem; letter-spacing: .07em;
       text-transform: uppercase; }}
-  .appfot .mitt {{ text-align: center; text-transform: none; letter-spacing: .02em; }}
-  .appfot-sub {{ text-align: center; color: {MUTED}; font-family: 'Space Grotesk', sans-serif;
-      font-size: .66rem; letter-spacing: .07em; text-transform: uppercase; margin: .5rem 0 1.6rem; }}
   .footctrl-label {{ font-family: 'Newsreader', Georgia, serif; font-size: .95rem; color: {MUTED};
       letter-spacing: .01em; }}
 
@@ -1584,18 +1580,6 @@ with fcol_r:
                 use_container_width=True,
             )
 
-from datetime import date as _date_fot
-
 _cd = data.get("claude_datum")
 _dl = f"Data {data['tidpunkt'].replace('T', ' kl. ')}" + (f" · Claude {_cd}" if _cd else "")
-st.markdown(
-    f"""
-    <div class="appfot">
-      <span>{_dl}</span>
-      <span class="mitt">eToro Portföljanalys — All Rights Reserved © {_date_fot.today().year}</span>
-      <span>Data: eToro · Yahoo Finance &nbsp;·&nbsp; Analys: Claude</span>
-    </div>
-    <div class="appfot-sub">Bevakar {" · ".join(ea.PROFILES)}</div>
-    """,
-    unsafe_allow_html=True,
-)
+st.markdown(f'<div class="appfot">{_dl}</div>', unsafe_allow_html=True)
