@@ -128,8 +128,8 @@ st.markdown(f"""
   .dp .dpval {{ width: 3rem; text-align: right; color: {MUTED}; flex: 0 0 auto; }}
   .detalj .meta {{ margin-top: 1.1rem; font-family: 'Space Grotesk', sans-serif;
       font-size: .68rem; letter-spacing: .03em; color: {MUTED}; }}
-  /* Claudes korta TL;DR (claude[tk].sammanfattning) överst i utfällningen */
-  .detalj .ctldr {{ margin-bottom: 1.4rem; padding-left: .9rem;
+  /* Claudes korta TL;DR (claude[tk].sammanfattning) längst ner i utfällningen */
+  .detalj .ctldr {{ margin-top: 1.4rem; padding-left: .9rem;
       border-left: 2px solid {HAIRLINE}; font-family: 'Newsreader', serif;
       font-size: 1.02rem; line-height: 1.5; color: {TEXT}; max-width: 620px; }}
 
@@ -540,10 +540,10 @@ def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max):
             f'<span class="crek" style="color:{farg}">{crek}</span>{trendmark}'
             f'</label>'
             f'<div class="detalj"><div class="detalj-inner">'
-            f'{tldr_html}'
             f'<div class="nyckeltal">{nyckel_html}</div>'
             f'<div class="delpoang">{dp_html}</div>'
             f'<div class="meta">{meta}</div>'
+            f'{tldr_html}'
             f'</div></div></div>')
     return f'<div class="stocklist">{"".join(rader)}</div>'
 
