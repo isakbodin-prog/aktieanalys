@@ -2619,13 +2619,27 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
         raise RuntimeError("eToro-anslutningen misslyckades. Kontrollera nycklarna i .env.")
     print("Anslutning OK!")
 
+    # Instrumentlistan hämtas EN gång före den parallella loopen. Annars skulle
+    # de samtidiga get_portfolio-anropen race:a på cache-fyllningen i
+    # resolve_instruments och var och en trigga sin egen ~16k-hämtning; efter
+    # priming läser trådarna bara ur cachen (trådsäkert).
+    resolve_instruments([])
+
+    # Portföljerna hämtas parallellt (6 sekventiella eToro-anrop ~17 s → ~3 s).
+    # eToros 429/Retry-After hanteras redan i api_get. pool.map bevarar
+    # PROFILES-ordningen så resultatet blir deterministiskt.
+    from concurrent.futures import ThreadPoolExecutor
     portfolios = {}
     port_meta = {}
-    for username in PROFILES:
-        p, meta = get_portfolio(username)
+    with ThreadPoolExecutor(max_workers=len(PROFILES)) as pool:
+        hämtade = list(pool.map(lambda u: (u, *get_portfolio(u, quiet=True)), PROFILES))
+    for username, p, meta in hämtade:
         if p:
             portfolios[username] = p
             port_meta[username] = meta or {}
+            print(f"  {username}: {len(p)} innehav")
+        else:
+            print(f"  {username}: portföljen kunde inte hämtas")
 
     if not portfolios:
         raise RuntimeError("Inga portföljer kunde hämtas via eToro-API:et.")
@@ -2688,17 +2702,30 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     if fear_greed and fear_greed.get("notis"):
         print(f"    Fear & Greed: {fear_greed['notis']}")
 
-    # Teknisk analys + analytikerdata
+    # Teknisk analys + analytikerdata — körs parallellt (4 sekventiella
+    # yfinance-anrop ~18 s → ~5 s). Konservativ pool + liten stagger mellan
+    # submits så vi inte fyrar iväg alla Yahoo-anrop exakt samtidigt (den
+    # tidigare sleep(1.5) fyllde samma funktion sekventiellt). OBS: Yahoos
+    # IP-blockering på molnservrar (§ Kända miljöbegränsningar) beror på IP,
+    # inte på parallelliteten — fältvis fallback nedan täcker den oförändrat.
     import time
+    from concurrent.futures import ThreadPoolExecutor
+    print(f"Analyserar {len(consensus)} aktier (parallellt)...")
     analyses = {}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {}
+        for i, ticker in enumerate(consensus):
+            if i:
+                time.sleep(0.4)   # stagger så starterna sprids ut något
+            futures[pool.submit(analyze_ticker, ticker)] = ticker
+        for fut, ticker in futures.items():   # submit-ordning bevaras
+            analyses[ticker] = fut.result()
     for ticker in consensus:
-        print(f"Analyserar {ticker}...")
-        analyses[ticker] = analyze_ticker(ticker)
-        if "error" in analyses[ticker]:
-            print(f"    FEL för {ticker}: {analyses[ticker]['error']}")
-        elif analyses[ticker].get("datakälla") != "Yahoo":
-            print(f"    (Yahoo blockerade — data från {analyses[ticker]['datakälla']})")
-        time.sleep(1.5)   # snäll paus så Yahoo inte strypmarkerar oss
+        a = analyses[ticker]
+        if "error" in a:
+            print(f"    FEL för {ticker}: {a['error']}")
+        elif a.get("datakälla") != "Yahoo":
+            print(f"    ({ticker}: Yahoo blockerade — data från {a['datakälla']})")
 
     # Fallerar båda datakällorna (t.ex. Alpha Vantages dagsgräns på 25 anrop)?
     # Återanvänd då hela förra körningens analys i stället för en tom rad.

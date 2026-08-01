@@ -145,7 +145,10 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
    Saknas både ny och tidigare data blir fältet null (appen döljer då
    widgeten). Skrivs till result["fear_greed"]. Frontend bygger UI mot
    SCHEMA.md, ingen UI-kod i backend-sessionen.
-1. Hämta 5 portföljer → aggregera investmentPct per instrumentId
+1. Hämta 5 portföljer → aggregera investmentPct per instrumentId.
+   PRESTANDA: portföljerna hämtas parallellt (ThreadPoolExecutor, ~17 s
+   sekventiellt → ~0,3 s). Instrumentlistan primas EN gång före loopen
+   (resolve_instruments([])) så trådarna inte race:ar på cache-fyllningen.
 2. Konsensus: PROCENTUELLA trösklar med HYSTERES (ersatte MIN_PORTFOLIOS=3
    2026-07-13). KONSENSUS_ANDEL_IN=0.60 för att komma IN på listan,
    KONSENSUS_ANDEL_KVAR=0.50 för att LIGGA KVAR (kvarnivån gäller bara
@@ -166,7 +169,12 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
    loggas bara mellan körningar med samma regel, så en omdefinition
    spammar inte "Lämnat listorna". IN/UT-poster anger tillämpad tröskel.
 3. Teknisk analys via yfinance: RSI14, MA50/MA200, golden cross, MACD,
-   Bollingerband, 52v-nivåer, 1m/3m-momentum, volymtrend
+   Bollingerband, 52v-nivåer, 1m/3m-momentum, volymtrend.
+   PRESTANDA: konsensusaktierna analyseras parallellt (ThreadPoolExecutor,
+   max_workers=4 + liten stagger mellan submits, ~18 s → ~10 s). Den gamla
+   sleep(1.5) mellan tickers är borta; staggern fyller samma "var snäll mot
+   Yahoo"-roll. Yahoos IP-blockering (§ Kända miljöbegränsningar) beror på
+   IP, inte parallellitet, och täcks oförändrat av fältvis fallback nedan.
 4. Analytikerdata via yfinance: rekommendation, riktkurs, uppsida %, EPS-rev,
    forward P/E, PEG, riktkursspridning, nästa rapport, sektor. Alla dessa
    fält (och SPY-regimen i steg 0) kan falla bort tyst om Yahoo blockerar/
