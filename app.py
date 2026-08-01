@@ -80,7 +80,10 @@ st.markdown(f"""
       max-width: 900px; margin-left: auto !important; margin-right: auto !important; }}
   .st-key-rapportbadge {{ text-align: center; }}
   .st-key-rapportbadge [data-testid="stCaptionContainer"] {{ justify-content: center; }}
-  .st-key-poangexp {{ align-items: center; }}
+  /* "Så räknas poängen": vänsterställd (som listan) och mindre text. */
+  .st-key-poangexp {{ align-items: flex-start; }}
+  [data-testid="stMainBlockContainer"] .st-key-poangexp [data-testid="stPopover"] button {{
+      font-size: .68rem !important; padding-left: .1rem !important; }}
   /* Sentiment-expandern på Bästa köp ska INTE ärva dragspelets topp-hårlinje.
      Den globala dragspelsregeln nedan har prefixet stMainBlockContainer och
      högre specificitet — matcha samma prefix + .st-key-fgexp för att vinna. */
@@ -143,14 +146,10 @@ st.markdown(f"""
       text-transform: uppercase; letter-spacing: .16em; font-size: .74rem; color: {TEXT}; }}
   [data-testid="stMainBlockContainer"] [data-testid="stExpander"] summary:hover {{ color: {OLIV}; }}
 
-  /* sidfoten */
-  .appfot {{ display: flex; justify-content: space-between; flex-wrap: wrap;
-      gap: .5rem 2rem; margin: 1.4rem 0 1rem; color: {MUTED};
-      font-family: 'Space Grotesk', sans-serif; font-size: .72rem; letter-spacing: .06em;
+  /* sidfoten — en diskret, centrerad rad (bara datafärskhet) */
+  .appfot {{ text-align: center; margin: 1.4rem 0 1.6rem; color: {MUTED};
+      font-family: 'Space Grotesk', sans-serif; font-size: .68rem; letter-spacing: .07em;
       text-transform: uppercase; }}
-  .appfot .mitt {{ text-align: center; text-transform: none; letter-spacing: .02em; }}
-  .appfot-sub {{ text-align: center; color: {MUTED}; font-family: 'Space Grotesk', sans-serif;
-      font-size: .66rem; letter-spacing: .07em; text-transform: uppercase; margin: .5rem 0 1.6rem; }}
   .footctrl-label {{ font-family: 'Newsreader', Georgia, serif; font-size: .95rem; color: {MUTED};
       letter-spacing: .01em; }}
 
@@ -244,7 +243,12 @@ st.markdown(f"""
     .poang {{ width: 2.7rem; font-size: .92rem; }}
     .crek {{ width: auto; font-size: .56rem; letter-spacing: .05em; }}
     .trend {{ width: .9rem; }}
-    .detalj-inner {{ padding-left: 2.4rem; }}
+    .detalj-inner {{ padding-left: 2.4rem; padding-bottom: 1rem; }}
+    /* Tightare mobilrytm: mindre glapp mellan delarna */
+    [data-testid="stMainBlockContainer"] [data-testid="stVerticalBlock"] {{ gap: .6rem; }}
+    .hero-sub {{ margin-bottom: .9rem; }}
+    .nyckeltal {{ gap: .7rem 1.6rem; margin-bottom: .9rem; }}
+    .delpoang {{ gap: .35rem; }}
     .fg-mini {{ flex-wrap: wrap; }}
     .fg-mini-hint {{ display: none; }}   /* nå via VII · Sentiment i menyn */
     /* Mobil: dölj de breda tabellerna, visa kort/listor i stället */
@@ -616,7 +620,9 @@ def fear_greed_gauge(varde):
         },
         domain={"x": [0, 1], "y": [0, 1]},
     ))
-    fig.update_layout(height=270, margin=dict(l=24, r=24, t=6, b=0),
+    # t-marginalen måste rymma de översta zonetiketterna (45/55) — annars klipps
+    # de av figurkanten. Höjden höjs lika mycket så själva bågen behåller storleken.
+    fig.update_layout(height=300, margin=dict(l=24, r=24, t=34, b=0),
                       paper_bgcolor="rgba(0,0,0,0)", font={"family": "Space Grotesk"})
     return fig
 
@@ -817,24 +823,6 @@ st.markdown(
 # VY: Bästa köp — hjälte + senaste händelser
 # ======================================================================
 if view == "Bästa köp":
-    # Marknadssentiment (Fear & Greed): sammanfattning på förstasidan, utfällbar mätare.
-    _fg = data.get("fear_greed")
-    if _fg and _fg.get("varde") is not None:
-        _fgv = _fg["varde"]
-        _fge = _fg.get("etikett") or fg_zon(_fgv)[0]
-        _fgf = fg_zon(_fgv)[1]
-        with st.container(key="fgexp"):
-            with st.expander(f"Marknadssentiment · {_fgv:.0f} · {_fge}"):
-                _fgc = st.columns([1, 4, 1])
-                with _fgc[1]:
-                    st.plotly_chart(fear_greed_gauge(_fgv), use_container_width=True,
-                                    config={"displayModeBar": False})
-                    st.markdown(f'<div class="fg-etikett" style="color:{_fgf}">{_fge}</div>',
-                                unsafe_allow_html=True)
-                st.caption("Full vy med historik under **VII · Sentiment**.")
-        # Färga sammanfattningsraden i zonens färg.
-        st.markdown(f"<style>.st-key-fgexp summary {{ color: {_fgf} !important; }}</style>",
-                    unsafe_allow_html=True)
     st.markdown(
         '<div class="hero-title">Bästa köp</div>'
         '<div class="hero-sub">Sammanvägd poäng 0–100. Håll muspekaren över eller klicka '
@@ -863,6 +851,25 @@ if view == "Bästa köp":
                 st.caption(f":material/event_upcoming: **Rapport inom en vecka:** {badges}")
 
         st.markdown(hero_html(ranking, claude, consensus, bransch, KOMP_MAX, analyses), unsafe_allow_html=True)
+
+        # Marknadssentiment (Fear & Greed): direkt under aktielistan, utfällbar mätare.
+        _fg = data.get("fear_greed")
+        if _fg and _fg.get("varde") is not None:
+            _fgv = _fg["varde"]
+            _fge = _fg.get("etikett") or fg_zon(_fgv)[0]
+            _fgf = fg_zon(_fgv)[1]
+            with st.container(key="fgexp"):
+                with st.expander(f"Marknadssentiment · {_fgv:.0f} · {_fge}"):
+                    _fgc = st.columns([1, 4, 1])
+                    with _fgc[1]:
+                        st.plotly_chart(fear_greed_gauge(_fgv), use_container_width=True,
+                                        config={"displayModeBar": False})
+                        st.markdown(f'<div class="fg-etikett" style="color:{_fgf}">{_fge}</div>',
+                                    unsafe_allow_html=True)
+                    st.caption("Full vy med historik under **VII · Sentiment**.")
+            # Färga sammanfattningsraden i zonens färg.
+            st.markdown(f"<style>.st-key-fgexp summary {{ color: {_fgf} !important; }}</style>",
+                        unsafe_allow_html=True)
 
         with st.container(key="poangexp"), st.popover("Så räknas poängen"):
             st.caption(
@@ -1573,18 +1580,6 @@ with fcol_r:
                 use_container_width=True,
             )
 
-from datetime import date as _date_fot
-
 _cd = data.get("claude_datum")
 _dl = f"Data {data['tidpunkt'].replace('T', ' kl. ')}" + (f" · Claude {_cd}" if _cd else "")
-st.markdown(
-    f"""
-    <div class="appfot">
-      <span>{_dl}</span>
-      <span class="mitt">eToro Portföljanalys — All Rights Reserved © {_date_fot.today().year}</span>
-      <span>Data: eToro · Yahoo Finance &nbsp;·&nbsp; Analys: Claude</span>
-    </div>
-    <div class="appfot-sub">Bevakar {" · ".join(ea.PROFILES)}</div>
-    """,
-    unsafe_allow_html=True,
-)
+st.markdown(f'<div class="appfot">{_dl}</div>', unsafe_allow_html=True)
