@@ -80,7 +80,10 @@ st.markdown(f"""
       max-width: 900px; margin-left: auto !important; margin-right: auto !important; }}
   .st-key-rapportbadge {{ text-align: center; }}
   .st-key-rapportbadge [data-testid="stCaptionContainer"] {{ justify-content: center; }}
-  .st-key-poangexp {{ align-items: center; }}
+  /* "Så räknas poängen": vänsterställd (som listan) och mindre text. */
+  .st-key-poangexp {{ align-items: flex-start; }}
+  [data-testid="stMainBlockContainer"] .st-key-poangexp [data-testid="stPopover"] button {{
+      font-size: .68rem !important; padding-left: .1rem !important; }}
   /* Sentiment-expandern på Bästa köp ska INTE ärva dragspelets topp-hårlinje.
      Den globala dragspelsregeln nedan har prefixet stMainBlockContainer och
      högre specificitet — matcha samma prefix + .st-key-fgexp för att vinna. */
