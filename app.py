@@ -10,6 +10,7 @@ Den öppnas i webbläsaren på http://localhost:8501.
 Nycklarna läses från .env-filen precis som för etoro_analys.py.
 """
 
+import html
 import json
 import os
 
@@ -127,6 +128,10 @@ st.markdown(f"""
   .dp .dpval {{ width: 3rem; text-align: right; color: {MUTED}; flex: 0 0 auto; }}
   .detalj .meta {{ margin-top: 1.1rem; font-family: 'Space Grotesk', sans-serif;
       font-size: .68rem; letter-spacing: .03em; color: {MUTED}; }}
+  /* Claudes korta TL;DR (claude[tk].sammanfattning) överst i utfällningen */
+  .detalj .ctldr {{ margin-bottom: 1.4rem; padding-left: .9rem;
+      border-left: 2px solid {HAIRLINE}; font-family: 'Newsreader', serif;
+      font-size: 1.02rem; line-height: 1.5; color: {TEXT}; max-width: 620px; }}
 
   /* ---- Diskret, numrerat dragspel för övriga vyer ---- */
   [data-testid="stMainBlockContainer"] [data-testid="stExpander"] {{ border: none !important; }}
@@ -478,7 +483,8 @@ def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max):
     for i, r in enumerate(ranking, start=1):
         tk = r["ticker"]
         poang = r["poäng"]
-        crek = (claude_map.get(tk) or {}).get("rekommendation", "—")
+        cl = claude_map.get(tk) or {}
+        crek = cl.get("rekommendation", "—")
         farg = rek_farg.get(crek, MUTED)
         if r["trend_ok"]:
             trendmark = f'<span class="trend" style="color:{MOSS}">▲</span>'
@@ -515,6 +521,14 @@ def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max):
         else:
             meta = "Kluster: ensam"
 
+        # Claudes korta TL;DR (SCHEMA: claude[tk].sammanfattning, str | null).
+        # null → visa inget (fältet fylls i vid nästa backend-körning).
+        sammanfattning = cl.get("sammanfattning")
+        tldr_html = ""
+        if sammanfattning:
+            tldr_html = (f'<div class="ctldr" style="border-color:{farg}">'
+                         f'{html.escape(sammanfattning)}</div>')
+
         rader.append(
             f'<div class="stock">'
             f'<input type="checkbox" id="st_{tk}" class="stoggle">'
@@ -526,6 +540,7 @@ def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max):
             f'<span class="crek" style="color:{farg}">{crek}</span>{trendmark}'
             f'</label>'
             f'<div class="detalj"><div class="detalj-inner">'
+            f'{tldr_html}'
             f'<div class="nyckeltal">{nyckel_html}</div>'
             f'<div class="delpoang">{dp_html}</div>'
             f'<div class="meta">{meta}</div>'
