@@ -80,10 +80,12 @@ st.markdown(f"""
       max-width: 900px; margin-left: auto !important; margin-right: auto !important; }}
   .st-key-rapportbadge {{ text-align: center; }}
   .st-key-rapportbadge [data-testid="stCaptionContainer"] {{ justify-content: center; }}
-  /* "Så räknas poängen": vänsterställd (som listan) och mindre text. */
+  /* "Så räknas poängen": vänsterställd, samma typsnitt/storlek som hero-sub. */
   .st-key-poangexp {{ align-items: flex-start; }}
   [data-testid="stMainBlockContainer"] .st-key-poangexp [data-testid="stPopover"] button {{
-      font-size: .68rem !important; padding-left: .1rem !important; }}
+      font-family: 'Space Grotesk', sans-serif !important;
+      font-size: .8rem !important; letter-spacing: .01em !important;
+      padding-left: .1rem !important; }}
   /* Sentiment-expandern på Bästa köp ska INTE ärva dragspelets topp-hårlinje.
      Den globala dragspelsregeln nedan har prefixet stMainBlockContainer och
      högre specificitet — matcha samma prefix + .st-key-fgexp för att vinna. */
@@ -829,6 +831,19 @@ if view == "Bästa köp":
         'på en aktie för poänguppdelning och nyckeltal.</div>',
         unsafe_allow_html=True,
     )
+    # "Så räknas poängen" direkt under underrubriken, samma typsnitt/storlek.
+    with st.container(key="poangexp"), st.popover("Så räknas poängen"):
+        st.caption(
+            "**Poängmodellen (§12, omviktad):** Trend 25 p · Momentum 20 p (inkl. relativ "
+            "styrka mot sektor-ETF) · Analytiker 20 p (uppsida — halverad vid hög "
+            "riktkursspridning — antal analytiker, köprekommendation, EPS-revidering) · "
+            "Konsensus 25 p (viktad konsensus, snittvikt, nettoflöde 30d) — delat med "
+            "√klusterstorlek om aktien samvarierar starkt (korr > 0,7) med andra "
+            "konsensusaktier · Värdering 10 p (forward P/E mot sektormedian, PEG). "
+            "**Poäng v1** är förra modellen (utan Värdering/RS/spridning) — kvar för "
+            "jämförelse tills --utvardera hunnit kalibrera de nya vikterna. "
+            "Aktier utan stigande trend rankas alltid sist, oavsett poäng."
+        )
 
     if not ranking:
         st.info("Ingen rangordning i senaste körningen — kör en ny analys.")
@@ -870,19 +885,6 @@ if view == "Bästa köp":
             # Färga sammanfattningsraden i zonens färg.
             st.markdown(f"<style>.st-key-fgexp summary {{ color: {_fgf} !important; }}</style>",
                         unsafe_allow_html=True)
-
-        with st.container(key="poangexp"), st.popover("Så räknas poängen"):
-            st.caption(
-                "**Poängmodellen (§12, omviktad):** Trend 25 p · Momentum 20 p (inkl. relativ "
-                "styrka mot sektor-ETF) · Analytiker 20 p (uppsida — halverad vid hög "
-                "riktkursspridning — antal analytiker, köprekommendation, EPS-revidering) · "
-                "Konsensus 25 p (viktad konsensus, snittvikt, nettoflöde 30d) — delat med "
-                "√klusterstorlek om aktien samvarierar starkt (korr > 0,7) med andra "
-                "konsensusaktier · Värdering 10 p (forward P/E mot sektormedian, PEG). "
-                "**Poäng v1** är förra modellen (utan Värdering/RS/spridning) — kvar för "
-                "jämförelse tills --utvardera hunnit kalibrera de nya vikterna. "
-                "Aktier utan stigande trend rankas alltid sist, oavsett poäng."
-            )
 
     # Senaste händelser — kondenserad översikt direkt under hjälten
     log = data.get("historik", [])
