@@ -16,6 +16,12 @@
 Notera datum + ändring varje gång ett fält som UI:t läser ändras
 (nytt/borttaget/omdöpt/typändrat). Nyast överst.
 
+- **2026-08-01** — Claude-triggerfilter: `claude[tk].indikator_snapshot`
+  fick sex nya frysta nivåfält (`swing_hog_20d/60d`, `swing_lag_20d/60d`,
+  `hog_52v`, `lag_52v`). Bryter dagens pris igenom en av dem omanalyseras
+  texten — täpper till luckan där en köptrigger (t.ex. "stängning över
+  784") kunde ligga kvar långt under rådande pris fast priset redan brutit
+  upp. Rent internt filterfält, UI läser det inte; `null` på äldre snapshots.
 - **2026-07-19** — Fear & Greed-index: ny toppnyckel `fear_greed` i
   `senaste_analys.json` (CNN:s index, inofficiell endpoint, oberoende av
   eToro-data). Rent informationsfält — ingen poäng- eller regimpåverkan.
@@ -248,7 +254,7 @@ Nyckel = ticker (endast konsensusaktier, och bara de som analyserats).
 | `analys_alder_dagar` | int \| null | Dagar sedan `genererad`, beräknat varje körning (även för återanvända texter). `null` om `genererad` saknas. |
 | `modell` | str \| null | Modellen som skrev texten: `"claude-opus-4-8"` (grundanalys — aktien var "ny på listan") eller `"claude-sonnet-4-6"` (omanalys av befintlig aktie). `null` på texter från före Claude-triggerfiltret (2026-07-16). |
 | `analys_orsak` | str \| null | Varför texten (om)genererades senast, t.ex. `"ny på listan"`, `"RSI korsade 70"`, `"poäng ändrad 65.2 → 78.9"`, `"force-claude"`. Loggas för att se vad som triggar flest omanalyser. `null` på gamla texter. |
-| `indikator_snapshot` | dict \| null | Ögonblicksbild av indikatorerna vid genereringstillfället — jämförs mot dagens värden nästa körning för att avgöra omanalys. `{rsi, pris, ma50, ma200, macd_diff, over_ma200, golden_cross, poang, viktad_konsensus, exit, regim, format_version}` (alla nullbara utom `format_version`). `format_version` (int, sedan 2026-07-19) taggar vilken version av Claude-promptens textstruktur som genererade texten — höjs i koden (`CLAUDE_PROMPT_FORMAT_VERSION`) vid framtida omskrivningar av `analys`-textens format, vilket auto-triggar en engångsomanalys av ALLA texter (se `behover_ny_analys`). `null` på texter från före filtret — det UI:t behöver inte läsa, det är internt facit för backend. |
+| `indikator_snapshot` | dict \| null | Ögonblicksbild av indikatorerna vid genereringstillfället — jämförs mot dagens värden nästa körning för att avgöra omanalys. `{rsi, pris, ma50, ma200, macd_diff, over_ma200, golden_cross, swing_hog_20d, swing_hog_60d, swing_lag_20d, swing_lag_60d, hog_52v, lag_52v, poang, viktad_konsensus, exit, regim, format_version}` (alla nullbara utom `format_version`). `swing_hog_*`/`swing_lag_*`/`hog_52v`/`lag_52v` (frysta motstånds-/stödnivåer, sedan 2026-08-01) jämförs mot dagens pris: bryter priset igenom en nivå som köptriggern/ogiltigt-om byggdes av omanalyseras texten (annars kunde en köptrigger ligga kvar långt under rådande pris — se `_pris_brot_nivaer`); `null` på snapshots från före de fälten (hoppas då tyst över). `format_version` (int, sedan 2026-07-19) taggar vilken version av Claude-promptens textstruktur som genererade texten — höjs i koden (`CLAUDE_PROMPT_FORMAT_VERSION`) vid framtida omskrivningar av `analys`-textens format, vilket auto-triggar en engångsomanalys av ALLA texter (se `behover_ny_analys`). `null` på texter från före filtret — det UI:t behöver inte läsa, det är internt facit för backend. |
 
 → Saknas en konsensusaktie i `claude`: visa "ingen Claude-analys".
 

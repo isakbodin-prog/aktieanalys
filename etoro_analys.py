@@ -1457,6 +1457,11 @@ MODELL_KORTNAMN = {CLAUDE_MODELL_NY: "opus", CLAUDE_MODELL_OMANALYS: "sonnet"}
 MAX_ANALYS_ALDER_DAGAR = 7
 POANG_TRIGGER_DIFF = 10.0
 KONSENSUS_TRIGGER_DIFF = 1.0
+# Bryter dagens pris igenom en motstånds-/stödnivå som texten byggde köptriggern
+# eller ogiltigt-om-nivån av, har texten blivit inaktuell även om ingen
+# indikatorregim ändrats. Marginalen filtrerar bort stängningar som bara nuddar
+# nivån (ren brus) — se _pris_brot_nivaer / behover_ny_analys.
+NIVA_BROTT_MARGINAL = 0.005  # 0,5 %
 # Output-tak: Sonnet-omanalyser kör UTAN thinking (ren textbudget, ~120 ord
 # räcker med marginal). Opus-grundanalyser behåller adaptive thinking, som
 # äter av samma max_tokens-budget — mer marginal krävs där (se incidenten
@@ -1488,6 +1493,14 @@ def _bygg_indikator_snapshot(a, poang, viktad_konsensus, exit_flagga, regim_stat
         "macd_diff": round(macd - macd_sig, 4) if macd is not None and macd_sig is not None else None,
         "over_ma200": a.get("över_MA200"),
         "golden_cross": a.get("golden_cross"),
+        # Frysta motstånds-/stödnivåer som köptriggern/ogiltigt-om kan byggas av.
+        # Jämförs mot dagens pris i behover_ny_analys (nivåbrott = inaktuell text).
+        "swing_hog_20d": a.get("swing_hog_20d"),
+        "swing_hog_60d": a.get("swing_hog_60d"),
+        "swing_lag_20d": a.get("swing_lag_20d"),
+        "swing_lag_60d": a.get("swing_lag_60d"),
+        "hog_52v": a.get("52v_högsta"),
+        "lag_52v": a.get("52v_lägsta"),
         "poang": poang,
         "viktad_konsensus": viktad_konsensus,
         "exit": exit_flagga,
@@ -1502,6 +1515,41 @@ def _rsi_korsade_troskel(old_rsi, new_rsi, troskel):
     return (old_rsi < troskel <= new_rsi) or (new_rsi < troskel <= old_rsi)
 
 
+def _pris_brot_nivaer(gammal, ny_pris):
+    """Orsakssträng om dagens pris brutit igenom en FRUSEN motstånds-/stödnivå
+    från när texten skrevs, annars None.
+
+    Motstånd (swing_hog_20d/60d, 52v-högsta) och stöd (swing_lag_20d/60d,
+    52v-lägsta) fryses i indikator_snapshot. Köptriggern och ogiltigt-om-nivån
+    i Claude-texten byggs av just dessa fält (se _bygg_claude_input /
+    systemprompten), så när dagens pris klev över ett fruset motstånd (eller
+    under ett fruset stöd) har texten blivit inaktuell även om ingen
+    indikatorregim ändrats — det var precis den luckan som gjorde att en
+    köptrigger kunde ligga kvar långt under rådande pris.
+
+    Nivåerna prövas från bredaste till tätaste så den mest signifikanta
+    genombrytningen namnges. Marginalen (NIVA_BROTT_MARGINAL) kräver att priset
+    passerat nivån med tydlig marginal, inte bara nuddat den vid stängning.
+    Gamla snapshots (före nivåfälten) saknar nycklarna → hoppas tyst över.
+    """
+    if ny_pris is None:
+        return None
+    gp = gammal.get("pris")
+    motstand = (("52-veckorshögsta", gammal.get("hog_52v")),
+                ("60-dagarshögsta", gammal.get("swing_hog_60d")),
+                ("20-dagarshögsta", gammal.get("swing_hog_20d")))
+    stod = (("52-veckorslägsta", gammal.get("lag_52v")),
+            ("60-dagarslägsta", gammal.get("swing_lag_60d")),
+            ("20-dagarslägsta", gammal.get("swing_lag_20d")))
+    for namn, niva in motstand:
+        if niva and (gp is None or gp <= niva) and ny_pris > niva * (1 + NIVA_BROTT_MARGINAL):
+            return f"priset bröt {namn} ({niva:g})"
+    for namn, niva in stod:
+        if niva and (gp is None or gp >= niva) and ny_pris < niva * (1 - NIVA_BROTT_MARGINAL):
+            return f"priset bröt under {namn} ({niva:g})"
+    return None
+
+
 def behover_ny_analys(ticker, dagens_data, senaste_analys):
     """Avgör om `ticker` behöver Claude-omanalyseras. Returnerar (bool, orsak).
 
@@ -1514,9 +1562,12 @@ def behover_ny_analys(ticker, dagens_data, senaste_analys):
 
     Analyseras om ENDAST vid: saknad text, gammalt textformat, RSI-korsning
     av 30/70, pris-korsning av MA200, MACD-korsning av signallinjen,
-    golden/death cross, ändrad EXIT-status, poängändring > 10, viktad
-    konsensus-ändring > 1.0, regimskifte GRÖN↔RÖD (GUL/OKÄND triggar inte
-    — för brusigt), eller text äldre än MAX_ANALYS_ALDER_DAGAR dagar.
+    golden/death cross, pris som bryter en frusen motstånds-/stödnivå som
+    köptriggern/ogiltigt-om byggdes av (_pris_brot_nivaer — annars kan en
+    köptrigger ligga kvar långt under rådande pris), ändrad EXIT-status,
+    poängändring > 10, viktad konsensus-ändring > 1.0, regimskifte GRÖN↔RÖD
+    (GUL/OKÄND triggar inte — för brusigt), eller text äldre än
+    MAX_ANALYS_ALDER_DAGAR dagar.
     """
     from datetime import date
     if not senaste_analys or not senaste_analys.get("analys"):
@@ -1551,6 +1602,10 @@ def behover_ny_analys(ticker, dagens_data, senaste_analys):
     ggc, ngc = gammal.get("golden_cross"), dagens_data.get("golden_cross")
     if ggc is not None and ngc is not None and ggc != ngc:
         return True, "dödskors/goldenkors inträffade"
+
+    brott = _pris_brot_nivaer(gammal, dagens_data.get("pris"))
+    if brott:
+        return True, brott
 
     ge, ne = gammal.get("exit"), dagens_data.get("exit")
     if ge is not None and ne is not None and ge != ne:

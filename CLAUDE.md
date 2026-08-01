@@ -222,7 +222,10 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
    behover_ny_analys(ticker, dagens_data, senaste_analys) avgör om en
    redan analyserad aktie omanalyseras — bara vid väsentlig förändring
    sedan claude[tk].indikator_snapshot sparades (RSI korsat 30/70, pris
-   korsat MA200, MACD korsat signallinjen, golden/death cross, EXIT-status
+   korsat MA200, MACD korsat signallinjen, golden/death cross, pris brutit
+   igenom en frusen motstånds-/stödnivå som köptriggern/ogiltigt-om byggdes
+   av (swing 20d/60d + 52v hög/låg, marginal 0,5 % — täpper luckan där en
+   köptrigger kunde ligga kvar långt under rådande pris), EXIT-status
    ändrad, poäng ändrat >10, viktad konsensus ändrad >1.0, regimskifte
    GRÖN↔RÖD (GUL/OKÄND triggar inte), gammalt textformat (indikator_
    snapshot.format_version ≠ CLAUDE_PROMPT_FORMAT_VERSION — höjs manuellt
