@@ -98,6 +98,38 @@ def api_get(path, params=None, quiet=False, retries=3):
 # ----------------------------------------------------------------------
 _instrument_cache = {}
 _industry_cache = {}   # ticker -> stocksIndustryID (1=Råvaror ... 9=Kraft, se app.py)
+_name_cache = {}       # ticker -> kort bolagsnamn ("Micron"), ur instrumentDisplayName
+
+# Juridiska suffix som kapas när instrumentDisplayName snyggas till ett kort
+# visningsnamn. Jämförs skiftlägesokänsligt och utan avslutande punkt.
+# "technology/technologies" tas med eftersom eToro-namnen ofta bär det (Micron,
+# Palantir m.fl.); kapas bara så länge minst ett ord återstår.
+_BOLAG_SUFFIX = {
+    "inc", "incorporated", "corp", "corporation", "co", "company",
+    "holdings", "holding", "group", "ltd", "limited", "plc", "llc", "lp",
+    "sa", "ag", "nv", "se", "ab", "asa", "oyj", "kgaa",
+    "technologies", "technology",
+}
+
+
+def _snygga_bolagsnamn(display_name):
+    """Kort visningsnamn ur eToros instrumentDisplayName, eller None.
+
+    Tar delen före första kommat, kapar avslutande juridiska suffix
+    (_BOLAG_SUFFIX) så länge minst ett ord återstår, och trimmar ".com".
+    "Micron Technology, Inc." -> "Micron", "Amazon.com Inc" -> "Amazon",
+    "NVIDIA Corporation" -> "NVIDIA", "PayPal Holdings" -> "PayPal".
+    Tomt/okänt namn -> None (frontend faller då tillbaka på tickern).
+    """
+    if not display_name:
+        return None
+    ord_ = str(display_name).split(",", 1)[0].split()
+    while len(ord_) > 1 and ord_[-1].rstrip(".").lower() in _BOLAG_SUFFIX:
+        ord_.pop()
+    namn = " ".join(ord_).strip()
+    if namn.lower().endswith(".com"):
+        namn = namn[:-4].strip()
+    return namn or None
 
 def resolve_instruments(instrument_ids):
     """Översätt instrument-ID:n till tickers.
@@ -116,6 +148,9 @@ def resolve_instruments(instrument_ids):
                 _instrument_cache[int(iid)] = str(ticker)
                 if item.get("stocksIndustryID") is not None:
                     _industry_cache[str(ticker)] = item["stocksIndustryID"]
+                namn = _snygga_bolagsnamn(item.get("instrumentDisplayName"))
+                if namn:
+                    _name_cache[str(ticker)] = namn
         print(f"  {len(_instrument_cache)} instrument i uppslagstabellen.")
 
     missing = [int(i) for i in instrument_ids if int(i) not in _instrument_cache]
@@ -2708,6 +2743,12 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
         if återanvänt:
             print(f"    {ticker}: {len(återanvänt)} värderings-/rapportfält återanvända från "
                   f"{prev.get('tidpunkt', 'förra körningen')[:10]} ({', '.join(återanvänt)})")
+
+    # Bolagsnamn (kort visningsnamn) per ticker — frontend inleder Bästa köp-
+    # sammanfattningen med detta i stället för tickern. Hämtas ur samma
+    # instrumentlista som ticker-uppslaget (inga extra API-anrop); None om okänt.
+    for ticker, a in analyses.items():
+        a["bolagsnamn"] = _name_cache.get(ticker)
 
     # §B Exitregel (trendbrott): pris < MA200 OCH MA50 < MA200 — beräknas här
     # (kräver bara analyses) men appliceras i update_history/build_ranking nedan

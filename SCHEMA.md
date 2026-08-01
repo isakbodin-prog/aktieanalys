@@ -16,6 +16,11 @@
 Notera datum + ändring varje gång ett fält som UI:t läser ändras
 (nytt/borttaget/omdöpt/typändrat). Nyast överst.
 
+- **2026-08-01** — Analyses: nytt fält `analyses[tk].bolagsnamn` (str | null)
+  — kort bolagsnamn (t.ex. `"Micron"`) härlett ur eToro-instrumentlistans
+  `instrumentDisplayName` i samma veva som ticker-uppslaget (inga extra
+  API-anrop). Frontend inleder Bästa köp-sammanfattningen med namnet i stället
+  för tickern; fältet "tänds" automatiskt, `null` när namnet är okänt.
 - **2026-08-01** — Claude-analys: nytt fält `claude[tk].sammanfattning`
   (str | null) — kort 1–2-menings-TL;DR om läget just nu, tänkt att visas
   under en utfälld aktie på Bästa köp-fliken. Genereras i samma API-anrop
@@ -189,6 +194,7 @@ Nyckel = ticker. Värdet har **två möjliga former**:
 | Fält | Typ | Kan vara null? | Beskrivning |
 |---|---|---|---|
 | `ticker` | str | nej | |
+| `bolagsnamn` | str \| null | ja | Kort bolagsnamn (t.ex. `"Micron"`, `"NVIDIA"`), härlett ur eToro-instrumentlistans `instrumentDisplayName` (juridiska suffix som Inc/Corporation/Holdings/Technology + `.com` kapas). `null` om okänt. Frontend inleder Bästa köp-sammanfattningen med detta i stället för tickern. Sedan 2026-08-01. |
 | `datakälla` | str | nej | `"Yahoo"`, `"Alpha Vantage"` eller `"cache"`. |
 | `cache_datum` | str | *bara vid cache* | Sätts endast när `datakälla == "cache"` — tidpunkt datan är från. |
 | `valuta` | str \| null | ja | Handelsvaluta, t.ex. `"USD"`. `null` = okänd. |
