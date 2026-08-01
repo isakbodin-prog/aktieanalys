@@ -526,17 +526,27 @@ def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max, analys_
         sammanfattning = cl.get("sammanfattning")
         tldr_html = ""
         if sammanfattning:
-            text = sammanfattning
-            # Senaste kurs inom parentes direkt efter det inledande kortnamnet.
             a = analys_map.get(tk) or {}
             pris = a.get("pris")
-            if pris is not None:
-                kurs = _num(pris, f" {a.get('valuta') or ''}".rstrip(), dec=2)
-                ord_delar = text.split(" ", 1)
-                if len(ord_delar) == 2:
-                    text = f"{ord_delar[0]} ({kurs}) {ord_delar[1]}"
-                else:
-                    text = f"{text} ({kurs})"
+            kurs = (_num(pris, f" {a.get('valuta') or ''}".rstrip(), dec=2)
+                    if pris is not None else None)
+            bolagsnamn = a.get("bolagsnamn")  # SCHEMA: analyses[tk].bolagsnamn (str | null)
+            if bolagsnamn:
+                # Inled alltid med bolagsnamnet (+ kurs inom parentes). Släng en
+                # inledande ticker/namn-dubblett ur prosan så det inte upprepas.
+                forsta, _, resten = sammanfattning.partition(" ")
+                forsta_ren = forsta.strip(".,:;").upper()
+                droppa = forsta_ren in (tk.upper(), bolagsnamn.split(" ")[0].upper())
+                kropp = resten if (droppa and resten) else sammanfattning
+                prefix = f"{bolagsnamn} ({kurs})" if kurs else bolagsnamn
+                text = f"{prefix} {kropp}"
+            elif kurs:
+                # Inget bolagsnamnsfält ännu → kurs inom parentes efter inledande ordet.
+                ord_delar = sammanfattning.split(" ", 1)
+                text = (f"{ord_delar[0]} ({kurs}) {ord_delar[1]}"
+                        if len(ord_delar) == 2 else f"{sammanfattning} ({kurs})")
+            else:
+                text = sammanfattning
             tldr_html = (f'<div class="ctldr" style="border-color:{farg}">'
                          f'{html.escape(text)}</div>')
 
