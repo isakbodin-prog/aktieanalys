@@ -77,12 +77,12 @@ st.markdown(f"""
       letter-spacing: .24em; font-size: .68rem; color: {MUTED}; margin-bottom: .5rem; }}
   /* Enhetlig rubrikstorlek över alla vyer: hero-title, sh-rubrik och st.subheader (h2/h3) */
   .hero-title {{ font-family: 'Newsreader', serif; font-size: 1.6rem; line-height: 1.05;
-      letter-spacing: -.02em; color: {TEXT}; margin: 1rem auto .5rem; max-width: 900px;
+      letter-spacing: -.02em; color: {TEXT}; margin: 1.2rem auto 1.2rem; max-width: 900px;
       text-align: center; }}
   [data-testid="stMainBlockContainer"] h2, [data-testid="stMainBlockContainer"] h3 {{
       font-size: 1.6rem !important; }}
   .hero-sub {{ font-family: 'Space Grotesk', sans-serif; font-size: .8rem; color: {MUTED};
-      letter-spacing: .01em; margin: 0 auto 1.2rem; max-width: 900px; line-height: 1.5; }}
+      letter-spacing: .01em; margin: 1rem auto 1.4rem; max-width: 900px; line-height: 1.5; }}
 
   .stocklist {{ margin: .2rem auto .5rem; max-width: 900px; }}
   /* Sentiment-utfäll och rapportnotis centreras med hjälten (900px) */
