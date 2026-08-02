@@ -50,6 +50,12 @@ st.markdown(f"""
   [data-testid="stMainBlockContainer"], .block-container {{
       max-width: 100% !important; padding: 2rem 3.5rem 2rem !important; }}
 
+  /* Dölj Streamlits egen verktygsrad (Deploy/Stop/⋮/running-man) + färgdekor
+     högst upp — de tillhör inte designen och klippte wordmarken. */
+  [data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecoration"],
+  [data-testid="stStatusWidget"] {{ display: none !important; }}
+  [data-testid="stAppViewContainer"] {{ margin-top: 0 !important; }}
+
   /* Fullbreddslinje vid sidhuvud/sidfot (bryter ut ur ytans padding) */
   .fullrule {{ border: none; border-top: 1px solid {HAIRLINE};
       margin: .9rem -3.5rem 0; }}
