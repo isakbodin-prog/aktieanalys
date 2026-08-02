@@ -48,7 +48,7 @@ st.markdown(f"""
   /* Full bredd på ytan (fullbreddslinjer + hörnplacerad wordmark); innehållet
      centreras i egna 900px-block. */
   [data-testid="stMainBlockContainer"], .block-container {{
-      max-width: 100% !important; padding: .8rem 3.5rem 2rem !important; position: relative; }}
+      max-width: 100% !important; padding: .5rem 3.5rem 2rem !important; position: relative; }}
 
   /* Dölj Streamlits egen verktygsrad (Deploy/Stop/⋮/running-man) + färgdekor
      högst upp — de tillhör inte designen och klippte wordmarken. */
@@ -119,7 +119,7 @@ st.markdown(f"""
   .stoggle {{ position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }}
   .rad {{ display: flex; align-items: center; gap: 1rem; padding: .8rem .3rem;
       cursor: pointer; transition: padding-left .28s ease; }}
-  .stock:hover .rad {{ padding-left: .95rem; }}
+  @media (hover: hover) {{ .stock:hover .rad {{ padding-left: .95rem; }} }}
   .rang {{ font-family: 'Space Grotesk', sans-serif; font-size: .72rem; color: {MUTED};
       width: 1.6rem; flex: 0 0 auto; }}
   .bikon {{ width: 32px; height: 32px; opacity: .75; flex: 0 0 auto; }}
@@ -135,7 +135,12 @@ st.markdown(f"""
 
   .detalj {{ max-height: 0; overflow: hidden; opacity: 0;
       transition: max-height .5s cubic-bezier(.4,0,.2,1), opacity .4s ease; }}
-  .stock:hover .detalj, .stoggle:checked ~ .detalj {{ max-height: 560px; opacity: 1; }}
+  .stoggle:checked ~ .detalj {{ max-height: 560px; opacity: 1; }}
+  /* Hover-öppning bara på enheter med muspekare — på touch klibbar :hover
+     och hindrar att man kan stänga en aktie med ett andra tryck. */
+  @media (hover: hover) {{
+    .stock:hover .detalj {{ max-height: 560px; opacity: 1; }}
+  }}
   .detalj-inner {{ padding: .1rem .3rem 1.7rem 3.9rem; }}
   .nyckeltal {{ display: flex; flex-wrap: wrap; gap: 2.4rem; margin-bottom: 1.4rem; }}
   .nyckeltal .lbl {{ display: block; font-family: 'Space Grotesk', sans-serif; font-size: .62rem;
@@ -260,8 +265,10 @@ st.markdown(f"""
         padding-left: 1.1rem !important; padding-right: 1.1rem !important; }}
     .fullrule {{ margin: .35rem -1.1rem 0 !important; }}
     /* Hamburgaren i övre högra hörnet (absolut mot huvudytan), wordmark kvar vänster */
-    .st-key-mobtoggle {{ position: absolute !important; top: 1.1rem !important;
+    .st-key-mobtoggle {{ position: absolute !important; top: .8rem !important;
         right: 1.1rem !important; width: auto !important; z-index: 5; }}
+    /* Nolla gapet till den dolda nav-kolumnen så sidhuvudet blir kompakt */
+    .st-key-header [data-testid="stHorizontalBlock"] {{ gap: 0 !important; }}
     /* Hopfällbar meny: navbox dold tills hamburgaren öppnar den → vertikal lista */
     .st-key-navbox {{ display: none !important; flex-direction: column !important;
         align-items: flex-start !important; gap: .1rem !important; }}
@@ -802,25 +809,26 @@ VYER = [
 st.session_state.setdefault("view", "Bästa köp")
 st.session_state.setdefault("mobmeny_open", False)
 
-hcol1, hcol2 = st.columns([2, 8], vertical_alignment="top")
-with hcol1:
-    # Wordmark + hamburgerknapp på SAMMA rad (hamburgaren bara synlig på mobil).
-    with st.container(key="brandrow"):
-        st.markdown('<div class="wordmark">eToro Portföljanalys</div>', unsafe_allow_html=True)
-        with st.container(key="mobtoggle"):
-            if st.button("✕" if st.session_state["mobmeny_open"] else "☰",
-                         key="mobmeny_btn"):
-                st.session_state["mobmeny_open"] = not st.session_state["mobmeny_open"]
-                st.rerun()
-with hcol2:
-    # Menypunkterna flödar som en rad (flex-wrap) — radbryter på smala skärmar.
-    # På mobil dold som standard; visas när mobmeny_open (stil injiceras nedan).
-    with st.container(key="navbox"):
-        for _key, _label in VYER:
-            if st.button(_label, key=f"nav_{_navslug(_key)}"):
-                st.session_state["view"] = _key
-                st.session_state["mobmeny_open"] = False   # fäll ihop efter val
-                st.rerun()
+with st.container(key="header"):
+    hcol1, hcol2 = st.columns([2, 8], vertical_alignment="top")
+    with hcol1:
+        # Wordmark + hamburgerknapp på SAMMA rad (hamburgaren bara synlig på mobil).
+        with st.container(key="brandrow"):
+            st.markdown('<div class="wordmark">eToro Portföljanalys</div>', unsafe_allow_html=True)
+            with st.container(key="mobtoggle"):
+                if st.button("✕" if st.session_state["mobmeny_open"] else "☰",
+                             key="mobmeny_btn"):
+                    st.session_state["mobmeny_open"] = not st.session_state["mobmeny_open"]
+                    st.rerun()
+    with hcol2:
+        # Menypunkterna flödar som en rad (flex-wrap) — radbryter på smala skärmar.
+        # På mobil dold som standard; visas när mobmeny_open (stil injiceras nedan).
+        with st.container(key="navbox"):
+            for _key, _label in VYER:
+                if st.button(_label, key=f"nav_{_navslug(_key)}"):
+                    st.session_state["view"] = _key
+                    st.session_state["mobmeny_open"] = False   # fäll ihop efter val
+                    st.rerun()
 
 # Understryk den aktiva menypunkten (dynamiskt per vy).
 _aktiv = _navslug(st.session_state["view"])
