@@ -48,7 +48,7 @@ st.markdown(f"""
   /* Full bredd på ytan (fullbreddslinjer + hörnplacerad wordmark); innehållet
      centreras i egna 900px-block. */
   [data-testid="stMainBlockContainer"], .block-container {{
-      max-width: 100% !important; padding: 2rem 3.5rem 2rem !important; position: relative; }}
+      max-width: 100% !important; padding: 1.3rem 3.5rem 2rem !important; position: relative; }}
 
   /* Dölj Streamlits egen verktygsrad (Deploy/Stop/⋮/running-man) + färgdekor
      högst upp — de tillhör inte designen och klippte wordmarken. */
@@ -75,8 +75,11 @@ st.markdown(f"""
   /* ---- Hjälte: Bästa köp ---- */
   .hero-label {{ font-family: 'Space Grotesk', sans-serif; text-transform: uppercase;
       letter-spacing: .24em; font-size: .68rem; color: {MUTED}; margin-bottom: .5rem; }}
-  .hero-title {{ font-family: 'Newsreader', serif; font-size: 2.3rem; line-height: 1.02;
+  /* Enhetlig rubrikstorlek över alla vyer: hero-title, sh-rubrik och st.subheader (h2/h3) */
+  .hero-title {{ font-family: 'Newsreader', serif; font-size: 1.6rem; line-height: 1.05;
       letter-spacing: -.02em; color: {TEXT}; margin: 1rem auto .5rem; max-width: 900px; }}
+  [data-testid="stMainBlockContainer"] h2, [data-testid="stMainBlockContainer"] h3 {{
+      font-size: 1.6rem !important; }}
   .hero-sub {{ font-family: 'Space Grotesk', sans-serif; font-size: .8rem; color: {MUTED};
       letter-spacing: .01em; margin: 0 auto 1.2rem; max-width: 900px; line-height: 1.5; }}
 
@@ -191,7 +194,7 @@ st.markdown(f"""
       letter-spacing: .04em; text-align: center; margin-top: 1.3rem; line-height: 1.6; }}
 
   /* ---- Senaste händelser ---- */
-  .sh-rubrik {{ font-family: 'Newsreader', Georgia, serif; font-size: 1.75rem; color: {TEXT};
+  .sh-rubrik {{ font-family: 'Newsreader', Georgia, serif; font-size: 1.6rem; color: {TEXT};
       text-align: center; margin: .3rem 0 1.9rem; letter-spacing: -.01em; }}
   .sh-kol {{ font-family: 'Space Grotesk', sans-serif; font-size: .64rem; text-transform: uppercase;
       letter-spacing: .13em; color: {TEXT}; margin-bottom: .2rem; padding-bottom: .55rem;
@@ -206,8 +209,8 @@ st.markdown(f"""
       display: none !important; }}
 
   /* --- Diskret toppnavigering --- */
-  .wordmark {{ font-family: 'Newsreader', serif; font-size: 1.2rem; color: {TEXT};
-      letter-spacing: .01em; padding-top: .4rem; }}
+  .wordmark {{ font-family: 'Newsreader', serif; font-size: 1.05rem; color: {TEXT};
+      letter-spacing: .01em; padding-top: .3rem; }}
   .dateline {{ font-family: 'Space Grotesk', sans-serif; font-size: .64rem; text-transform: uppercase;
       letter-spacing: .16em; color: {MUTED}; margin: .2rem 0 2.6rem; }}
   hr.navhr {{ margin: .8rem 0 0 !important; }}
@@ -254,14 +257,17 @@ st.markdown(f"""
         padding-left: 1.1rem !important; padding-right: 1.1rem !important; }}
     .fullrule {{ margin: .35rem -1.1rem 0 !important; }}
     /* Hamburgaren i övre högra hörnet (absolut mot huvudytan), wordmark kvar vänster */
-    .st-key-mobtoggle {{ position: absolute !important; top: 2.65rem !important;
+    .st-key-mobtoggle {{ position: absolute !important; top: 1.75rem !important;
         right: 1.1rem !important; width: auto !important; z-index: 5; }}
     /* Hopfällbar meny: navbox dold tills hamburgaren öppnar den → vertikal lista */
     .st-key-navbox {{ display: none !important; flex-direction: column !important;
         align-items: flex-start !important; gap: .1rem !important; }}
     [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button {{
         font-size: .82rem !important; letter-spacing: .1em; padding: .5rem .1rem !important; }}
-    .hero-title {{ font-size: 1.9rem; margin-top: .5rem; }}
+    .hero-title {{ font-size: 1.5rem; margin-top: .5rem; }}
+    .sh-rubrik {{ font-size: 1.5rem; margin-bottom: 1.4rem; }}
+    [data-testid="stMainBlockContainer"] h2, [data-testid="stMainBlockContainer"] h3 {{
+        font-size: 1.5rem !important; }}
     .rad {{ gap: .55rem; padding: .7rem .05rem; }}
     .meter {{ display: none; }}          /* poängsiffran räcker; frigör bredd */
     .tk {{ flex: 1 1 auto; font-size: 1.05rem; min-width: 0; }}
@@ -275,6 +281,7 @@ st.markdown(f"""
     [data-testid="stMainBlockContainer"] [data-testid="stVerticalBlock"] {{ gap: .6rem; }}
     .st-key-fgexp {{ margin-top: .5rem; }}      /* lite andrum lista → sentiment */
     .hero-sub {{ margin-bottom: .9rem; }}
+    .sub-lang {{ display: none; }}   /* mobil: kortad undertext (bara poäng + länk) */
     .nyckeltal {{ gap: .7rem 1.6rem; margin-bottom: .9rem; }}
     .delpoang {{ gap: .35rem; }}
     .fg-mini {{ flex-wrap: wrap; }}
@@ -871,8 +878,9 @@ if view == "Bästa köp":
     # <details>/<summary> → samma rad, expanderar poängförklaringen utan rerun).
     st.markdown(
         '<div class="hero-title">Bästa köp</div>'
-        '<div class="hero-sub">Sammanvägd poäng 0–100. Håll muspekaren över eller klicka '
-        'på en aktie för poänguppdelning och nyckeltal. '
+        '<div class="hero-sub">Sammanvägd poäng 0–100. '
+        '<span class="sub-lang">Håll muspekaren över eller klicka '
+        'på en aktie för poänguppdelning och nyckeltal. </span>'
         '<details class="poang-inline"><summary>Så räknas poängen</summary>'
         '<span class="poang-text">'
         '<strong>Poängmodellen (§12, omviktad):</strong> Trend 25 p · Momentum 20 p '
