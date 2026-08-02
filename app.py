@@ -110,10 +110,21 @@ st.markdown(f"""
       border: none !important; border-top: none !important; box-shadow: none !important; }}
   [data-testid="stMainBlockContainer"] .st-key-fgexp [data-testid="stExpander"] summary {{
       text-transform: none !important; letter-spacing: .01em !important;
-      font-size: .82rem !important; justify-content: flex-start; padding-left: 0 !important; }}
-  /* Dölj expanderns chevron så "Marknadssentiment" ligger i linje med övrigt vänster */
-  .st-key-fgexp summary span:has(> [data-testid="stIconMaterial"]) {{ display: none !important; }}
+      font-size: .82rem !important; justify-content: flex-start; padding-left: 0 !important;
+      padding-top: .35rem !important; padding-bottom: .35rem !important; gap: .45rem; }}
+  /* Chevronen flyttas EFTER etiketten (order) i stället för att döljas — kvar som
+     utfällningssignal, men "Marknadssentiment" ligger ändå i vänsterlinjen. */
+  .st-key-fgexp summary span:has(> [data-testid="stIconMaterial"]) {{
+      order: 2; opacity: .55; }}
+  /* Etikett-diven växer annars och knuffar chevronen till högerkanten */
+  .st-key-fgexp summary > span {{ gap: .35rem; }}
+  .st-key-fgexp summary > span > div {{
+      flex: 0 0 auto !important; width: max-content !important; }}
+  .st-key-fgexp summary p {{ white-space: nowrap; }}
+  .st-key-fgexp summary [data-testid="stIconMaterial"] {{ font-size: 1.05rem !important; }}
   .st-key-fgexp summary p {{ font-size: .82rem !important; }}
+  /* Dra upp sentimentet närmare poäng-raden ovanför */
+  .st-key-fgexp {{ margin-top: -1rem !important; }}
   .stock {{ border-top: 1px solid {HAIRLINE}; }}
   .stock:last-child {{ border-bottom: 1px solid {HAIRLINE}; }}
   .stoggle {{ position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }}
@@ -293,7 +304,8 @@ st.markdown(f"""
     .detalj-inner {{ padding-left: 2.4rem; padding-bottom: 1rem; }}
     /* Tightare mobilrytm: mindre glapp mellan delarna */
     [data-testid="stMainBlockContainer"] [data-testid="stVerticalBlock"] {{ gap: .6rem; }}
-    .st-key-fgexp {{ margin-top: .5rem; }}      /* lite andrum lista → sentiment */
+    /* Mobilen har redan tightare rytm (gap .6rem) → mildare uppdragning */
+    .st-key-fgexp {{ margin-top: -.15rem !important; }}
     .hero-sub {{ margin-bottom: .9rem; }}
     .sub-lang {{ display: none; }}   /* mobil: kortad undertext (bara poäng + länk) */
     .nyckeltal {{ gap: .7rem 1.6rem; margin-bottom: .9rem; }}
