@@ -58,7 +58,7 @@ st.markdown(f"""
 
   /* Fullbreddslinje vid sidhuvud/sidfot (bryter ut ur ytans padding) */
   .fullrule {{ border: none; border-top: 1px solid {HAIRLINE};
-      margin: .9rem -3.5rem 0; }}
+      margin: .8rem -3.5rem 0 !important; }}   /* !important slår Streamlits default-hr (2em) */
 
   /* Mjuk fade när en vy tar över mittsektionen */
   @keyframes vyfade {{ from {{ opacity: 0; transform: translateY(4px); }}
@@ -69,16 +69,16 @@ st.markdown(f"""
   h1, h2, h3, h4 {{ font-family: 'Newsreader', Georgia, serif !important;
       font-weight: 400 !important; letter-spacing: -.01em; }}
 
-  hr {{ margin: 1.3rem 0 !important; border: none !important;
+  hr:not(.fullrule) {{ margin: 1.3rem 0 !important; border: none !important;
         border-top: 1px solid {HAIRLINE} !important; }}
 
   /* ---- Hjälte: Bästa köp ---- */
   .hero-label {{ font-family: 'Space Grotesk', sans-serif; text-transform: uppercase;
       letter-spacing: .24em; font-size: .68rem; color: {MUTED}; margin-bottom: .5rem; }}
   .hero-title {{ font-family: 'Newsreader', serif; font-size: 2.3rem; line-height: 1.02;
-      letter-spacing: -.02em; color: {TEXT}; margin: 1.6rem auto .5rem; max-width: 900px; }}
+      letter-spacing: -.02em; color: {TEXT}; margin: 1rem auto .5rem; max-width: 900px; }}
   .hero-sub {{ font-family: 'Space Grotesk', sans-serif; font-size: .8rem; color: {MUTED};
-      letter-spacing: .01em; margin: 0 auto 1.7rem; max-width: 900px; line-height: 1.5; }}
+      letter-spacing: .01em; margin: 0 auto 1.2rem; max-width: 900px; line-height: 1.5; }}
 
   .stocklist {{ margin: .2rem auto .5rem; max-width: 900px; }}
   /* Sentiment-utfäll och rapportnotis centreras med hjälten (900px) */
@@ -251,7 +251,7 @@ st.markdown(f"""
   @media (max-width: 640px) {{
     [data-testid="stMainBlockContainer"], .block-container {{
         padding-left: 1.1rem !important; padding-right: 1.1rem !important; }}
-    .fullrule {{ margin-left: -1.1rem; margin-right: -1.1rem; }}
+    .fullrule {{ margin: .35rem -1.1rem 0 !important; }}
     /* Wordmark + hamburgare på samma rad högst upp till vänster */
     .st-key-brandrow {{ flex-direction: row !important; align-items: baseline !important;
         gap: 1rem !important; }}
@@ -261,7 +261,7 @@ st.markdown(f"""
         align-items: flex-start !important; gap: .1rem !important; }}
     [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button {{
         font-size: .82rem !important; letter-spacing: .1em; padding: .5rem .1rem !important; }}
-    .hero-title {{ font-size: 1.9rem; }}
+    .hero-title {{ font-size: 1.9rem; margin-top: .5rem; }}
     .rad {{ gap: .55rem; padding: .7rem .05rem; }}
     .meter {{ display: none; }}          /* poängsiffran räcker; frigör bredd */
     .tk {{ flex: 1 1 auto; font-size: 1.05rem; min-width: 0; }}
@@ -273,6 +273,7 @@ st.markdown(f"""
     .detalj-inner {{ padding-left: 2.4rem; padding-bottom: 1rem; }}
     /* Tightare mobilrytm: mindre glapp mellan delarna */
     [data-testid="stMainBlockContainer"] [data-testid="stVerticalBlock"] {{ gap: .6rem; }}
+    .st-key-fgexp {{ margin-top: .5rem; }}      /* lite andrum lista → sentiment */
     .hero-sub {{ margin-bottom: .9rem; }}
     .nyckeltal {{ gap: .7rem 1.6rem; margin-bottom: .9rem; }}
     .delpoang {{ gap: .35rem; }}
