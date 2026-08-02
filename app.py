@@ -245,7 +245,7 @@ st.markdown(f"""
   .st-key-mobtoggle button {{ background: transparent !important; border: none !important;
       box-shadow: none !important; padding: .1rem .2rem !important; min-height: 0 !important; }}
   .st-key-mobtoggle button, .st-key-mobtoggle button p {{
-      font-family: 'Space Grotesk', sans-serif !important; font-size: 1.35rem !important;
+      font-family: 'Space Grotesk', sans-serif !important; font-size: 1.7rem !important;
       line-height: 1 !important; color: {TEXT} !important; }}
 
   /* ---- Mobil: mindre marginal, kompaktare Bästa köp-rad ---- */
@@ -254,7 +254,7 @@ st.markdown(f"""
         padding-left: 1.1rem !important; padding-right: 1.1rem !important; }}
     .fullrule {{ margin: .35rem -1.1rem 0 !important; }}
     /* Hamburgaren i övre högra hörnet (absolut mot huvudytan), wordmark kvar vänster */
-    .st-key-mobtoggle {{ position: absolute !important; top: 1.7rem !important;
+    .st-key-mobtoggle {{ position: absolute !important; top: 2.65rem !important;
         right: 1.1rem !important; width: auto !important; z-index: 5; }}
     /* Hopfällbar meny: navbox dold tills hamburgaren öppnar den → vertikal lista */
     .st-key-navbox {{ display: none !important; flex-direction: column !important;
