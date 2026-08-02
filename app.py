@@ -125,6 +125,8 @@ st.markdown(f"""
   .st-key-fgexp summary p {{ font-size: .82rem !important; }}
   /* Dra upp sentimentet närmare poäng-raden ovanför */
   .st-key-fgexp {{ margin-top: -1rem !important; }}
+  /* Två mätarfigurer, en per bredd (se kommentaren vid st.plotly_chart) */
+  .st-key-fggauge-m {{ display: none; }}
   .stock {{ border-top: 1px solid {HAIRLINE}; }}
   .stock:last-child {{ border-bottom: 1px solid {HAIRLINE}; }}
   .stoggle {{ position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }}
@@ -306,6 +308,17 @@ st.markdown(f"""
     [data-testid="stMainBlockContainer"] [data-testid="stVerticalBlock"] {{ gap: .6rem; }}
     /* Mobilen har redan tightare rytm (gap .6rem) → mildare uppdragning */
     .st-key-fgexp {{ margin-top: -.15rem !important; }}
+    /* Utfällt sentiment: kapa luften runt mätaren (figurens egen döda höjd
+       styrs av hojd= i fear_greed_gauge). Etikettens undermarginal är det
+       som annars ger 30+ px ner till bildtexten. */
+    .st-key-fgexp [data-testid="stExpanderDetails"] {{
+        padding-top: .1rem !important; padding-bottom: .1rem !important; }}
+    .st-key-fggauge-d {{ display: none; }}
+    .st-key-fggauge-m {{ display: block; }}
+    /* Centrerkolumnerna [1,4,1] staplas på mobil — den tomma första kolumnen
+       lämnar då bara ett gap kvar ovanför mätaren. */
+    .st-key-fgexp [data-testid="stHorizontalBlock"] {{ gap: 0 !important; }}
+    .st-key-fgexp .fg-etikett {{ margin: -.7rem 0 .2rem; font-size: 1.4rem; }}
     .hero-sub {{ margin-bottom: .9rem; }}
     .sub-lang {{ display: none; }}   /* mobil: kortad undertext (bara poäng + länk) */
     .nyckeltal {{ gap: .7rem 1.6rem; margin-bottom: .9rem; }}
@@ -655,8 +668,14 @@ def fg_zon(v):
     return FG_ZONER[-1][1], FG_ZONER[-1][2]
 
 
-def fear_greed_gauge(varde):
-    """CNN-lik halvcirkelmätare (Plotly go.Indicator) med fem färgzoner + nål."""
+def fear_greed_gauge(varde, hojd=300):
+    """CNN-lik halvcirkelmätare (Plotly go.Indicator) med fem färgzoner + nål.
+
+    hojd styr figurhöjden. Plotly centrerar mätaren i figuren och låter bågens
+    storlek begränsas av den minsta av bredd/höjd — är figuren högre än vad
+    bågen behöver blir mellanskillnaden tomrum över och under. Utfället på
+    Bästa köp är smalt (särskilt på mobil) och skickar därför en lägre höjd.
+    """
     import plotly.graph_objects as go
 
     fig = go.Figure(go.Indicator(
@@ -682,8 +701,11 @@ def fear_greed_gauge(varde):
         domain={"x": [0, 1], "y": [0, 1]},
     ))
     # t-marginalen måste rymma de översta zonetiketterna (45/55) — annars klipps
-    # de av figurkanten. Höjden höjs lika mycket så själva bågen behåller storleken.
-    fig.update_layout(height=300, margin=dict(l=24, r=24, t=34, b=0),
+    # de av figurkanten. Plotly reserverar ingen plats för dem: de ritas ovanför
+    # bågen och sticker upp mer ju större bågen är. Frestas inte att krympa den
+    # för den låga figuren — på en bred skärm är bågen höjdbegränsad och därmed
+    # stor, och då klipps 45/55 bort (testat: t=12 klipper på desktop).
+    fig.update_layout(height=hojd, margin=dict(l=24, r=24, t=34, b=0),
                       paper_bgcolor="rgba(0,0,0,0)", font={"family": "Space Grotesk"})
     return fig
 
@@ -963,8 +985,18 @@ if view == "Bästa köp":
                 with st.expander(f"Marknadssentiment · {_fgv:.0f} · {_fge}"):
                     _fgc = st.columns([1, 4, 1])
                     with _fgc[1]:
-                        st.plotly_chart(fear_greed_gauge(_fgv), use_container_width=True,
-                                        config={"displayModeBar": False})
+                        # Rätt figurhöjd beror på bredden: smal (mobil) → bågen
+                        # begränsas av bredden och en hög figur blir mest tomrum;
+                        # bred (desktop) → bågen begränsas av höjden och en låg
+                        # figur ger en onödigt liten mätare. Plotly ritar i fasta
+                        # pixlar, så CSS kan inte skala om en och samma figur utan
+                        # att beskära den. Därför två, en dold per media query —
+                        # samma mönster som breda tabeller vs mobilkort nedan.
+                        for _nyckel, _h in (("fggauge-d", 300), ("fggauge-m", 195)):
+                            with st.container(key=_nyckel):
+                                st.plotly_chart(fear_greed_gauge(_fgv, hojd=_h),
+                                                use_container_width=True,
+                                                config={"displayModeBar": False})
                         st.markdown(f'<div class="fg-etikett" style="color:{_fgf}">{_fge}</div>',
                                     unsafe_allow_html=True)
                     st.caption("Full vy med historik under **VII · Sentiment**.")
