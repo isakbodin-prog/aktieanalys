@@ -77,7 +77,7 @@ st.markdown(f"""
       letter-spacing: .24em; font-size: .68rem; color: {MUTED}; margin-bottom: .5rem; }}
   /* Enhetlig rubrikstorlek över alla vyer: hero-title, sh-rubrik och st.subheader (h2/h3) */
   .hero-title {{ font-family: 'Newsreader', serif; font-size: 1.6rem; line-height: 1.05;
-      letter-spacing: -.02em; color: {TEXT}; margin: 1.2rem auto 1.2rem; max-width: 900px;
+      letter-spacing: -.02em; color: {TEXT}; margin: 1.9rem auto 1.9rem; max-width: 900px;
       text-align: center; }}
   [data-testid="stMainBlockContainer"] h2, [data-testid="stMainBlockContainer"] h3 {{
       font-size: 1.6rem !important; }}
@@ -274,7 +274,7 @@ st.markdown(f"""
         align-items: flex-start !important; gap: .1rem !important; }}
     [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button {{
         font-size: .82rem !important; letter-spacing: .1em; padding: .5rem .1rem !important; }}
-    .hero-title {{ font-size: 1.5rem; margin-top: .5rem; }}
+    .hero-title {{ font-size: 1.5rem; margin-top: 1.5rem; }}
     .sh-rubrik {{ font-size: 1.5rem; margin-bottom: 1.4rem; }}
     [data-testid="stMainBlockContainer"] h2, [data-testid="stMainBlockContainer"] h3 {{
         font-size: 1.5rem !important; }}
