@@ -111,7 +111,11 @@ st.markdown(f"""
   [data-testid="stMainBlockContainer"] .st-key-fgexp [data-testid="stExpander"] summary {{
       text-transform: none !important; letter-spacing: .01em !important;
       font-size: .82rem !important; justify-content: flex-start; padding-left: 0 !important;
-      padding-top: .35rem !important; padding-bottom: .35rem !important; gap: .45rem; }}
+      padding-top: .35rem !important; padding-bottom: .35rem !important; gap: .45rem;
+      /* Streamlit fyller summary-raden (rgb(238,233,221) + rundade hörn upptill)
+         så fort expandern är ÖPPEN — stängd är den transparent. Det ger en
+         plattliknande ram runt rubriken som inte hör hemma i den här listan. */
+      background: transparent !important; border-radius: 0 !important; }}
   /* Chevronen flyttas EFTER etiketten (order) i stället för att döljas — kvar som
      utfällningssignal, men "Marknadssentiment" ligger ändå i vänsterlinjen. */
   .st-key-fgexp summary span:has(> [data-testid="stIconMaterial"]) {{
@@ -705,7 +709,9 @@ def fear_greed_gauge(varde, hojd=300):
     # bågen och sticker upp mer ju större bågen är. Frestas inte att krympa den
     # för den låga figuren — på en bred skärm är bågen höjdbegränsad och därmed
     # stor, och då klipps 45/55 bort (testat: t=12 klipper på desktop).
-    fig.update_layout(height=hojd, margin=dict(l=24, r=24, t=34, b=0),
+    # l/r måste rymma ändetiketterna 0 och 100 — den tresiffriga hänger annars
+    # utanför figurkanten och sista nollan klipps (mätt: 310 px i en 308 px figur).
+    fig.update_layout(height=hojd, margin=dict(l=36, r=36, t=34, b=0),
                       paper_bgcolor="rgba(0,0,0,0)", font={"family": "Space Grotesk"})
     return fig
 
