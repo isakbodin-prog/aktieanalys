@@ -312,7 +312,7 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
    EXIT-sektion), Historik, en flik per profil
 
 ## Deploy (GitHub + Render)
-- Repo: https://github.com/isakbodin-prog/aktieanalys (privat) — push till
+- Repo: https://github.com/isakbodin-prog/aktieanalys (publikt) — push till
   main triggar automatisk deploy på Render (gratisnivå, somnar efter 15 min)
 - Start command: streamlit run app.py --server.port $PORT
   --server.address 0.0.0.0 --server.headless true
