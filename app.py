@@ -48,7 +48,7 @@ st.markdown(f"""
   /* Full bredd på ytan (fullbreddslinjer + hörnplacerad wordmark); innehållet
      centreras i egna 900px-block. */
   [data-testid="stMainBlockContainer"], .block-container {{
-      max-width: 100% !important; padding: 1.3rem 3.5rem 2rem !important; position: relative; }}
+      max-width: 100% !important; padding: .8rem 3.5rem 2rem !important; position: relative; }}
 
   /* Dölj Streamlits egen verktygsrad (Deploy/Stop/⋮/running-man) + färgdekor
      högst upp — de tillhör inte designen och klippte wordmarken. */
@@ -209,8 +209,8 @@ st.markdown(f"""
       display: none !important; }}
 
   /* --- Diskret toppnavigering --- */
-  .wordmark {{ font-family: 'Newsreader', serif; font-size: 1.05rem; color: {TEXT};
-      letter-spacing: .01em; padding-top: .3rem; }}
+  .wordmark {{ font-family: 'Newsreader', serif; font-size: .95rem; color: {TEXT};
+      letter-spacing: .01em; padding-top: .2rem; }}
   .dateline {{ font-family: 'Space Grotesk', sans-serif; font-size: .64rem; text-transform: uppercase;
       letter-spacing: .16em; color: {MUTED}; margin: .2rem 0 2.6rem; }}
   hr.navhr {{ margin: .8rem 0 0 !important; }}
@@ -257,7 +257,7 @@ st.markdown(f"""
         padding-left: 1.1rem !important; padding-right: 1.1rem !important; }}
     .fullrule {{ margin: .35rem -1.1rem 0 !important; }}
     /* Hamburgaren i övre högra hörnet (absolut mot huvudytan), wordmark kvar vänster */
-    .st-key-mobtoggle {{ position: absolute !important; top: 1.75rem !important;
+    .st-key-mobtoggle {{ position: absolute !important; top: 1.1rem !important;
         right: 1.1rem !important; width: auto !important; z-index: 5; }}
     /* Hopfällbar meny: navbox dold tills hamburgaren öppnar den → vertikal lista */
     .st-key-navbox {{ display: none !important; flex-direction: column !important;
