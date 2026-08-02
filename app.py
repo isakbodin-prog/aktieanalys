@@ -252,26 +252,30 @@ st.markdown(f"""
       padding-top: .5rem !important; overflow: visible !important; }}
   .st-key-navbox [data-testid="stElementContainer"], .st-key-navbox .stButton {{
       width: auto !important; overflow: visible !important; }}
-  /* Hamburgerikonen (bara mobil) — diskret, i högra hörnet. */
-  .st-key-mobtoggle button {{ background: transparent !important; border: none !important;
-      box-shadow: none !important; padding: .1rem .2rem !important; min-height: 0 !important; }}
-  .st-key-mobtoggle button, .st-key-mobtoggle button p {{
-      font-family: 'Space Grotesk', sans-serif !important; font-size: 1.7rem !important;
-      line-height: 1 !important; color: {TEXT} !important; }}
+  /* CSS-only hamburgartoggle — dold kryssruta + klickbar ikon-label (bara mobil).
+     Öppnar/stänger menyn direkt på klienten via :has(), utan st.rerun. */
+  .mm-cb {{ position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }}
+  .mm-burger {{ display: none; }}
+  .mm-burger .mm-close {{ display: none; }}
 
   /* ---- Mobil: mindre marginal, kompaktare Bästa köp-rad ---- */
   @media (max-width: 640px) {{
     [data-testid="stMainBlockContainer"], .block-container {{
         padding-left: 1.1rem !important; padding-right: 1.1rem !important; }}
     .fullrule {{ margin: .35rem -1.1rem 0 !important; }}
-    /* Hamburgaren i övre högra hörnet (absolut mot huvudytan), wordmark kvar vänster */
-    .st-key-mobtoggle {{ position: absolute !important; top: .8rem !important;
-        right: 1.1rem !important; width: auto !important; z-index: 5; }}
+    /* Hamburgaren i övre högra hörnet (absolut mot markdown-containern som redan
+       ligger inom sidpaddingen → right: 0 = innehållets högerkant) */
+    .mm-burger {{ display: block; position: absolute; top: 0; right: 0;
+        font-family: 'Space Grotesk', sans-serif; font-size: 1.7rem; line-height: 1;
+        color: {TEXT}; cursor: pointer; z-index: 5; padding: .1rem .2rem; }}
+    body:has(.mm-cb:checked) .mm-burger .mm-open {{ display: none; }}
+    body:has(.mm-cb:checked) .mm-burger .mm-close {{ display: inline; }}
     /* Nolla gapet till den dolda nav-kolumnen så sidhuvudet blir kompakt */
     .st-key-header [data-testid="stHorizontalBlock"] {{ gap: 0 !important; }}
-    /* Hopfällbar meny: navbox dold tills hamburgaren öppnar den → vertikal lista */
+    /* Hopfällbar meny: navbox dold tills kryssrutan är ikryssad → vertikal lista */
     .st-key-navbox {{ display: none !important; flex-direction: column !important;
         align-items: flex-start !important; gap: .1rem !important; }}
+    body:has(.mm-cb:checked) .st-key-navbox {{ display: flex !important; }}
     [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button {{
         font-size: .82rem !important; letter-spacing: .1em; padding: .5rem .1rem !important; }}
     .hero-title {{ font-size: 1.5rem; margin-top: 1.5rem; }}
@@ -305,7 +309,7 @@ st.markdown(f"""
   /* Aktiekort (mobil) — tabellersättning. Döljs på desktop. */
   .mobilkort {{ margin: .2rem 0 .5rem; }}
   /* Element som bara ska visas på mobil (döljs på desktop) */
-  @media (min-width: 641px) {{ .mobilkort, .mobilonly, .st-key-mobtoggle {{ display: none !important; }} }}
+  @media (min-width: 641px) {{ .mobilkort, .mobilonly {{ display: none !important; }} }}
 
   /* Historik-logg (mobil) — kompakt lista i stället för bred tabell */
   .logglista {{ margin: .2rem 0 .5rem; }}
@@ -807,27 +811,32 @@ VYER = [
     ("Sentiment", "VII · Sentiment"),
 ]
 st.session_state.setdefault("view", "Bästa köp")
-st.session_state.setdefault("mobmeny_open", False)
 
 with st.container(key="header"):
     hcol1, hcol2 = st.columns([2, 8], vertical_alignment="top")
     with hcol1:
-        # Wordmark + hamburgerknapp på SAMMA rad (hamburgaren bara synlig på mobil).
+        # Wordmark + CSS-only hamburgartoggle: dold kryssruta + klickbar ikon-label.
+        # Öppna/stänga sker direkt på klienten (ingen st.rerun → ingen fördröjning).
+        # Vy-kommentaren gör att markupen (och kryssrutan) återställs vid vybyte,
+        # så menyn fälls ihop automatiskt när man valt en vy.
         with st.container(key="brandrow"):
-            st.markdown('<div class="wordmark">eToro Portföljanalys</div>', unsafe_allow_html=True)
-            with st.container(key="mobtoggle"):
-                if st.button("✕" if st.session_state["mobmeny_open"] else "☰",
-                             key="mobmeny_btn"):
-                    st.session_state["mobmeny_open"] = not st.session_state["mobmeny_open"]
-                    st.rerun()
+            # Vy-beroende klass (mv-<vy>) gör att markupen ändras vid vybyte →
+            # Streamlit renderar om → kryssrutan nollställs → menyn fälls ihop.
+            st.markdown(
+                '<div class="wordmark">eToro Portföljanalys</div>'
+                '<input type="checkbox" id="mm-cb" class="mm-cb">'
+                f'<label for="mm-cb" class="mm-burger mv-{_navslug(st.session_state["view"])}" '
+                'aria-label="Meny">'
+                '<span class="mm-open">☰</span><span class="mm-close">✕</span></label>',
+                unsafe_allow_html=True,
+            )
     with hcol2:
-        # Menypunkterna flödar som en rad (flex-wrap) — radbryter på smala skärmar.
-        # På mobil dold som standard; visas när mobmeny_open (stil injiceras nedan).
+        # Menypunkterna flödar som en rad (flex-wrap); på mobil dold tills
+        # kryssrutan är ikryssad (styrs via :has() nedan).
         with st.container(key="navbox"):
             for _key, _label in VYER:
                 if st.button(_label, key=f"nav_{_navslug(_key)}"):
                     st.session_state["view"] = _key
-                    st.session_state["mobmeny_open"] = False   # fäll ihop efter val
                     st.rerun()
 
 # Understryk den aktiva menypunkten (dynamiskt per vy).
@@ -837,12 +846,14 @@ st.markdown(
     f"border-bottom: 1px solid {TEXT} !important; }}</style>",
     unsafe_allow_html=True,
 )
-# Fäll ut mobilmenyn när den är öppen (bara mobil).
-if st.session_state["mobmeny_open"]:
-    st.markdown(
-        "<style>@media (max-width: 640px) { .st-key-navbox { display: flex !important; } }</style>",
-        unsafe_allow_html=True,
-    )
+# Mobilmenyns kryssruta lever i DOM:en och nollas inte av Streamlit vid rerun.
+# En liten script-komponent (kör vid varje rerun, t.ex. vyval) fäller ihop menyn.
+# Vy-taggen gör att iframen laddas om vid vybyte så scriptet garanterat körs.
+st.components.v1.html(
+    f"<script>try{{const c=window.parent.document.getElementById('mm-cb');"
+    f"if(c)c.checked=false;}}catch(e){{}}/*{_aktiv}*/</script>",
+    height=0, width=0,
+)
 
 st.markdown('<hr class="fullrule">', unsafe_allow_html=True)
 
