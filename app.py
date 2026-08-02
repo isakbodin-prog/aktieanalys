@@ -131,6 +131,14 @@ st.markdown(f"""
   .st-key-fgexp {{ margin-top: -1rem !important; }}
   /* Två mätarfigurer, en per bredd (se kommentaren vid st.plotly_chart) */
   .st-key-fggauge-m {{ display: none; }}
+  /* Genvägen till Sentiment-vyn: en knapp klädd som bildtextens textlänk */
+  .st-key-fglank button {{ background: none !important; border: none !important;
+      box-shadow: none !important; padding: 0 !important; min-height: 0 !important;
+      height: auto !important; font-family: 'Space Grotesk', sans-serif !important;
+      color: {MUTED} !important; text-decoration: underline;
+      text-underline-offset: 2px; text-decoration-thickness: 1px; }}
+  .st-key-fglank button p {{ font-size: .78rem !important; }}
+  .st-key-fglank button:hover {{ color: {TEXT} !important; }}
   .stock {{ border-top: 1px solid {HAIRLINE}; }}
   .stock:last-child {{ border-bottom: 1px solid {HAIRLINE}; }}
   .stoggle {{ position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }}
@@ -1005,7 +1013,15 @@ if view == "Bästa köp":
                                                 config={"displayModeBar": False})
                         st.markdown(f'<div class="fg-etikett" style="color:{_fgf}">{_fge}</div>',
                                     unsafe_allow_html=True)
-                    st.caption("Full vy med historik under **VII · Sentiment**.")
+                    # Genväg till Sentiment-vyn. En ren <a> kan inte byta vy —
+                    # navigeringen går via session_state — så det är en knapp som
+                    # CSS:en klär som en textlänk. Vyn har redan lästs ur
+                    # session_state längre upp, därav en explicit rerun.
+                    with st.container(key="fglank"):
+                        if st.button("Full vy med historik under VII · Sentiment",
+                                     key="btn_fg_till_sentiment"):
+                            st.session_state["view"] = "Sentiment"
+                            st.rerun()
             # Färga sammanfattningsraden i zonens färg.
             st.markdown(f"<style>.st-key-fgexp summary {{ color: {_fgf} !important; }}</style>",
                         unsafe_allow_html=True)
