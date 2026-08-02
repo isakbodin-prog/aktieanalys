@@ -48,7 +48,7 @@ st.markdown(f"""
   /* Full bredd på ytan (fullbreddslinjer + hörnplacerad wordmark); innehållet
      centreras i egna 900px-block. */
   [data-testid="stMainBlockContainer"], .block-container {{
-      max-width: 100% !important; padding: 2rem 3.5rem 2rem !important; }}
+      max-width: 100% !important; padding: 2rem 3.5rem 2rem !important; position: relative; }}
 
   /* Dölj Streamlits egen verktygsrad (Deploy/Stop/⋮/running-man) + färgdekor
      högst upp — de tillhör inte designen och klippte wordmarken. */
@@ -241,21 +241,21 @@ st.markdown(f"""
       padding-top: .5rem !important; overflow: visible !important; }}
   .st-key-navbox [data-testid="stElementContainer"], .st-key-navbox .stButton {{
       width: auto !important; overflow: visible !important; }}
-  /* Hamburgerknappen (bara mobil) — diskret, textlik. */
-  .st-key-mobtoggle button {{ font-family: 'Space Grotesk', sans-serif !important;
-      text-transform: uppercase; letter-spacing: .14em; font-size: .72rem !important;
-      color: {TEXT} !important; background: transparent !important; border: none !important;
-      box-shadow: none !important; padding: .3rem .1rem !important; min-height: 0 !important; }}
+  /* Hamburgerikonen (bara mobil) — diskret, i högra hörnet. */
+  .st-key-mobtoggle button {{ background: transparent !important; border: none !important;
+      box-shadow: none !important; padding: .1rem .2rem !important; min-height: 0 !important; }}
+  .st-key-mobtoggle button, .st-key-mobtoggle button p {{
+      font-family: 'Space Grotesk', sans-serif !important; font-size: 1.35rem !important;
+      line-height: 1 !important; color: {TEXT} !important; }}
 
   /* ---- Mobil: mindre marginal, kompaktare Bästa köp-rad ---- */
   @media (max-width: 640px) {{
     [data-testid="stMainBlockContainer"], .block-container {{
         padding-left: 1.1rem !important; padding-right: 1.1rem !important; }}
     .fullrule {{ margin: .35rem -1.1rem 0 !important; }}
-    /* Wordmark + hamburgare på samma rad högst upp till vänster */
-    .st-key-brandrow {{ flex-direction: row !important; align-items: baseline !important;
-        gap: 1rem !important; }}
-    .st-key-mobtoggle {{ width: auto !important; }}
+    /* Hamburgaren i övre högra hörnet (absolut mot huvudytan), wordmark kvar vänster */
+    .st-key-mobtoggle {{ position: absolute !important; top: 1.7rem !important;
+        right: 1.1rem !important; width: auto !important; z-index: 5; }}
     /* Hopfällbar meny: navbox dold tills hamburgaren öppnar den → vertikal lista */
     .st-key-navbox {{ display: none !important; flex-direction: column !important;
         align-items: flex-start !important; gap: .1rem !important; }}
@@ -798,7 +798,7 @@ with hcol1:
     with st.container(key="brandrow"):
         st.markdown('<div class="wordmark">eToro Portföljanalys</div>', unsafe_allow_html=True)
         with st.container(key="mobtoggle"):
-            if st.button("✕  Meny" if st.session_state["mobmeny_open"] else "☰  Meny",
+            if st.button("✕" if st.session_state["mobmeny_open"] else "☰",
                          key="mobmeny_btn"):
                 st.session_state["mobmeny_open"] = not st.session_state["mobmeny_open"]
                 st.rerun()
