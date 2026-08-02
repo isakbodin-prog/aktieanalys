@@ -252,6 +252,10 @@ st.markdown(f"""
     [data-testid="stMainBlockContainer"], .block-container {{
         padding-left: 1.1rem !important; padding-right: 1.1rem !important; }}
     .fullrule {{ margin-left: -1.1rem; margin-right: -1.1rem; }}
+    /* Wordmark + hamburgare på samma rad högst upp till vänster */
+    .st-key-brandrow {{ flex-direction: row !important; align-items: baseline !important;
+        gap: 1rem !important; }}
+    .st-key-mobtoggle {{ width: auto !important; }}
     /* Hopfällbar meny: navbox dold tills hamburgaren öppnar den → vertikal lista */
     .st-key-navbox {{ display: none !important; flex-direction: column !important;
         align-items: flex-start !important; gap: .1rem !important; }}
@@ -789,14 +793,15 @@ st.session_state.setdefault("mobmeny_open", False)
 
 hcol1, hcol2 = st.columns([2, 8], vertical_alignment="top")
 with hcol1:
-    st.markdown('<div class="wordmark">eToro Portföljanalys</div>', unsafe_allow_html=True)
+    # Wordmark + hamburgerknapp på SAMMA rad (hamburgaren bara synlig på mobil).
+    with st.container(key="brandrow"):
+        st.markdown('<div class="wordmark">eToro Portföljanalys</div>', unsafe_allow_html=True)
+        with st.container(key="mobtoggle"):
+            if st.button("✕  Meny" if st.session_state["mobmeny_open"] else "☰  Meny",
+                         key="mobmeny_btn"):
+                st.session_state["mobmeny_open"] = not st.session_state["mobmeny_open"]
+                st.rerun()
 with hcol2:
-    # Hamburgerknapp — bara synlig på mobil (CSS); togglar navbox.
-    with st.container(key="mobtoggle"):
-        if st.button("✕  Meny" if st.session_state["mobmeny_open"] else "☰  Meny",
-                     key="mobmeny_btn"):
-            st.session_state["mobmeny_open"] = not st.session_state["mobmeny_open"]
-            st.rerun()
     # Menypunkterna flödar som en rad (flex-wrap) — radbryter på smala skärmar.
     # På mobil dold som standard; visas när mobmeny_open (stil injiceras nedan).
     with st.container(key="navbox"):
