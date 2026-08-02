@@ -885,27 +885,7 @@ st.markdown(
 # VY: Bästa köp — hjälte + senaste händelser
 # ======================================================================
 if view == "Bästa köp":
-    # "Så räknas poängen" ligger inline direkt efter underrubriken (native
-    # <details>/<summary> → samma rad, expanderar poängförklaringen utan rerun).
-    st.markdown(
-        '<div class="hero-title">Bästa köp</div>'
-        '<div class="hero-sub">Sammanvägd poäng 0–100. '
-        '<span class="sub-lang">Håll muspekaren över eller klicka '
-        'på en aktie för poänguppdelning och nyckeltal. </span>'
-        '<details class="poang-inline"><summary>Så räknas poängen</summary>'
-        '<span class="poang-text">'
-        '<strong>Poängmodellen (§12, omviktad):</strong> Trend 25 p · Momentum 20 p '
-        '(inkl. relativ styrka mot sektor-ETF) · Analytiker 20 p (uppsida — halverad vid '
-        'hög riktkursspridning — antal analytiker, köprekommendation, EPS-revidering) · '
-        'Konsensus 25 p (viktad konsensus, snittvikt, nettoflöde 30d) — delat med '
-        '√klusterstorlek om aktien samvarierar starkt (korr &gt; 0,7) med andra '
-        'konsensusaktier · Värdering 10 p (forward P/E mot sektormedian, PEG). '
-        '<strong>Poäng v1</strong> är förra modellen (utan Värdering/RS/spridning) — kvar '
-        'för jämförelse tills --utvardera hunnit kalibrera de nya vikterna. '
-        'Aktier utan stigande trend rankas alltid sist, oavsett poäng.'
-        '</span></details></div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<div class="hero-title">Bästa köp</div>', unsafe_allow_html=True)
 
     if not ranking:
         st.info("Ingen rangordning i senaste körningen — kör en ny analys.")
@@ -929,7 +909,28 @@ if view == "Bästa köp":
 
         st.markdown(hero_html(ranking, claude, consensus, bransch, KOMP_MAX, analyses), unsafe_allow_html=True)
 
-        # Marknadssentiment (Fear & Greed): direkt under aktielistan, utfällbar mätare.
+        # Undertext om poängen ligger UNDER listan. "Så räknas poängen" inline
+        # (native <details>/<summary> → samma rad, expanderar utan rerun).
+        st.markdown(
+            '<div class="hero-sub">Sammanvägd poäng 0–100. '
+            '<span class="sub-lang">Håll muspekaren över eller klicka '
+            'på en aktie för poänguppdelning och nyckeltal. </span>'
+            '<details class="poang-inline"><summary>Så räknas poängen</summary>'
+            '<span class="poang-text">'
+            '<strong>Poängmodellen (§12, omviktad):</strong> Trend 25 p · Momentum 20 p '
+            '(inkl. relativ styrka mot sektor-ETF) · Analytiker 20 p (uppsida — halverad vid '
+            'hög riktkursspridning — antal analytiker, köprekommendation, EPS-revidering) · '
+            'Konsensus 25 p (viktad konsensus, snittvikt, nettoflöde 30d) — delat med '
+            '√klusterstorlek om aktien samvarierar starkt (korr &gt; 0,7) med andra '
+            'konsensusaktier · Värdering 10 p (forward P/E mot sektormedian, PEG). '
+            '<strong>Poäng v1</strong> är förra modellen (utan Värdering/RS/spridning) — kvar '
+            'för jämförelse tills --utvardera hunnit kalibrera de nya vikterna. '
+            'Aktier utan stigande trend rankas alltid sist, oavsett poäng.'
+            '</span></details></div>',
+            unsafe_allow_html=True,
+        )
+
+        # Marknadssentiment (Fear & Greed): under listan, utfällbar mätare.
         _fg = data.get("fear_greed")
         if _fg and _fg.get("varde") is not None:
             _fgv = _fg["varde"]
