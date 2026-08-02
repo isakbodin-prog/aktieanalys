@@ -77,7 +77,8 @@ st.markdown(f"""
       letter-spacing: .24em; font-size: .68rem; color: {MUTED}; margin-bottom: .5rem; }}
   /* Enhetlig rubrikstorlek över alla vyer: hero-title, sh-rubrik och st.subheader (h2/h3) */
   .hero-title {{ font-family: 'Newsreader', serif; font-size: 1.6rem; line-height: 1.05;
-      letter-spacing: -.02em; color: {TEXT}; margin: 1rem auto .5rem; max-width: 900px; }}
+      letter-spacing: -.02em; color: {TEXT}; margin: 1rem auto .5rem; max-width: 900px;
+      text-align: center; }}
   [data-testid="stMainBlockContainer"] h2, [data-testid="stMainBlockContainer"] h3 {{
       font-size: 1.6rem !important; }}
   .hero-sub {{ font-family: 'Space Grotesk', sans-serif; font-size: .8rem; color: {MUTED};
@@ -109,7 +110,9 @@ st.markdown(f"""
       border: none !important; border-top: none !important; box-shadow: none !important; }}
   [data-testid="stMainBlockContainer"] .st-key-fgexp [data-testid="stExpander"] summary {{
       text-transform: none !important; letter-spacing: .01em !important;
-      font-size: .82rem !important; justify-content: center; }}
+      font-size: .82rem !important; justify-content: flex-start; padding-left: 0 !important; }}
+  /* Dölj expanderns chevron så "Marknadssentiment" ligger i linje med övrigt vänster */
+  .st-key-fgexp summary span:has(> [data-testid="stIconMaterial"]) {{ display: none !important; }}
   .st-key-fgexp summary p {{ font-size: .82rem !important; }}
   .stock {{ border-top: 1px solid {HAIRLINE}; }}
   .stock:last-child {{ border-bottom: 1px solid {HAIRLINE}; }}
