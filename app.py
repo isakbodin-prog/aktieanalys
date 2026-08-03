@@ -323,8 +323,12 @@ st.markdown(f"""
      (se kommentaren i Python-koden) — nolla containerns EGNA gap så de inte
      bara flyttar det döda utrymmet hit i stället. */
   .st-key-header {{ gap: 0 !important; }}
+  /* padding-top kompenserar en MÄTT skillnad, inte en gissning: menytextens
+     line-height 1.5 (satt för understrykningens läge) lägger dess mittlinje
+     3 px lägre än wordmarkens. Utan detta står de inte i linje. Nollas på
+     mobil, där menyn är dold och hamburgaren centreras mot samma container. */
   .wordmark {{ font-family: 'Newsreader', serif; font-size: .95rem; color: {TEXT};
-      letter-spacing: .01em; }}
+      letter-spacing: .01em; padding-top: 3px; }}
   .dateline {{ font-family: 'Space Grotesk', sans-serif; font-size: .64rem; text-transform: uppercase;
       letter-spacing: .16em; color: {MUTED}; margin: .2rem 0 2.6rem; }}
   hr.navhr {{ margin: .8rem 0 0 !important; }}
@@ -397,9 +401,19 @@ st.markdown(f"""
     [data-testid="stMainBlockContainer"], .block-container {{
         padding-left: 1.1rem !important; padding-right: 1.1rem !important; }}
     .fullrule {{ margin: .35rem -1.1rem 0 !important; }}
-    /* Hamburgaren i övre högra hörnet (absolut mot markdown-containern som redan
-       ligger inom sidpaddingen → right: 0 = innehållets högerkant) */
-    .mm-burger {{ display: block; position: absolute; top: 0; right: 0;
+    /* Streamlit lägger margin-bottom: -16px på stMarkdownContainer (för att äta
+       upp blockets gap). Elementcontainerns autohöjd blir då 24 − 16 = 8 px
+       trots att wordmarken är 24 — innehållet svämmar ut ur sidhuvudet, som ser
+       hoptryckt ut, och hamburgaren (absolut positionerad MOT just den
+       containern) utgår från en box en tredjedel så hög som texten. På desktop
+       döljs det av att navkolumnen bär höjden; på mobil är den dold. */
+    .st-key-brandrow [data-testid="stMarkdownContainer"] {{ margin-bottom: 0 !important; }}
+    .wordmark {{ padding-top: 0; }}   /* desktopens menykompensation gäller ej här */
+    /* Hamburgaren i övre högra hörnet. Centrerad mot containern i stället för
+       top: 0 — då följer den wordmarkens mitt även om radhöjden ändras, i
+       stället för att råka hamna rätt vid en viss teckenstorlek. */
+    .mm-burger {{ display: block; position: absolute; top: 50%; right: 0;
+        transform: translateY(-50%);
         font-family: 'Space Grotesk', sans-serif; font-size: 1.7rem; line-height: 1;
         color: {TEXT}; cursor: pointer; z-index: 5; padding: .1rem .2rem; }}
     body:has(.mm-cb:checked) .mm-burger .mm-open {{ display: none; }}
