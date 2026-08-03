@@ -152,8 +152,38 @@ st.markdown(f"""
       min-width: 4.2rem; flex: 0 0 auto; }}
   .meter {{ flex: 1 1 auto; height: 2px; background: {HAIRLINE}; position: relative; min-width: 50px; }}
   .meter .fill {{ position: absolute; inset: 0 auto 0 0; height: 100%; background: {TEXT}; }}
+  /* PROTOTYP — kurskolumnerna. Tal sätts med tabulära siffror (tnum) så de
+     bildar pelare: det är i hög grad DET som får en finansyta att läsa som
+     "clean", inte paletten. Proportionella siffror gör att 96,0 och 82,8 får
+     olika bredd och kolumnen fransar sig. */
+  .rad .pris, .rad .delta, .poang, .rang {{
+      font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }}
+  .sparkbox {{ flex: 1 1 auto; min-width: 54px; max-width: 210px; display: flex;
+      align-items: center; }}
+  .spark {{ width: 100%; height: 26px; display: block; overflow: visible; }}
+  .pris {{ font-family: 'Space Grotesk', sans-serif; font-size: .84rem; color: {TEXT};
+      width: 4.6rem; text-align: right; flex: 0 0 auto; }}
+  .delta {{ font-family: 'Space Grotesk', sans-serif; font-size: .74rem;
+      width: 4rem; text-align: right; flex: 0 0 auto; }}
   .poang {{ font-family: 'Space Grotesk', sans-serif; font-size: 1rem; color: {TEXT};
       width: 3.1rem; text-align: right; flex: 0 0 auto; }}
+  /* Kolumnhuvud — utan det blir tre sifferkolumner i rad omöjliga att tyda */
+  .kolhuvud {{ display: flex; align-items: center; gap: 1rem; padding: 0 .3rem .5rem;
+      max-width: 900px; margin: 0 auto; font-family: 'Space Grotesk', sans-serif;
+      font-size: .58rem; text-transform: uppercase; letter-spacing: .13em;
+      color: {MUTED}; }}
+  .kolhuvud .kh-spark {{ flex: 1 1 auto; min-width: 54px; max-width: 210px; }}
+  .kolhuvud .kh-vanster {{ width: calc(1.6rem + 32px + 4.2rem + 2rem); flex: 0 0 auto; }}
+  .kolhuvud .kh-pris {{ width: 4.6rem; text-align: right; flex: 0 0 auto; }}
+  .kolhuvud .kh-delta {{ width: 4rem; text-align: right; flex: 0 0 auto; }}
+  .kolhuvud .kh-poang {{ width: 3.1rem; text-align: right; flex: 0 0 auto; }}
+  .kolhuvud .kh-rek {{ width: calc(5.2rem + 1rem + 1rem); flex: 0 0 auto; }}
+  /* Lägesrad ovanför listan — hela marknadsläget på en rad */
+  .lagesrad {{ max-width: 900px; margin: 0 auto 1.5rem; text-align: center;
+      font-family: 'Space Grotesk', sans-serif; font-size: .68rem;
+      text-transform: uppercase; letter-spacing: .13em; color: {MUTED};
+      font-variant-numeric: tabular-nums; }}
+  .lagesrad b {{ font-weight: 500; color: {TEXT}; }}
   .crek {{ font-family: 'Space Grotesk', sans-serif; font-size: .66rem; text-transform: uppercase;
       letter-spacing: .14em; width: 5.2rem; text-align: right; flex: 0 0 auto; }}
   .trend {{ width: 1rem; text-align: center; font-size: .78rem; flex: 0 0 auto; }}
@@ -354,7 +384,18 @@ st.markdown(f"""
         font-size: 1.5rem !important; }}
     .rad {{ gap: .55rem; padding: .7rem .05rem; }}
     .meter {{ display: none; }}          /* poängsiffran räcker; frigör bredd */
-    .tk {{ flex: 1 1 auto; font-size: 1.05rem; min-width: 0; }}
+    /* PROTOTYP på mobil: sparklinen får plats och bär mest information, men
+       3-månaderskolumnen, kolumnhuvudet och kursen får vika — sex sifferfält
+       på 375 px blir gröt. Kursen finns kvar i utfällningens TL;DR. */
+    .kolhuvud {{ display: none; }}
+    .delta-3m, .rad .pris {{ display: none; }}
+    .sparkbox {{ min-width: 42px; max-width: 92px; }}
+    .spark {{ height: 20px; }}
+    .delta {{ width: 3.4rem; font-size: .66rem; }}
+    /* Tickern får ALDRIG krympa — med min-width: 0 bryter den mitt i ordet
+       ("AM ZN"). Sparklinen är den enda som ger efter på bredden. Minbredden
+       från basregeln behålls så sparklinerna börjar på samma x i alla rader. */
+    .tk {{ flex: 0 0 auto; font-size: 1.05rem; white-space: nowrap; }}
     .bikon {{ width: 26px; height: 26px; }}
     .rang {{ width: 1.3rem; font-size: .68rem; }}
     .poang {{ width: 2.7rem; font-size: .92rem; }}
@@ -607,6 +648,52 @@ def _sv1(v):
     return f"{v:.1f}".replace(".", ",")
 
 
+def _pct(v):
+    """Procent med tecken och svensk decimal, eller '—' vid null."""
+    return "—" if v is None else f"{v:+.1f}".replace(".", ",") + " %"
+
+
+def sparkline(ohlc, farg, bredd=120, hojd=26):
+    """Inline SVG-sparkline ur kursserien (SCHEMA: analyses[tk].ohlc, ~90 dgr).
+
+    Ritas som SVG direkt i HTML-strängen, inte som ett diagramwidget: Bästa
+    köp-listan är EN markdown-blob med CSS-driven utfällning, och en widget per
+    rad hade brutit den strukturen. SVG:n sträcks till radens bredd
+    (preserveAspectRatio="none") medan linjebredden hålls konstant med
+    vector-effect, så den inte deformeras.
+
+    MA200 ritas som svag referenslinje i samma skala — ligger kursen över den
+    är trenden intakt, vilket är exakt det hårda köpkriteriet i poängmodellen.
+    """
+    if not ohlc:
+        return ""
+    serie = [(p.get("c"), p.get("ma200")) for p in ohlc if p.get("c") is not None]
+    if len(serie) < 2:
+        return ""
+    stangn = [c for c, _ in serie]
+    ma_varden = [m for _, m in serie if m is not None]
+    lo = min(stangn + ma_varden)
+    hi = max(stangn + ma_varden)
+    spann = (hi - lo) or 1.0
+    steg = bredd / (len(serie) - 1)
+
+    def y(v):
+        return hojd - 2 - (v - lo) / spann * (hojd - 4)
+
+    kurs = " ".join(f"{i * steg:.1f},{y(c):.1f}" for i, (c, _) in enumerate(serie))
+    # MA200 saknas tidigt i serien → rita bara den sammanhängande svansen.
+    ma_pkt = [(i, m) for i, (_, m) in enumerate(serie) if m is not None]
+    ma_linje = ""
+    if len(ma_pkt) >= 2:
+        d = " ".join(f"{i * steg:.1f},{y(m):.1f}" for i, m in ma_pkt)
+        ma_linje = (f'<polyline points="{d}" fill="none" stroke="{HAIRLINE}" '
+                    f'stroke-width="1" vector-effect="non-scaling-stroke"/>')
+    return (f'<svg class="spark" viewBox="0 0 {bredd} {hojd}" preserveAspectRatio="none" '
+            f'aria-hidden="true">{ma_linje}'
+            f'<polyline points="{kurs}" fill="none" stroke="{farg}" stroke-width="1.4" '
+            f'stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>')
+
+
 def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max, analys_map):
     """Bästa köp som redaktionell hover/klick-lista (ren HTML/CSS, inga widgets).
 
@@ -685,13 +772,29 @@ def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max, analys_
             tldr_html = (f'<div class="ctldr" style="border-color:{farg}">'
                          f'{html.escape(text)}</div>')
 
+        # PROTOTYP: sparkline + kurs + avkastning ersätter poängstapeln. Poängen
+        # är en abstraktion; kursbilden är det man faktiskt vill se först.
+        a_pro = analys_map.get(tk) or {}
+        spark_farg = MOSS if r["trend_ok"] else RUST
+        spark = sparkline(a_pro.get("ohlc"), spark_farg)
+        kurs_txt = _num(a_pro.get("pris"), dec=2)
+        av1 = a_pro.get("avkastning_1m_%")
+        av3 = a_pro.get("avkastning_3m_%")
+
+        def _delta_span(v, klass):
+            f = MOSS if (v or 0) > 0 else (RUST if (v or 0) < 0 else MUTED)
+            return f'<span class="{klass}" style="color:{f}">{_pct(v)}</span>'
+
         rader.append(
             f'<div class="stock">'
             f'<input type="checkbox" id="st_{tk}" class="stoggle">'
             f'<label class="rad" for="st_{tk}">'
             f'<span class="rang">{i:02d}</span>{img}'
             f'<span class="tk">{tk}</span>'
-            f'<span class="meter"><span class="fill" style="width:{poang:.0f}%"></span></span>'
+            f'<span class="sparkbox">{spark}</span>'
+            f'<span class="pris">{kurs_txt}</span>'
+            f'{_delta_span(av1, "delta")}'
+            f'{_delta_span(av3, "delta delta-3m")}'
             f'<span class="poang">{_sv1(poang)}</span>'
             f'<span class="crek" style="color:{farg}">{crek}</span>{trendmark}'
             f'</label>'
@@ -1022,6 +1125,37 @@ if view == "Bästa köp":
             with st.container(key="rapportbadge"):
                 st.caption(f":material/event_upcoming: **Rapport inom en vecka:** {badges}")
 
+        # PROTOTYP — lägesrad: regim, sentiment, listans storlek och dagens
+        # ändringar finns redan som data men låg utspridda på fem vyer. Samlade
+        # här ger de hela marknadsläget på en rad, innan man läser listan.
+        _st_delar = []
+        _rg = (data.get("regim") or {}).get("regim")
+        if _rg:
+            _rgf = {"GRÖN": MOSS, "GUL": SAND, "RÖD": RUST}.get(_rg, MUTED)
+            _st_delar.append(f'Regim <b style="color:{_rgf}">{_rg}</b>')
+        _fgd = data.get("fear_greed") or {}
+        if _fgd.get("varde") is not None:
+            _fge2 = _fgd.get("etikett") or fg_zon(_fgd["varde"])[0]
+            _st_delar.append(f'Sentiment <b style="color:{fg_zon(_fgd["varde"])[1]}">'
+                             f'{_fgd["varde"]:.0f} {_fge2}</b>')
+        _st_delar.append(f'<b>{len(ranking)}</b> konsensusaktier')
+        _log_idag = data.get("historik") or []
+        if _log_idag:
+            _antal_idag = sum(1 for e in _log_idag if e["datum"] == _log_idag[0]["datum"])
+            _ord = "ändring" if _antal_idag == 1 else "ändringar"
+            _st_delar.append(f'<b>{_antal_idag}</b> {_ord} {_log_idag[0]["datum"]}')
+        st.markdown(f'<div class="lagesrad">{" · ".join(_st_delar)}</div>',
+                    unsafe_allow_html=True)
+
+        st.markdown(
+            '<div class="kolhuvud"><span class="kh-vanster"></span>'
+            '<span class="kh-spark">90 dagar</span>'
+            '<span class="kh-pris">Kurs</span>'
+            '<span class="kh-delta">1 mån</span>'
+            '<span class="kh-delta delta-3m">3 mån</span>'
+            '<span class="kh-poang">Poäng</span>'
+            '<span class="kh-rek"></span></div>',
+            unsafe_allow_html=True)
         st.markdown(hero_html(ranking, claude, consensus, bransch, KOMP_MAX, analyses), unsafe_allow_html=True)
 
         # Undertext om poängen ligger UNDER listan. "Så räknas poängen" inline
