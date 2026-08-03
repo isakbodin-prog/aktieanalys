@@ -274,18 +274,46 @@ st.markdown(f"""
   /* Toppnavet: liten, diskret mono-versal */
   [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button {{
       font-family: 'Space Grotesk', sans-serif !important; text-transform: uppercase;
-      letter-spacing: .1em; font-size: .48rem !important; color: {TEXT} !important;
+      letter-spacing: .1em; color: {TEXT} !important;
       padding: .1rem .1rem !important; line-height: 1.5 !important;
       height: auto !important; overflow: visible !important; white-space: nowrap; }}
+  /* Graden MÅSTE sättas på <p>:et, inte på knappen: Streamlit lägger etiketten
+     i en egen <p> med egen font-size, så en regel på knappen når aldrig texten
+     (den gamla .48rem gav 7,7 px på knappen men 16 px på texten — större än
+     brödtexten, och därför radbröts menyn vid 1280 px). */
+  [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button p {{
+      font-size: .64rem !important; letter-spacing: .1em; line-height: 1.5;
+      /* Understrykning som växer fram från vänster (hover + aktiv vy). Ritas som
+         bakgrundsbild i stället för border, så den ligger tätt mot texten och
+         kan animeras i bredd — en border kan inte det. */
+      background-image: linear-gradient(currentColor, currentColor);
+      background-repeat: no-repeat; background-position: 0 100%;
+      background-size: 0% 1px; transition: background-size .28s ease; }}
+  [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button:hover p {{
+      background-size: 100% 1px; }}
+  /* Romerska siffran (:gray[] i etiketten) — dov och en aning mindre */
+  [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button p span {{
+      color: {MUTED} !important; font-size: .88em; letter-spacing: .06em; }}
   [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button:hover {{
       color: {OLIV} !important; }}
-  /* Menyn flödar som en rad och radbryter på smala skärmar (mobil) */
+  /* Menyn flödar som en rad och radbryter på smala skärmar (mobil).
+     Högerställd på desktop så wordmark och meny ramar in sidhuvudet. */
   .st-key-navbox, .st-key-navbox [data-testid="stVerticalBlock"] {{
       flex-direction: row !important; flex-wrap: wrap !important;
-      align-items: center; align-content: flex-start; gap: .1rem 1rem !important;
+      align-items: center; align-content: flex-start;
+      justify-content: flex-end !important; gap: .1rem 1.15rem !important;
       padding-top: 0 !important; overflow: visible !important; }}
   .st-key-navbox [data-testid="stElementContainer"], .st-key-navbox .stButton {{
       width: auto !important; overflow: visible !important; }}
+  /* Smalt desktopfönster (t.ex. delad skärm): posterna ryms inte med siffror och
+     skulle radbryta till två rader. Offra ornamentet i stället för läsbarheten —
+     att i stället krympa graden hade gett ~9 px versaler. Mobilen har egen meny. */
+  @media (min-width: 641px) and (max-width: 1150px) {{
+    [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button p span {{
+        display: none; }}
+    .st-key-navbox, .st-key-navbox [data-testid="stVerticalBlock"] {{
+        gap: .1rem .8rem !important; }}
+  }}
   /* CSS-only hamburgartoggle — dold kryssruta + klickbar ikon-label (bara mobil).
      Öppnar/stänger menyn direkt på klienten via :has(), utan st.rerun. */
   .mm-cb {{ position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }}
@@ -306,12 +334,19 @@ st.markdown(f"""
     body:has(.mm-cb:checked) .mm-burger .mm-close {{ display: inline; }}
     /* Nolla gapet till den dolda nav-kolumnen så sidhuvudet blir kompakt */
     .st-key-header [data-testid="stHorizontalBlock"] {{ gap: 0 !important; }}
-    /* Hopfällbar meny: navbox dold tills kryssrutan är ikryssad → vertikal lista */
+    /* Hopfällbar meny: navbox dold tills kryssrutan är ikryssad → vertikal lista.
+       justify-content återställs: desktopens flex-end betyder "packa nedåt" när
+       riktningen är column, vilket inte är vad mobilmenyn vill. */
     .st-key-navbox {{ display: none !important; flex-direction: column !important;
-        align-items: flex-start !important; gap: .1rem !important; }}
+        align-items: flex-start !important; justify-content: flex-start !important;
+        gap: .1rem !important; }}
     body:has(.mm-cb:checked) .st-key-navbox {{ display: flex !important; }}
     [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button {{
-        font-size: .82rem !important; letter-spacing: .1em; padding: .5rem .1rem !important; }}
+        letter-spacing: .1em; padding: .5rem .1rem !important; }}
+    /* Graden måste sättas på <p>:et även här — se basregeln ovan. Utan denna
+       ärvs desktopens .64rem och mobilmenyn blir oläsligt liten. */
+    [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button p {{
+        font-size: .82rem !important; }}
     .hero-title {{ font-size: 1.5rem; margin-top: 1.5rem; }}
     /* Samma toppmarginal som hjälterubriken ovan — mobilen har tightare rytm */
     .sh-rubrik {{ font-size: 1.5rem; margin-top: 1.5rem; margin-bottom: 1.4rem; }}
@@ -858,15 +893,17 @@ if data:
 # Sidhuvud: wordmark (vänstra hörnet) + fördjupningsmeny (byter mittsektion)
 # ----------------------------------------------------------------------
 # (nyckel, etikett): vyn lagras på nyckeln, menyn visar etiketten (rom. siffror).
+# Siffran märks med :gray[] — Streamlits färgmarkdown — så den kan sättas i dov
+# ton och mindre grad via CSS (span:et nedan) utan att etiketten påverkas.
 VYER = [
     ("Bästa köp", "Bästa köp"),
-    ("Konsensus", "I · Konsensus"),
-    ("Divergens", "II · Divergens"),
-    ("Claude", "III · Claude"),
-    ("Ändringar", "IV · Ändringar"),
-    ("Historik", "V · Historik"),
-    ("Portföljer", "VI · Portföljer"),
-    ("Sentiment", "VII · Sentiment"),
+    ("Konsensus", ":gray[I] Konsensus"),
+    ("Divergens", ":gray[II] Divergens"),
+    ("Claude", ":gray[III] Claude"),
+    ("Ändringar", ":gray[IV] Ändringar"),
+    ("Historik", ":gray[V] Historik"),
+    ("Portföljer", ":gray[VI] Portföljer"),
+    ("Sentiment", ":gray[VII] Sentiment"),
 ]
 st.session_state.setdefault("view", "Bästa köp")
 
@@ -903,9 +940,14 @@ with st.container(key="header"):
     # upp ett dött mellanrum på ~50 px mellan menyn och hårlinjen under.
     # Understryk den aktiva menypunkten (dynamiskt per vy).
     _aktiv = _navslug(st.session_state["view"])
+    # Samma understrykningsteknik som hover (bakgrundsbild på <p>), inte en
+    # border på knappen — annars hamnar aktiv och hovrad linje på olika höjd.
+    # OBS prefixet stMainBlockContainer: basregeln för menyns <p> har två
+    # attributselektorer och vinner annars över en ren klassregel här.
     st.markdown(
-        f"<style>div.st-key-nav_{_aktiv} button {{ color: {TEXT} !important; "
-        f"border-bottom: 1px solid {TEXT} !important; }}</style>",
+        f"<style>div.st-key-nav_{_aktiv} button {{ color: {TEXT} !important; }}"
+        f'[data-testid="stMainBlockContainer"] div.st-key-nav_{_aktiv} button p '
+        f"{{ background-size: 100% 1px; }}</style>",
         unsafe_allow_html=True,
     )
     # Mobilmenyns kryssruta lever i DOM:en och nollas inte av Streamlit vid rerun.
