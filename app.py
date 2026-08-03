@@ -1137,7 +1137,7 @@ if view == "Bästa köp":
             with st.container(key="rapportbadge"):
                 st.caption(f":material/event_upcoming: **Rapport inom en vecka:** {badges}")
 
-        # Lägesrad: marknadstrend, sentiment, listans storlek och dagens
+        # Lägesrad: marknadsläge, sentiment, listans storlek och dagens
         # ändringar finns redan som data men låg utspridda på fem vyer. Samlade
         # här ger de hela marknadsläget på en rad, innan man läser listan.
         _st_delar = []
@@ -1145,9 +1145,10 @@ if view == "Bästa köp":
         if _rg:
             _rgf = {"GRÖN": MOSS, "GUL": SAND, "RÖD": RUST}.get(_rg, MUTED)
             # "Regim" är backendens fältnamn (SCHEMA: regim.regim) och stannar i
-            # datat — men i UI:t heter det Marknadstrend, som säger vad det är
-            # utan att man behöver kunna termen.
-            _st_delar.append(f'Marknadstrend <b style="color:{_rgf}">{_rg}</b>')
+            # datat — men i UI:t heter det Marknadsläge, som säger vad det är
+            # utan att man behöver kunna termen (och som klär färgorden bättre
+            # än "trend", eftersom en trend beskrivs som upp/ner, inte som färg).
+            _st_delar.append(f'Marknadsläge <b style="color:{_rgf}">{_rg}</b>')
         _fgd = data.get("fear_greed") or {}
         if _fgd.get("varde") is not None:
             _fge2 = _fgd.get("etikett") or fg_zon(_fgd["varde"])[0]
@@ -1837,7 +1838,7 @@ if view == "Sentiment":
         '<div class="hero-title">Marknadssentiment</div>'
         '<div class="hero-sub">CNN:s Fear &amp; Greed-index — marknadens känsloläge från '
         'extrem rädsla (0) till extrem girighet (100). Rent informationsfält, '
-        'ingen påverkan på poäng eller marknadstrend.</div>',
+        'ingen påverkan på poäng eller marknadsläge.</div>',
         unsafe_allow_html=True,
     )
     fg = data.get("fear_greed")
