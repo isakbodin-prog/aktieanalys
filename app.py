@@ -229,8 +229,10 @@ st.markdown(f"""
   /* ---- Senaste händelser ---- */
   /* Samma spaltbredd som aktielistan ovanför */
   .st-key-shbox {{ max-width: 900px; margin-left: auto !important; margin-right: auto !important; }}
+  /* Toppmarginalen matchar hjälterubrikens avstånd till sin hårlinje (49 px),
+     så de två sektionerna andas lika mycket under sina respektive linjer. */
   .sh-rubrik {{ font-family: 'Newsreader', Georgia, serif; font-size: 1.6rem; color: {TEXT};
-      text-align: center; margin: .3rem 0 1.9rem; letter-spacing: -.01em; }}
+      text-align: center; margin: 2.5rem 0 1.9rem; letter-spacing: -.01em; }}
   .sh-kol {{ font-family: 'Space Grotesk', sans-serif; font-size: .64rem; text-transform: uppercase;
       letter-spacing: .13em; color: {TEXT}; margin-bottom: .2rem; padding-bottom: .55rem;
       border-bottom: 1px solid {HAIRLINE}; }}
@@ -311,7 +313,8 @@ st.markdown(f"""
     [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button {{
         font-size: .82rem !important; letter-spacing: .1em; padding: .5rem .1rem !important; }}
     .hero-title {{ font-size: 1.5rem; margin-top: 1.5rem; }}
-    .sh-rubrik {{ font-size: 1.5rem; margin-bottom: 1.4rem; }}
+    /* Samma toppmarginal som hjälterubriken ovan — mobilen har tightare rytm */
+    .sh-rubrik {{ font-size: 1.5rem; margin-top: 1.5rem; margin-bottom: 1.4rem; }}
     [data-testid="stMainBlockContainer"] h2, [data-testid="stMainBlockContainer"] h3 {{
         font-size: 1.5rem !important; }}
     .rad {{ gap: .55rem; padding: .7rem .05rem; }}
@@ -1085,7 +1088,10 @@ if view == "Bästa köp":
         vikt_rader = [t for _, t in sorted(vikt_rader, key=lambda x: -x[0])][:6]
 
         if lista_rader or vikt_rader:
-            st.markdown('<hr class="fullrule" style="margin-top:2.4rem">', unsafe_allow_html=True)
+            # Ingen inline margin-top här: .fullrule sätter margin med !important
+            # och vinner över inline-stil. Luften ovanför rubriken styrs i stället
+            # av .sh-rubrik:s toppmarginal.
+            st.markdown('<hr class="fullrule">', unsafe_allow_html=True)
             # Samma bredd och vänsterkant som aktielistan (.stocklist, 900 px) —
             # centrerkolumner [1,4,1] gav 867 px och en annan vänsterkant.
             with st.container(key="shbox"):
