@@ -212,11 +212,13 @@ st.markdown(f"""
       text-align: left; white-space: normal;
       opacity: 0; visibility: hidden; transition: opacity .18s ease;
       box-shadow: 0 2px 14px rgba(67, 61, 52, .10); }}
+  /* Två triggers, medvetet: hover för mus, focus för tangentbord OCH tryck
+     (elementen har tabindex). Rutan får ALDRIG villkoras på (hover: none) —
+     den frågan går inte att lita på: emulerade mobilvyer svarar "hover: hover"
+     med noll touch-punkter, så beteendet blir omöjligt att testa och skiljer
+     sig från riktiga telefoner. Layouten styrs av bredd i stället. */
   .lagesrad .tip:hover::after, .lagesrad .tip:focus::after {{
       opacity: 1; visibility: visible; }}
-  /* Touch har ingen hover — där vore rutan bara en fälla som aldrig öppnas */
-  @media (hover: none) {{ .lagesrad .tip {{ border-bottom: none; cursor: default; }}
-      .lagesrad .tip::after {{ display: none; }} }}
   .crek {{ font-family: 'Space Grotesk', sans-serif; font-size: .66rem; text-transform: uppercase;
       letter-spacing: .14em; width: 5.2rem; text-align: right; flex: 0 0 auto; }}
 
@@ -414,7 +416,11 @@ st.markdown(f"""
     .sh-rubrik {{ font-size: 1.5rem; margin-top: 1.5rem; margin-bottom: 1.4rem; }}
     [data-testid="stMainBlockContainer"] h2, [data-testid="stMainBlockContainer"] h3 {{
         font-size: 1.5rem !important; }}
-    .rad {{ gap: .55rem; padding: .7rem .05rem; }}
+    /* Radens barn har flex: 0 0 auto och kan alltså INTE krympa — summerar de
+       mer än radens bredd målas de utanför och klipps av skärmkanten utan att
+       ge vare sig scrollbar eller synlig varning. Budgeten på 375 px är knapp,
+       så breddarna nedan är avstämda mot den: 7 synliga fält + 6 mellanrum. */
+    .rad {{ gap: .45rem; padding: .7rem .05rem; }}
     .meter {{ display: none; }}          /* poängsiffran räcker; frigör bredd */
     /* PROTOTYP på mobil: sparklinen får plats och bär mest information, men
        3-månaderskolumnen, kolumnhuvudet och kursen får vika — sex sifferfält
@@ -424,20 +430,22 @@ st.markdown(f"""
        sparklinen visar redan riktningen. Kurs och exakta procenttal finns kvar
        i utfällningen. */
     .delta-3m, .rad .pris, .rad .delta {{ display: none; }}
-    .vikt {{ width: 3rem; font-size: .74rem; }}
-    .sparkbox {{ min-width: 42px; max-width: 92px; }}
+    .vikt {{ width: 2.8rem; font-size: .74rem; }}
+    .sparkbox {{ min-width: 38px; max-width: 92px; }}
     .spark {{ height: 20px; }}
     .delta {{ width: 3.4rem; font-size: .66rem; }}
     /* Tickern får ALDRIG krympa — med min-width: 0 bryter den mitt i ordet
-       ("AM ZN"). Sparklinen är den enda som ger efter på bredden. Minbredden
-       från basregeln behålls så sparklinerna börjar på samma x i alla rader. */
-    .tk {{ flex: 0 0 auto; font-size: 1.05rem; white-space: nowrap; }}
+       ("AM ZN"). Sparklinen är den enda som ger efter på bredden. Egen minbredd
+       här (basregelns 4.2rem är för bred i mobilbudgeten) så sparklinerna ändå
+       börjar på samma x i alla rader. */
+    .tk {{ flex: 0 0 auto; font-size: 1.05rem; white-space: nowrap;
+        min-width: 3.6rem; }}
     .bikon {{ width: 26px; height: 26px; }}
     .rang {{ width: 1.3rem; font-size: .68rem; }}
     .poang {{ width: 3rem; font-size: 1.05rem; }}
     /* Fast bredd nu när rekommendationen är sista kolumnen — med width:auto
        slutar KÖP och AVVAKTA på olika x och högerkanten fransar sig. */
-    .crek {{ width: 3.6rem; font-size: .56rem; letter-spacing: .05em; }}
+    .crek {{ width: 3.2rem; font-size: .56rem; letter-spacing: .05em; }}
     .detalj-inner {{ padding-left: 2.4rem; padding-bottom: 1rem; }}
     /* Tightare mobilrytm: mindre glapp mellan delarna */
     [data-testid="stMainBlockContainer"] [data-testid="stVerticalBlock"] {{ gap: .6rem; }}
@@ -454,6 +462,17 @@ st.markdown(f"""
        lämnar då bara ett gap kvar ovanför mätaren. */
     .st-key-fgexp [data-testid="stHorizontalBlock"] {{ gap: 0 !important; }}
     .st-key-fgexp .fg-etikett {{ margin: -.7rem 0 .2rem; font-size: 1.4rem; }}
+    /* Förklaringsrutan på smal skärm: spänn över hela lägesraden i stället för
+       att centreras på värdet. Ett värde nära kanten hade annars fått rutan att
+       hamna utanför skärmen. Tricket är att göra .tip static — då blir
+       .lagesrad (position: relative) det som ::after positioneras mot. */
+    .lagesrad {{ position: relative; }}
+    .lagesrad .tip {{ position: static; }}
+    /* Under lägesraden på mobil, inte över: ovanför hamnar den mitt över
+       wordmarken. Nedanför täcker den listan, som är lättare att offra. */
+    .lagesrad .tip::after {{
+        left: 0; right: 0; width: auto; max-width: none; transform: none;
+        bottom: auto; top: 100%; margin-top: .45rem; font-size: .72rem; }}
     .hero-sub {{ margin-bottom: .9rem; }}
     .nyckeltal {{ gap: .7rem 1.6rem; margin-bottom: .9rem; }}
     .delpoang {{ gap: .35rem; }}
