@@ -227,6 +227,8 @@ st.markdown(f"""
       letter-spacing: .04em; text-align: center; margin-top: 1.3rem; line-height: 1.6; }}
 
   /* ---- Senaste händelser ---- */
+  /* Samma spaltbredd som aktielistan ovanför */
+  .st-key-shbox {{ max-width: 900px; margin-left: auto !important; margin-right: auto !important; }}
   .sh-rubrik {{ font-family: 'Newsreader', Georgia, serif; font-size: 1.6rem; color: {TEXT};
       text-align: center; margin: .3rem 0 1.9rem; letter-spacing: -.01em; }}
   .sh-kol {{ font-family: 'Space Grotesk', sans-serif; font-size: .64rem; text-transform: uppercase;
@@ -242,8 +244,13 @@ st.markdown(f"""
       display: none !important; }}
 
   /* --- Diskret toppnavigering --- */
+  /* De osynliga teknikelementen (aktiv-nav-stilen + 0×0-menyscriptet) flyttades
+     in i header-containern för att slippa deras andel av rotens 16 px flex-gap
+     (se kommentaren i Python-koden) — nolla containerns EGNA gap så de inte
+     bara flyttar det döda utrymmet hit i stället. */
+  .st-key-header {{ gap: 0 !important; }}
   .wordmark {{ font-family: 'Newsreader', serif; font-size: .95rem; color: {TEXT};
-      letter-spacing: .01em; padding-top: .2rem; }}
+      letter-spacing: .01em; }}
   .dateline {{ font-family: 'Space Grotesk', sans-serif; font-size: .64rem; text-transform: uppercase;
       letter-spacing: .16em; color: {MUTED}; margin: .2rem 0 2.6rem; }}
   hr.navhr {{ margin: .8rem 0 0 !important; }}
@@ -266,7 +273,7 @@ st.markdown(f"""
   [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button {{
       font-family: 'Space Grotesk', sans-serif !important; text-transform: uppercase;
       letter-spacing: .1em; font-size: .48rem !important; color: {TEXT} !important;
-      padding: .35rem .1rem !important; line-height: 1.9 !important;
+      padding: .1rem .1rem !important; line-height: 1.5 !important;
       height: auto !important; overflow: visible !important; white-space: nowrap; }}
   [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button:hover {{
       color: {OLIV} !important; }}
@@ -274,7 +281,7 @@ st.markdown(f"""
   .st-key-navbox, .st-key-navbox [data-testid="stVerticalBlock"] {{
       flex-direction: row !important; flex-wrap: wrap !important;
       align-items: center; align-content: flex-start; gap: .1rem 1rem !important;
-      padding-top: .5rem !important; overflow: visible !important; }}
+      padding-top: 0 !important; overflow: visible !important; }}
   .st-key-navbox [data-testid="stElementContainer"], .st-key-navbox .stButton {{
       width: auto !important; overflow: visible !important; }}
   /* CSS-only hamburgartoggle — dold kryssruta + klickbar ikon-label (bara mobil).
@@ -887,21 +894,25 @@ with st.container(key="header"):
                     st.session_state["view"] = _key
                     st.rerun()
 
-# Understryk den aktiva menypunkten (dynamiskt per vy).
-_aktiv = _navslug(st.session_state["view"])
-st.markdown(
-    f"<style>div.st-key-nav_{_aktiv} button {{ color: {TEXT} !important; "
-    f"border-bottom: 1px solid {TEXT} !important; }}</style>",
-    unsafe_allow_html=True,
-)
-# Mobilmenyns kryssruta lever i DOM:en och nollas inte av Streamlit vid rerun.
-# En liten script-komponent (kör vid varje rerun, t.ex. vyval) fäller ihop menyn.
-# Vy-taggen gör att iframen laddas om vid vybyte så scriptet garanterat körs.
-st.components.v1.html(
-    f"<script>try{{const c=window.parent.document.getElementById('mm-cb');"
-    f"if(c)c.checked=false;}}catch(e){{}}/*{_aktiv}*/</script>",
-    height=0, width=0,
-)
+    # De två teknikelementen nedan renderar inget synligt (stil-tagg + 0×0-iframe)
+    # men ligger INUTI header-containern med flit — som egna toppnivåelement fick
+    # var och en samma 16 px flex-gap som huvudinnehållets sektioner, vilket drog
+    # upp ett dött mellanrum på ~50 px mellan menyn och hårlinjen under.
+    # Understryk den aktiva menypunkten (dynamiskt per vy).
+    _aktiv = _navslug(st.session_state["view"])
+    st.markdown(
+        f"<style>div.st-key-nav_{_aktiv} button {{ color: {TEXT} !important; "
+        f"border-bottom: 1px solid {TEXT} !important; }}</style>",
+        unsafe_allow_html=True,
+    )
+    # Mobilmenyns kryssruta lever i DOM:en och nollas inte av Streamlit vid rerun.
+    # En liten script-komponent (kör vid varje rerun, t.ex. vyval) fäller ihop menyn.
+    # Vy-taggen gör att iframen laddas om vid vybyte så scriptet garanterat körs.
+    st.components.v1.html(
+        f"<script>try{{const c=window.parent.document.getElementById('mm-cb');"
+        f"if(c)c.checked=false;}}catch(e){{}}/*{_aktiv}*/</script>",
+        height=0, width=0,
+    )
 
 st.markdown('<hr class="fullrule">', unsafe_allow_html=True)
 
@@ -1075,8 +1086,9 @@ if view == "Bästa köp":
 
         if lista_rader or vikt_rader:
             st.markdown('<hr class="fullrule" style="margin-top:2.4rem">', unsafe_allow_html=True)
-            _shl, _shc, _shr = st.columns([1, 4, 1])
-            with _shc:
+            # Samma bredd och vänsterkant som aktielistan (.stocklist, 900 px) —
+            # centrerkolumner [1,4,1] gav 867 px och en annan vänsterkant.
+            with st.container(key="shbox"):
                 st.markdown('<div class="sh-rubrik">Senaste händelser</div>',
                             unsafe_allow_html=True)
                 # 1. Förändringar i listorna
