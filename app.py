@@ -34,6 +34,9 @@ OLIV = "#6B7052"    # dämpad oliv — MA200 / accent
 MUTED = "#8A8375"   # varm grå — neutralt/sekundärt
 TEXT = "#433D34"    # varm mörkbrun (samma som temat)
 HAIRLINE = "#D9D1C0"  # hårfin linje mot den varma gräddvita bakgrunden
+BG = "#F2EDE3"      # sidbakgrunden — samma värde som backgroundColor i
+                    # .streamlit/config.toml; behövs för ogenomskinliga ytor
+                    # (tooltips) som annars låter texten under lysa igenom
 
 REK_FARG = {"KÖP": MOSS, "AVVAKTA": SAND, "SÄLJ": RUST}
 
@@ -193,6 +196,27 @@ st.markdown(f"""
       text-transform: uppercase; letter-spacing: .13em; color: {MUTED};
       font-variant-numeric: tabular-nums; }}
   .lagesrad b {{ font-weight: 500; color: {TEXT}; }}
+  /* Förklaringar på hover. Egen CSS-tooltip i stället för title-attributet:
+     webbläsarens egen ruta har systemtypsnitt, grå platta och ~1 s fördröjning
+     — den hade skavt mot resten. Streamlits containrar klipper inte här, men
+     lägesraden måste tillåta överflöde för att rutan ska synas. */
+  .lagesrad {{ overflow: visible; }}
+  .lagesrad .tip {{ position: relative; cursor: help;
+      border-bottom: 1px dotted currentColor; }}
+  .lagesrad .tip::after {{
+      content: attr(data-tip); position: absolute; left: 50%; bottom: 150%;
+      transform: translateX(-50%); width: 21rem; max-width: 78vw; z-index: 40;
+      background: {BG}; border: 1px solid {HAIRLINE}; padding: .7rem .8rem;
+      font-family: 'Space Grotesk', sans-serif; font-size: .68rem; line-height: 1.5;
+      letter-spacing: .01em; text-transform: none; color: {TEXT}; font-weight: 400;
+      text-align: left; white-space: normal;
+      opacity: 0; visibility: hidden; transition: opacity .18s ease;
+      box-shadow: 0 2px 14px rgba(67, 61, 52, .10); }}
+  .lagesrad .tip:hover::after, .lagesrad .tip:focus::after {{
+      opacity: 1; visibility: visible; }}
+  /* Touch har ingen hover — där vore rutan bara en fälla som aldrig öppnas */
+  @media (hover: none) {{ .lagesrad .tip {{ border-bottom: none; cursor: default; }}
+      .lagesrad .tip::after {{ display: none; }} }}
   .crek {{ font-family: 'Space Grotesk', sans-serif; font-size: .66rem; text-transform: uppercase;
       letter-spacing: .14em; width: 5.2rem; text-align: right; flex: 0 0 auto; }}
 
@@ -1141,19 +1165,51 @@ if view == "Bästa köp":
         # ändringar finns redan som data men låg utspridda på fem vyer. Samlade
         # här ger de hela marknadsläget på en rad, innan man läser listan.
         _st_delar = []
-        _rg = (data.get("regim") or {}).get("regim")
+        _rgd = data.get("regim") or {}
+        _rg = _rgd.get("regim")
         if _rg:
             _rgf = {"GRÖN": MOSS, "GUL": SAND, "RÖD": RUST}.get(_rg, MUTED)
-            # "Regim" är backendens fältnamn (SCHEMA: regim.regim) och stannar i
-            # datat — men i UI:t heter det Marknadsläge, som säger vad det är
-            # utan att man behöver kunna termen (och som klär färgorden bättre
-            # än "trend", eftersom en trend beskrivs som upp/ner, inte som färg).
-            _st_delar.append(f'Marknadsläge <b style="color:{_rgf}">{_rg}</b>')
+            # Förklaringen bygger på de FAKTISKA värdena (index mot MA200), inte
+            # bara en generisk definition — hela poängen med en tooltip här är
+            # att slippa gå till en annan vy för att se vad läget grundas på.
+            _rgtxt = {
+                "GRÖN": "Indexet ligger över sitt 200-dagars glidande medelvärde "
+                        "och medelvärdet stiger — bred upptrend.",
+                "RÖD": "Indexet ligger under sitt 200-dagars glidande medelvärde "
+                       "och medelvärdet faller — bred nedtrend.",
+                "GUL": "Blandat läge: indexet och dess 200-dagars medelvärde pekar "
+                       "åt olika håll.",
+                "OKÄND": "Kunde inte beräknas den här körningen — behandlas som GRÖN.",
+            }.get(_rg, "")
+            _kalla = _rgd.get("regim_kalla") or "index"
+            _sp, _sm = _rgd.get("spy_pris"), _rgd.get("spy_ma200")
+            if _sp is not None and _sm is not None:
+                _rgtxt += f" {_kalla} {_num(_sp, dec=2)} mot MA200 {_num(_sm, dec=2)}."
+            _rgtxt += (" Påverkar aldrig poängen — bara RÖD har effekt, och då "
+                       "nedgraderas Claudes köptext till „KÖP (vänta på marknaden)”.")
+            if _rgd.get("notis"):
+                _rgtxt += f" {_rgd['notis']}"
+            _st_delar.append(
+                f'Marknadsläge <b class="tip" tabindex="0" '
+                f'data-tip="{html.escape(_rgtxt, quote=True)}" '
+                f'style="color:{_rgf}">{_rg}</b>')
         _fgd = data.get("fear_greed") or {}
         if _fgd.get("varde") is not None:
-            _fge2 = _fgd.get("etikett") or fg_zon(_fgd["varde"])[0]
-            _st_delar.append(f'Sentiment <b style="color:{fg_zon(_fgd["varde"])[1]}">'
-                             f'{_fgd["varde"]:.0f} {_fge2}</b>')
+            _fgv2 = _fgd["varde"]
+            _fge2 = _fgd.get("etikett") or fg_zon(_fgv2)[0]
+            # Rå &-tecken här: html.escape() nedan gör om den till &amp; en gång.
+            # Skrevs den redan escapad blev det &amp;amp; och rutan visade "&amp;".
+            _fgtxt = (f"CNN:s Fear & Greed-index mäter marknadens känsloläge på en "
+                      f"skala 0–100, från extrem rädsla till extrem girighet. "
+                      f"{_num(_fgv2, dec=0)} = {_fge2}. Zonerna: 0–25 Extreme Fear · "
+                      f"25–45 Fear · 45–55 Neutral · 55–75 Greed · 75–100 Extreme Greed. "
+                      f"Rent informationsfält — påverkar varken poäng eller marknadsläge.")
+            if _fgd.get("notis"):
+                _fgtxt += f" {_fgd['notis']}"
+            _st_delar.append(
+                f'Sentiment <b class="tip" tabindex="0" '
+                f'data-tip="{html.escape(_fgtxt, quote=True)}" '
+                f'style="color:{fg_zon(_fgv2)[1]}">{_fgv2:.0f} {_fge2}</b>')
         _st_delar.append(f'<b>{len(ranking)}</b> konsensusaktier')
         _log_idag = data.get("historik") or []
         if _log_idag:
