@@ -229,6 +229,14 @@ st.markdown(f"""
      och hindrar att man kan stänga en aktie med ett andra tryck. */
   @media (hover: hover) {{
     .stock:hover .detalj {{ max-height: 560px; opacity: 1; }}
+    /* Fördröjning innan hover öppnar: utfällningen ligger i flödet och trycker
+       ner allt under sig, så ett svep över listan fick hela sidan att hoppa.
+       Med .4s krävs att pekaren står stilla på raden. Bryter dessutom
+       självsvängningen (öppna → innehållet flyttas under pekaren → hover
+       tappas → stäng → öppna …), eftersom återöppningen inte sker direkt.
+       Gäller ENDAST oöppnade rader — annars hade ett klick, som ju alltid
+       sker med pekaren på raden, också fått vänta .4s innan något hände. */
+    .stock:hover .stoggle:not(:checked) ~ .detalj {{ transition-delay: .4s; }}
   }}
   .detalj-inner {{ padding: .1rem .3rem 1.7rem 3.9rem; }}
   .nyckeltal {{ display: flex; flex-wrap: wrap; gap: 2.4rem; margin-bottom: 1.4rem; }}
