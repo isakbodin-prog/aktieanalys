@@ -156,28 +156,37 @@ st.markdown(f"""
      bildar pelare: det är i hög grad DET som får en finansyta att läsa som
      "clean", inte paletten. Proportionella siffror gör att 96,0 och 82,8 får
      olika bredd och kolumnen fransar sig. */
-  .rad .pris, .rad .delta, .poang, .rang {{
+  .rad .pris, .rad .delta, .rad .vikt, .poang, .rang {{
       font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }}
-  .sparkbox {{ flex: 1 1 auto; min-width: 54px; max-width: 210px; display: flex;
-      align-items: center; }}
+  /* Ingen max-width: sparklinen ska svälja allt överblivet utrymme, annars
+     samlas det efter sista kolumnen och radens högerkant blir rufsig mot
+     hårlinjerna. Listan är ändå kapad till 900 px. */
+  .sparkbox {{ flex: 1 1 auto; min-width: 54px; display: flex; align-items: center; }}
   .spark {{ width: 100%; height: 26px; display: block; overflow: visible; }}
-  .pris {{ font-family: 'Space Grotesk', sans-serif; font-size: .84rem; color: {TEXT};
+  /* Hierarki: poängen är appens tes och ska väga tyngst, kursen är kontext.
+     Tidigare hade de samma grad och samma färg, så ögat fick ingen ledning. */
+  .pris {{ font-family: 'Space Grotesk', sans-serif; font-size: .78rem; color: {MUTED};
       width: 4.6rem; text-align: right; flex: 0 0 auto; }}
-  .delta {{ font-family: 'Space Grotesk', sans-serif; font-size: .74rem;
+  .delta {{ font-family: 'Space Grotesk', sans-serif; font-size: .72rem;
       width: 4rem; text-align: right; flex: 0 0 auto; }}
-  .poang {{ font-family: 'Space Grotesk', sans-serif; font-size: 1rem; color: {TEXT};
-      width: 3.1rem; text-align: right; flex: 0 0 auto; }}
+  /* Föreslagen vikt — det enda fältet som säger vad man ska GÖRA, inte bara
+     vad som är bra. Låg det tidigare begravt i utfällningen. */
+  .vikt {{ font-family: 'Space Grotesk', sans-serif; font-size: .8rem; color: {TEXT};
+      width: 3.4rem; text-align: right; flex: 0 0 auto; }}
+  .poang {{ font-family: 'Space Grotesk', sans-serif; font-size: 1.22rem; color: {TEXT};
+      width: 3.4rem; text-align: right; flex: 0 0 auto; }}
   /* Kolumnhuvud — utan det blir tre sifferkolumner i rad omöjliga att tyda */
   .kolhuvud {{ display: flex; align-items: center; gap: 1rem; padding: 0 .3rem .5rem;
       max-width: 900px; margin: 0 auto; font-family: 'Space Grotesk', sans-serif;
       font-size: .58rem; text-transform: uppercase; letter-spacing: .13em;
       color: {MUTED}; }}
-  .kolhuvud .kh-spark {{ flex: 1 1 auto; min-width: 54px; max-width: 210px; }}
+  .kolhuvud .kh-spark {{ flex: 1 1 auto; min-width: 54px; }}
   .kolhuvud .kh-vanster {{ width: calc(1.6rem + 32px + 4.2rem + 2rem); flex: 0 0 auto; }}
   .kolhuvud .kh-pris {{ width: 4.6rem; text-align: right; flex: 0 0 auto; }}
   .kolhuvud .kh-delta {{ width: 4rem; text-align: right; flex: 0 0 auto; }}
-  .kolhuvud .kh-poang {{ width: 3.1rem; text-align: right; flex: 0 0 auto; }}
-  .kolhuvud .kh-rek {{ width: calc(5.2rem + 1rem + 1rem); flex: 0 0 auto; }}
+  .kolhuvud .kh-vikt {{ width: 3.4rem; text-align: right; flex: 0 0 auto; }}
+  .kolhuvud .kh-poang {{ width: 3.4rem; text-align: right; flex: 0 0 auto; }}
+  .kolhuvud .kh-rek {{ width: 5.2rem; flex: 0 0 auto; }}
   /* Lägesrad ovanför listan — hela marknadsläget på en rad */
   .lagesrad {{ max-width: 900px; margin: 0 auto 1.5rem; text-align: center;
       font-family: 'Space Grotesk', sans-serif; font-size: .68rem;
@@ -186,7 +195,6 @@ st.markdown(f"""
   .lagesrad b {{ font-weight: 500; color: {TEXT}; }}
   .crek {{ font-family: 'Space Grotesk', sans-serif; font-size: .66rem; text-transform: uppercase;
       letter-spacing: .14em; width: 5.2rem; text-align: right; flex: 0 0 auto; }}
-  .trend {{ width: 1rem; text-align: center; font-size: .78rem; flex: 0 0 auto; }}
 
   .detalj {{ max-height: 0; overflow: hidden; opacity: 0;
       transition: max-height .5s cubic-bezier(.4,0,.2,1), opacity .4s ease; }}
@@ -388,7 +396,11 @@ st.markdown(f"""
        3-månaderskolumnen, kolumnhuvudet och kursen får vika — sex sifferfält
        på 375 px blir gröt. Kursen finns kvar i utfällningens TL;DR. */
     .kolhuvud {{ display: none; }}
-    .delta-3m, .rad .pris {{ display: none; }}
+    /* Vikten (vad man ska göra) prioriteras före avkastningssiffrorna på mobil —
+       sparklinen visar redan riktningen. Kurs och exakta procenttal finns kvar
+       i utfällningen. */
+    .delta-3m, .rad .pris, .rad .delta {{ display: none; }}
+    .vikt {{ width: 3rem; font-size: .74rem; }}
     .sparkbox {{ min-width: 42px; max-width: 92px; }}
     .spark {{ height: 20px; }}
     .delta {{ width: 3.4rem; font-size: .66rem; }}
@@ -398,9 +410,10 @@ st.markdown(f"""
     .tk {{ flex: 0 0 auto; font-size: 1.05rem; white-space: nowrap; }}
     .bikon {{ width: 26px; height: 26px; }}
     .rang {{ width: 1.3rem; font-size: .68rem; }}
-    .poang {{ width: 2.7rem; font-size: .92rem; }}
-    .crek {{ width: auto; font-size: .56rem; letter-spacing: .05em; }}
-    .trend {{ width: .9rem; }}
+    .poang {{ width: 3rem; font-size: 1.05rem; }}
+    /* Fast bredd nu när rekommendationen är sista kolumnen — med width:auto
+       slutar KÖP och AVVAKTA på olika x och högerkanten fransar sig. */
+    .crek {{ width: 3.6rem; font-size: .56rem; letter-spacing: .05em; }}
     .detalj-inner {{ padding-left: 2.4rem; padding-bottom: 1rem; }}
     /* Tightare mobilrytm: mindre glapp mellan delarna */
     [data-testid="stMainBlockContainer"] [data-testid="stVerticalBlock"] {{ gap: .6rem; }}
@@ -418,7 +431,6 @@ st.markdown(f"""
     .st-key-fgexp [data-testid="stHorizontalBlock"] {{ gap: 0 !important; }}
     .st-key-fgexp .fg-etikett {{ margin: -.7rem 0 .2rem; font-size: 1.4rem; }}
     .hero-sub {{ margin-bottom: .9rem; }}
-    .sub-lang {{ display: none; }}   /* mobil: kortad undertext (bara poäng + länk) */
     .nyckeltal {{ gap: .7rem 1.6rem; margin-bottom: .9rem; }}
     .delpoang {{ gap: .35rem; }}
     .fg-mini {{ flex-wrap: wrap; }}
@@ -708,10 +720,9 @@ def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max, analys_
         cl = claude_map.get(tk) or {}
         crek = cl.get("rekommendation", "—")
         farg = rek_farg.get(crek, MUTED)
-        if r["trend_ok"]:
-            trendmark = f'<span class="trend" style="color:{MOSS}">▲</span>'
-        else:
-            trendmark = f'<span class="trend" style="color:{RUST}">▼</span>'
+        # Trendpilen ▲▼ är borttagen: sparklinens färg och KÖP/AVVAKTA bar redan
+        # samma budskap, och tre signaler för en sak läser som brus. trend_ok
+        # styr numera bara sparklinens färg.
         ikon = bransch_ikon(tk, bransch_map)
         img = f'<img class="bikon" src="{ikon}">' if ikon else '<span class="bikon"></span>'
 
@@ -795,8 +806,9 @@ def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max, analys_
             f'<span class="pris">{kurs_txt}</span>'
             f'{_delta_span(av1, "delta")}'
             f'{_delta_span(av3, "delta delta-3m")}'
+            f'<span class="vikt">{_num(r.get("foreslagen_vikt_%"), " %")}</span>'
             f'<span class="poang">{_sv1(poang)}</span>'
-            f'<span class="crek" style="color:{farg}">{crek}</span>{trendmark}'
+            f'<span class="crek" style="color:{farg}">{crek}</span>'
             f'</label>'
             f'<div class="detalj"><div class="detalj-inner">'
             f'<div class="nyckeltal">{nyckel_html}</div>'
@@ -1144,6 +1156,11 @@ if view == "Bästa köp":
             _antal_idag = sum(1 for e in _log_idag if e["datum"] == _log_idag[0]["datum"])
             _ord = "ändring" if _antal_idag == 1 else "ändringar"
             _st_delar.append(f'<b>{_antal_idag}</b> {_ord} {_log_idag[0]["datum"]}')
+        # "Uppdaterad" hörde hemma där man faktiskt tittar, inte bara i sidfoten —
+        # på en finansyta är datats ålder en trovärdighetsuppgift.
+        _tp = data.get("tidpunkt")
+        if _tp:
+            _st_delar.append(f'Uppdaterad <b>{_tp.replace("T", " ")}</b>')
         st.markdown(f'<div class="lagesrad">{" · ".join(_st_delar)}</div>',
                     unsafe_allow_html=True)
 
@@ -1153,6 +1170,7 @@ if view == "Bästa köp":
             '<span class="kh-pris">Kurs</span>'
             '<span class="kh-delta">1 mån</span>'
             '<span class="kh-delta delta-3m">3 mån</span>'
+            '<span class="kh-vikt">Vikt</span>'
             '<span class="kh-poang">Poäng</span>'
             '<span class="kh-rek"></span></div>',
             unsafe_allow_html=True)
@@ -1160,10 +1178,11 @@ if view == "Bästa köp":
 
         # Undertext om poängen ligger UNDER listan. "Så räknas poängen" inline
         # (native <details>/<summary> → samma rad, expanderar utan rerun).
+        # Den tidigare bruksanvisningen ("Håll muspekaren över eller klicka på en
+        # aktie för …") är borta: ett verktyg som förklarar sin egen hovereffekt
+        # läser som en manual. Kolumnhuvudet ger nu kontexten i stället.
         st.markdown(
-            '<div class="hero-sub">Sammanvägd poäng 0–100. '
-            '<span class="sub-lang">Håll muspekaren över eller klicka '
-            'på en aktie för poänguppdelning och nyckeltal. </span>'
+            '<div class="hero-sub">'
             '<details class="poang-inline"><summary>Så räknas poängen</summary>'
             '<span class="poang-text">'
             '<strong>Poängmodellen (§12, omviktad):</strong> Trend 25 p · Momentum 20 p '
