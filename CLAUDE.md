@@ -66,6 +66,16 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
     återanvända regimen är äldre än REGIM_ALDER_VARNING_HANDELSDAGAR (5).
   - Motåtgärd för per-aktiefälten: fältvis återanvändning från förra
     körningen (se Pipeline steg 3–4 ovan).
+  - **NaN-platsrad, separat felläge från blockering** (fixat 2026-08-04,
+    flaggat av frontend-sessionen): Yahoo returnerar ibland en giltig,
+    icke-tom historik men med en NaN-rad för innevarande dag (handeln inte
+    avslutad än) — `history.empty` är då `False` så det gamla felet
+    smet förbi tomhetskontrollen. `pris > MA200` med NaN är alltid
+    `False`, vilket gjorde saknad data omöjlig att skilja från en äkta
+    nedtrend (RÖD). `_hamta_regim_for_ticker()` kör nu `close.dropna()`
+    innan beräkningen. `analyze_ticker()` (per-aktie, §3) hade redan detta
+    skydd sedan tidigare (`pd.isna(hist["Close"].iloc[-1])`-kollen) — bara
+    regimberäkningen saknade det.
   - Nästa eskaleringssteg OM blockeringen förvärras (implementera INTE
     förrän det faktiskt behövs): beräkna regimen lokalt (utanför Render)
     och gist-synka resultatet, så Render aldrig behöver nå Yahoo för just

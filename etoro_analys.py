@@ -1279,15 +1279,23 @@ REGIM_TICKER_KEDJA = ["SPY", "^GSPC", "VOO", "IVV"]   # alla S&P 500 — identis
 
 def _hamta_regim_for_ticker(ticker):
     """Ett försök i regimkedjan. Returnerar {regim, spy_pris, spy_ma200} vid
-    lyckad beräkning, annars None (och loggar orsaken via _logga_yf_miss)."""
+    lyckad beräkning, annars None (och loggar orsaken via _logga_yf_miss).
+
+    close.dropna() tar bort ev. NaN-rader — Yahoo lägger ibland en tom
+    platsrad för innevarande dag innan handeln avslutats. Utan detta blev
+    pris/MA200 NaN, och en jämförelse med NaN är alltid False: villkoret
+    för RÖD (inte över, inte stigande) blev då omöjligt att skilja från
+    saknad data — verifierat live 2026-08-04 (regim RÖD med spy_pris=NaN
+    trots att index i verkligheten låg över MA200, flaggat av frontend-
+    sessionen som byggde ett UI-skydd runt symptomet)."""
     import yfinance as yf
     try:
         h = yf.Ticker(ticker).history(period="1y", auto_adjust=True)
-        if h.empty or len(h) < 221:
+        close = h["Close"].dropna() if not h.empty and "Close" in h.columns else h.iloc[0:0]
+        if len(close) < 221:
             _logga_yf_miss(ticker, "history",
-                          detalj=f"otillräcklig historik ({len(h)} rader, behöver ≥221)")
+                          detalj=f"otillräcklig historik ({len(close)} giltiga rader, behöver ≥221)")
             return None
-        close = h["Close"]
         pris = float(close.iloc[-1])
         ma200_serie = close.rolling(200).mean()
         ma200 = float(ma200_serie.iloc[-1])
