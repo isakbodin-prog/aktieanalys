@@ -12,6 +12,7 @@ Nycklarna läses från .env-filen precis som för etoro_analys.py.
 
 import html
 import json
+import math
 import os
 
 import pandas as pd
@@ -643,6 +644,17 @@ def _num(v, suf="", dec=1):
     return "—" if v is None else f"{v:.{dec}f}{suf}".replace(".", ",")
 
 
+def _ar_tal(v):
+    """True bara för ett läsbart tal — sållar bort både None och NaN.
+
+    NaN når UI:t via senaste_analys.json: Pythons json skriver ut NaN utan att
+    klaga (trots att det inte är giltig JSON enligt standarden) och läser
+    tillbaka det som float('nan'). Ett NaN passerar `is not None`, så den
+    vanliga null-kontrollen räcker inte — därav den här.
+    """
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and not math.isnan(v)
+
+
 def nya_pa_listan(log, typ, dagar=7):
     """Tickers som fått en '{typ}'-loggpost de senaste `dagar` dagarna."""
     from datetime import date, timedelta
@@ -1208,6 +1220,17 @@ if view == "Bästa köp":
         _st_delar = []
         _rgd = data.get("regim") or {}
         _rg = _rgd.get("regim")
+        _sp, _sm = _rgd.get("spy_pris"), _rgd.get("spy_ma200")
+        # Etiketten härleds av backend UR de här två talen. Går de inte att läsa
+        # (NaN) är etiketten inte att lita på — den blir RÖD, eftersom villkoret
+        # för RÖD är formulerat som frånvaro av "över" och "stigande" och alla
+        # jämförelser med NaN är falska. Visa OKÄND i stället för att påstå en
+        # nedtrend vi inte har underlag för. Orsaken sitter i backendens
+        # regimberäkning; det här är bara ett skydd mot att UI:t ljuger.
+        _tal_lasbara = _ar_tal(_sp) and _ar_tal(_sm)
+        _nedgraderad = bool(_rg) and _rg != "OKÄND" and not _tal_lasbara and _sp is not None
+        if _nedgraderad:
+            _rg = "OKÄND"
         if _rg:
             _rgf = {"GRÖN": MOSS, "GUL": SAND, "RÖD": RUST}.get(_rg, MUTED)
             # Förklaringen bygger på de FAKTISKA värdena (index mot MA200), inte
@@ -1223,8 +1246,14 @@ if view == "Bästa köp":
                 "OKÄND": "Kunde inte beräknas den här körningen — behandlas som GRÖN.",
             }.get(_rg, "")
             _kalla = _rgd.get("regim_kalla") or "index"
-            _sp, _sm = _rgd.get("spy_pris"), _rgd.get("spy_ma200")
-            if _sp is not None and _sm is not None:
+            if _nedgraderad:
+                # Var uttrycklig om VARFÖR, annars ser det ut som ett vanligt
+                # hämtningsfel och orsaken blir svår att hitta igen.
+                _rgtxt = ("Marknadsläget kunde inte läsas: indexkursen saknade värde i "
+                          "senaste körningen, så jämförelsen mot 200-dagars medelvärdet "
+                          "gick inte att göra. Behandlas som GRÖN, precis som ett "
+                          "misslyckat hämtningsförsök.")
+            elif _tal_lasbara:
                 _rgtxt += f" {_kalla} {_num(_sp, dec=2)} mot MA200 {_num(_sm, dec=2)}."
             _rgtxt += (" Påverkar aldrig poängen — bara RÖD har effekt, och då "
                        "nedgraderas Claudes köptext till „KÖP (vänta på marknaden)”.")
