@@ -12,6 +12,7 @@ Nycklarna läses från .env-filen precis som för etoro_analys.py.
 
 import html
 import json
+import math
 import os
 
 import pandas as pd
@@ -34,6 +35,9 @@ OLIV = "#6B7052"    # dämpad oliv — MA200 / accent
 MUTED = "#8A8375"   # varm grå — neutralt/sekundärt
 TEXT = "#433D34"    # varm mörkbrun (samma som temat)
 HAIRLINE = "#D9D1C0"  # hårfin linje mot den varma gräddvita bakgrunden
+BG = "#F2EDE3"      # sidbakgrunden — samma värde som backgroundColor i
+                    # .streamlit/config.toml; behövs för ogenomskinliga ytor
+                    # (tooltips) som annars låter texten under lysa igenom
 
 REK_FARG = {"KÖP": MOSS, "AVVAKTA": SAND, "SÄLJ": RUST}
 
@@ -111,7 +115,11 @@ st.markdown(f"""
   [data-testid="stMainBlockContainer"] .st-key-fgexp [data-testid="stExpander"] summary {{
       text-transform: none !important; letter-spacing: .01em !important;
       font-size: .82rem !important; justify-content: flex-start; padding-left: 0 !important;
-      padding-top: .35rem !important; padding-bottom: .35rem !important; gap: .45rem; }}
+      padding-top: .35rem !important; padding-bottom: .35rem !important; gap: .45rem;
+      /* Streamlit fyller summary-raden (rgb(238,233,221) + rundade hörn upptill)
+         så fort expandern är ÖPPEN — stängd är den transparent. Det ger en
+         plattliknande ram runt rubriken som inte hör hemma i den här listan. */
+      background: transparent !important; border-radius: 0 !important; }}
   /* Chevronen flyttas EFTER etiketten (order) i stället för att döljas — kvar som
      utfällningssignal, men "Marknadssentiment" ligger ändå i vänsterlinjen. */
   .st-key-fgexp summary span:has(> [data-testid="stIconMaterial"]) {{
@@ -125,6 +133,16 @@ st.markdown(f"""
   .st-key-fgexp summary p {{ font-size: .82rem !important; }}
   /* Dra upp sentimentet närmare poäng-raden ovanför */
   .st-key-fgexp {{ margin-top: -1rem !important; }}
+  /* Två mätarfigurer, en per bredd (se kommentaren vid st.plotly_chart) */
+  .st-key-fggauge-m {{ display: none; }}
+  /* Genvägen till Sentiment-vyn: en knapp klädd som bildtextens textlänk */
+  .st-key-fglank button {{ background: none !important; border: none !important;
+      box-shadow: none !important; padding: 0 !important; min-height: 0 !important;
+      height: auto !important; font-family: 'Space Grotesk', sans-serif !important;
+      color: {MUTED} !important; text-decoration: underline;
+      text-underline-offset: 2px; text-decoration-thickness: 1px; }}
+  .st-key-fglank button p {{ font-size: .78rem !important; }}
+  .st-key-fglank button:hover {{ color: {TEXT} !important; }}
   .stock {{ border-top: 1px solid {HAIRLINE}; }}
   .stock:last-child {{ border-bottom: 1px solid {HAIRLINE}; }}
   .stoggle {{ position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }}
@@ -138,11 +156,72 @@ st.markdown(f"""
       min-width: 4.2rem; flex: 0 0 auto; }}
   .meter {{ flex: 1 1 auto; height: 2px; background: {HAIRLINE}; position: relative; min-width: 50px; }}
   .meter .fill {{ position: absolute; inset: 0 auto 0 0; height: 100%; background: {TEXT}; }}
-  .poang {{ font-family: 'Space Grotesk', sans-serif; font-size: 1rem; color: {TEXT};
-      width: 3.1rem; text-align: right; flex: 0 0 auto; }}
+  /* PROTOTYP — kurskolumnerna. Tal sätts med tabulära siffror (tnum) så de
+     bildar pelare: det är i hög grad DET som får en finansyta att läsa som
+     "clean", inte paletten. Proportionella siffror gör att 96,0 och 82,8 får
+     olika bredd och kolumnen fransar sig. */
+  .rad .pris, .rad .delta, .rad .vikt, .poang, .rang {{
+      font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }}
+  /* Ingen max-width: sparklinen ska svälja allt överblivet utrymme, annars
+     samlas det efter sista kolumnen och radens högerkant blir rufsig mot
+     hårlinjerna. Listan är ändå kapad till 900 px. */
+  .sparkbox {{ flex: 1 1 auto; min-width: 54px; display: flex; align-items: center; }}
+  .spark {{ width: 100%; height: 26px; display: block; overflow: visible; }}
+  /* Hierarki: poängen är appens tes och ska väga tyngst, kursen är kontext.
+     Tidigare hade de samma grad och samma färg, så ögat fick ingen ledning. */
+  .pris {{ font-family: 'Space Grotesk', sans-serif; font-size: .78rem; color: {MUTED};
+      width: 4.6rem; text-align: right; flex: 0 0 auto; }}
+  .delta {{ font-family: 'Space Grotesk', sans-serif; font-size: .72rem;
+      width: 4rem; text-align: right; flex: 0 0 auto; }}
+  /* Föreslagen vikt — det enda fältet som säger vad man ska GÖRA, inte bara
+     vad som är bra. Låg det tidigare begravt i utfällningen. */
+  .vikt {{ font-family: 'Space Grotesk', sans-serif; font-size: .8rem; color: {TEXT};
+      width: 3.4rem; text-align: right; flex: 0 0 auto; }}
+  .poang {{ font-family: 'Space Grotesk', sans-serif; font-size: 1.22rem; color: {TEXT};
+      width: 3.4rem; text-align: right; flex: 0 0 auto; }}
+  /* Kolumnhuvud — utan det blir tre sifferkolumner i rad omöjliga att tyda */
+  .kolhuvud {{ display: flex; align-items: center; gap: 1rem; padding: 0 .3rem .5rem;
+      max-width: 900px; margin: 0 auto; font-family: 'Space Grotesk', sans-serif;
+      font-size: .58rem; text-transform: uppercase; letter-spacing: .13em;
+      color: {MUTED}; }}
+  .kolhuvud .kh-spark {{ flex: 1 1 auto; min-width: 54px; }}
+  .kolhuvud .kh-vanster {{ width: calc(1.6rem + 32px + 4.2rem + 2rem); flex: 0 0 auto; }}
+  .kolhuvud .kh-pris {{ width: 4.6rem; text-align: right; flex: 0 0 auto; }}
+  .kolhuvud .kh-delta {{ width: 4rem; text-align: right; flex: 0 0 auto; }}
+  .kolhuvud .kh-vikt {{ width: 3.4rem; text-align: right; flex: 0 0 auto; }}
+  .kolhuvud .kh-poang {{ width: 3.4rem; text-align: right; flex: 0 0 auto; }}
+  .kolhuvud .kh-rek {{ width: 5.2rem; flex: 0 0 auto; }}
+  /* Lägesrad ovanför listan — hela marknadsläget på en rad */
+  .lagesrad {{ max-width: 900px; margin: 0 auto 1.5rem; text-align: center;
+      font-family: 'Space Grotesk', sans-serif; font-size: .68rem;
+      text-transform: uppercase; letter-spacing: .13em; color: {MUTED};
+      font-variant-numeric: tabular-nums; }}
+  .lagesrad b {{ font-weight: 500; color: {TEXT}; }}
+  /* Förklaringar på hover. Egen CSS-tooltip i stället för title-attributet:
+     webbläsarens egen ruta har systemtypsnitt, grå platta och ~1 s fördröjning
+     — den hade skavt mot resten. Streamlits containrar klipper inte här, men
+     lägesraden måste tillåta överflöde för att rutan ska synas. */
+  .lagesrad {{ overflow: visible; }}
+  .lagesrad .tip {{ position: relative; cursor: help;
+      border-bottom: 1px dotted currentColor; }}
+  .lagesrad .tip::after {{
+      content: attr(data-tip); position: absolute; left: 50%; bottom: 150%;
+      transform: translateX(-50%); width: 21rem; max-width: 78vw; z-index: 40;
+      background: {BG}; border: 1px solid {HAIRLINE}; padding: .7rem .8rem;
+      font-family: 'Space Grotesk', sans-serif; font-size: .68rem; line-height: 1.5;
+      letter-spacing: .01em; text-transform: none; color: {TEXT}; font-weight: 400;
+      text-align: left; white-space: normal;
+      opacity: 0; visibility: hidden; transition: opacity .18s ease;
+      box-shadow: 0 2px 14px rgba(67, 61, 52, .10); }}
+  /* Två triggers, medvetet: hover för mus, focus för tangentbord OCH tryck
+     (elementen har tabindex). Rutan får ALDRIG villkoras på (hover: none) —
+     den frågan går inte att lita på: emulerade mobilvyer svarar "hover: hover"
+     med noll touch-punkter, så beteendet blir omöjligt att testa och skiljer
+     sig från riktiga telefoner. Layouten styrs av bredd i stället. */
+  .lagesrad .tip:hover::after, .lagesrad .tip:focus::after {{
+      opacity: 1; visibility: visible; }}
   .crek {{ font-family: 'Space Grotesk', sans-serif; font-size: .66rem; text-transform: uppercase;
       letter-spacing: .14em; width: 5.2rem; text-align: right; flex: 0 0 auto; }}
-  .trend {{ width: 1rem; text-align: center; font-size: .78rem; flex: 0 0 auto; }}
 
   .detalj {{ max-height: 0; overflow: hidden; opacity: 0;
       transition: max-height .5s cubic-bezier(.4,0,.2,1), opacity .4s ease; }}
@@ -151,6 +230,14 @@ st.markdown(f"""
      och hindrar att man kan stänga en aktie med ett andra tryck. */
   @media (hover: hover) {{
     .stock:hover .detalj {{ max-height: 560px; opacity: 1; }}
+    /* Fördröjning innan hover öppnar: utfällningen ligger i flödet och trycker
+       ner allt under sig, så ett svep över listan fick hela sidan att hoppa.
+       Med .4s krävs att pekaren står stilla på raden. Bryter dessutom
+       självsvängningen (öppna → innehållet flyttas under pekaren → hover
+       tappas → stäng → öppna …), eftersom återöppningen inte sker direkt.
+       Gäller ENDAST oöppnade rader — annars hade ett klick, som ju alltid
+       sker med pekaren på raden, också fått vänta .4s innan något hände. */
+    .stock:hover .stoggle:not(:checked) ~ .detalj {{ transition-delay: .4s; }}
   }}
   .detalj-inner {{ padding: .1rem .3rem 1.7rem 3.9rem; }}
   .nyckeltal {{ display: flex; flex-wrap: wrap; gap: 2.4rem; margin-bottom: 1.4rem; }}
@@ -213,8 +300,12 @@ st.markdown(f"""
       letter-spacing: .04em; text-align: center; margin-top: 1.3rem; line-height: 1.6; }}
 
   /* ---- Senaste händelser ---- */
+  /* Samma spaltbredd som aktielistan ovanför */
+  .st-key-shbox {{ max-width: 900px; margin-left: auto !important; margin-right: auto !important; }}
+  /* Toppmarginalen matchar hjälterubrikens avstånd till sin hårlinje (49 px),
+     så de två sektionerna andas lika mycket under sina respektive linjer. */
   .sh-rubrik {{ font-family: 'Newsreader', Georgia, serif; font-size: 1.6rem; color: {TEXT};
-      text-align: center; margin: .3rem 0 1.9rem; letter-spacing: -.01em; }}
+      text-align: center; margin: 2.5rem 0 1.9rem; letter-spacing: -.01em; }}
   .sh-kol {{ font-family: 'Space Grotesk', sans-serif; font-size: .64rem; text-transform: uppercase;
       letter-spacing: .13em; color: {TEXT}; margin-bottom: .2rem; padding-bottom: .55rem;
       border-bottom: 1px solid {HAIRLINE}; }}
@@ -228,8 +319,17 @@ st.markdown(f"""
       display: none !important; }}
 
   /* --- Diskret toppnavigering --- */
+  /* De osynliga teknikelementen (aktiv-nav-stilen + 0×0-menyscriptet) flyttades
+     in i header-containern för att slippa deras andel av rotens 16 px flex-gap
+     (se kommentaren i Python-koden) — nolla containerns EGNA gap så de inte
+     bara flyttar det döda utrymmet hit i stället. */
+  .st-key-header {{ gap: 0 !important; }}
+  /* padding-top kompenserar en MÄTT skillnad, inte en gissning: menytextens
+     line-height 1.5 (satt för understrykningens läge) lägger dess mittlinje
+     3 px lägre än wordmarkens. Utan detta står de inte i linje. Nollas på
+     mobil, där menyn är dold och hamburgaren centreras mot samma container. */
   .wordmark {{ font-family: 'Newsreader', serif; font-size: .95rem; color: {TEXT};
-      letter-spacing: .01em; padding-top: .2rem; }}
+      letter-spacing: .01em; padding-top: 3px; }}
   .dateline {{ font-family: 'Space Grotesk', sans-serif; font-size: .64rem; text-transform: uppercase;
       letter-spacing: .16em; color: {MUTED}; margin: .2rem 0 2.6rem; }}
   hr.navhr {{ margin: .8rem 0 0 !important; }}
@@ -251,18 +351,46 @@ st.markdown(f"""
   /* Toppnavet: liten, diskret mono-versal */
   [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button {{
       font-family: 'Space Grotesk', sans-serif !important; text-transform: uppercase;
-      letter-spacing: .1em; font-size: .48rem !important; color: {TEXT} !important;
-      padding: .35rem .1rem !important; line-height: 1.9 !important;
+      letter-spacing: .1em; color: {TEXT} !important;
+      padding: .1rem .1rem !important; line-height: 1.5 !important;
       height: auto !important; overflow: visible !important; white-space: nowrap; }}
+  /* Graden MÅSTE sättas på <p>:et, inte på knappen: Streamlit lägger etiketten
+     i en egen <p> med egen font-size, så en regel på knappen når aldrig texten
+     (den gamla .48rem gav 7,7 px på knappen men 16 px på texten — större än
+     brödtexten, och därför radbröts menyn vid 1280 px). */
+  [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button p {{
+      font-size: .64rem !important; letter-spacing: .1em; line-height: 1.5;
+      /* Understrykning som växer fram från vänster (hover + aktiv vy). Ritas som
+         bakgrundsbild i stället för border, så den ligger tätt mot texten och
+         kan animeras i bredd — en border kan inte det. */
+      background-image: linear-gradient(currentColor, currentColor);
+      background-repeat: no-repeat; background-position: 0 100%;
+      background-size: 0% 1px; transition: background-size .28s ease; }}
+  [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button:hover p {{
+      background-size: 100% 1px; }}
+  /* Romerska siffran (:gray[] i etiketten) — dov och en aning mindre */
+  [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button p span {{
+      color: {MUTED} !important; font-size: .88em; letter-spacing: .06em; }}
   [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button:hover {{
       color: {OLIV} !important; }}
-  /* Menyn flödar som en rad och radbryter på smala skärmar (mobil) */
+  /* Menyn flödar som en rad och radbryter på smala skärmar (mobil).
+     Högerställd på desktop så wordmark och meny ramar in sidhuvudet. */
   .st-key-navbox, .st-key-navbox [data-testid="stVerticalBlock"] {{
       flex-direction: row !important; flex-wrap: wrap !important;
-      align-items: center; align-content: flex-start; gap: .1rem 1rem !important;
-      padding-top: .5rem !important; overflow: visible !important; }}
+      align-items: center; align-content: flex-start;
+      justify-content: flex-end !important; gap: .1rem 1.15rem !important;
+      padding-top: 0 !important; overflow: visible !important; }}
   .st-key-navbox [data-testid="stElementContainer"], .st-key-navbox .stButton {{
       width: auto !important; overflow: visible !important; }}
+  /* Smalt desktopfönster (t.ex. delad skärm): posterna ryms inte med siffror och
+     skulle radbryta till två rader. Offra ornamentet i stället för läsbarheten —
+     att i stället krympa graden hade gett ~9 px versaler. Mobilen har egen meny. */
+  @media (min-width: 641px) and (max-width: 1150px) {{
+    [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button p span {{
+        display: none; }}
+    .st-key-navbox, .st-key-navbox [data-testid="stVerticalBlock"] {{
+        gap: .1rem .8rem !important; }}
+  }}
   /* CSS-only hamburgartoggle — dold kryssruta + klickbar ikon-label (bara mobil).
      Öppnar/stänger menyn direkt på klienten via :has(), utan st.rerun. */
   .mm-cb {{ position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }}
@@ -274,40 +402,101 @@ st.markdown(f"""
     [data-testid="stMainBlockContainer"], .block-container {{
         padding-left: 1.1rem !important; padding-right: 1.1rem !important; }}
     .fullrule {{ margin: .35rem -1.1rem 0 !important; }}
-    /* Hamburgaren i övre högra hörnet (absolut mot markdown-containern som redan
-       ligger inom sidpaddingen → right: 0 = innehållets högerkant) */
-    .mm-burger {{ display: block; position: absolute; top: 0; right: 0;
+    /* Streamlit lägger margin-bottom: -16px på stMarkdownContainer (för att äta
+       upp blockets gap). Elementcontainerns autohöjd blir då 24 − 16 = 8 px
+       trots att wordmarken är 24 — innehållet svämmar ut ur sidhuvudet, som ser
+       hoptryckt ut, och hamburgaren (absolut positionerad MOT just den
+       containern) utgår från en box en tredjedel så hög som texten. På desktop
+       döljs det av att navkolumnen bär höjden; på mobil är den dold. */
+    .st-key-brandrow [data-testid="stMarkdownContainer"] {{ margin-bottom: 0 !important; }}
+    .wordmark {{ padding-top: 0; }}   /* desktopens menykompensation gäller ej här */
+    /* Hamburgaren i övre högra hörnet. Centrerad mot containern i stället för
+       top: 0 — då följer den wordmarkens mitt även om radhöjden ändras, i
+       stället för att råka hamna rätt vid en viss teckenstorlek. */
+    .mm-burger {{ display: block; position: absolute; top: 50%; right: 0;
+        transform: translateY(-50%);
         font-family: 'Space Grotesk', sans-serif; font-size: 1.7rem; line-height: 1;
         color: {TEXT}; cursor: pointer; z-index: 5; padding: .1rem .2rem; }}
     body:has(.mm-cb:checked) .mm-burger .mm-open {{ display: none; }}
     body:has(.mm-cb:checked) .mm-burger .mm-close {{ display: inline; }}
     /* Nolla gapet till den dolda nav-kolumnen så sidhuvudet blir kompakt */
     .st-key-header [data-testid="stHorizontalBlock"] {{ gap: 0 !important; }}
-    /* Hopfällbar meny: navbox dold tills kryssrutan är ikryssad → vertikal lista */
+    /* Hopfällbar meny: navbox dold tills kryssrutan är ikryssad → vertikal lista.
+       justify-content återställs: desktopens flex-end betyder "packa nedåt" när
+       riktningen är column, vilket inte är vad mobilmenyn vill. */
     .st-key-navbox {{ display: none !important; flex-direction: column !important;
-        align-items: flex-start !important; gap: .1rem !important; }}
+        align-items: flex-start !important; justify-content: flex-start !important;
+        gap: .1rem !important; }}
     body:has(.mm-cb:checked) .st-key-navbox {{ display: flex !important; }}
     [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button {{
-        font-size: .82rem !important; letter-spacing: .1em; padding: .5rem .1rem !important; }}
+        letter-spacing: .1em; padding: .5rem .1rem !important; }}
+    /* Graden måste sättas på <p>:et även här — se basregeln ovan. Utan denna
+       ärvs desktopens .64rem och mobilmenyn blir oläsligt liten. */
+    [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button p {{
+        font-size: .82rem !important; }}
     .hero-title {{ font-size: 1.5rem; margin-top: 1.5rem; }}
-    .sh-rubrik {{ font-size: 1.5rem; margin-bottom: 1.4rem; }}
+    /* Samma toppmarginal som hjälterubriken ovan — mobilen har tightare rytm */
+    .sh-rubrik {{ font-size: 1.5rem; margin-top: 1.5rem; margin-bottom: 1.4rem; }}
     [data-testid="stMainBlockContainer"] h2, [data-testid="stMainBlockContainer"] h3 {{
         font-size: 1.5rem !important; }}
-    .rad {{ gap: .55rem; padding: .7rem .05rem; }}
+    /* Radens barn har flex: 0 0 auto och kan alltså INTE krympa — summerar de
+       mer än radens bredd målas de utanför och klipps av skärmkanten utan att
+       ge vare sig scrollbar eller synlig varning. Budgeten på 375 px är knapp,
+       så breddarna nedan är avstämda mot den: 7 synliga fält + 6 mellanrum. */
+    .rad {{ gap: .45rem; padding: .7rem .05rem; }}
     .meter {{ display: none; }}          /* poängsiffran räcker; frigör bredd */
-    .tk {{ flex: 1 1 auto; font-size: 1.05rem; min-width: 0; }}
+    /* PROTOTYP på mobil: sparklinen får plats och bär mest information, men
+       3-månaderskolumnen, kolumnhuvudet och kursen får vika — sex sifferfält
+       på 375 px blir gröt. Kursen finns kvar i utfällningens TL;DR. */
+    .kolhuvud {{ display: none; }}
+    /* Vikten (vad man ska göra) prioriteras före avkastningssiffrorna på mobil —
+       sparklinen visar redan riktningen. Kurs och exakta procenttal finns kvar
+       i utfällningen. */
+    .delta-3m, .rad .pris, .rad .delta {{ display: none; }}
+    .vikt {{ width: 2.8rem; font-size: .74rem; }}
+    .sparkbox {{ min-width: 38px; max-width: 92px; }}
+    .spark {{ height: 20px; }}
+    .delta {{ width: 3.4rem; font-size: .66rem; }}
+    /* Tickern får ALDRIG krympa — med min-width: 0 bryter den mitt i ordet
+       ("AM ZN"). Sparklinen är den enda som ger efter på bredden. Egen minbredd
+       här (basregelns 4.2rem är för bred i mobilbudgeten) så sparklinerna ändå
+       börjar på samma x i alla rader. */
+    .tk {{ flex: 0 0 auto; font-size: 1.05rem; white-space: nowrap;
+        min-width: 3.6rem; }}
     .bikon {{ width: 26px; height: 26px; }}
     .rang {{ width: 1.3rem; font-size: .68rem; }}
-    .poang {{ width: 2.7rem; font-size: .92rem; }}
-    .crek {{ width: auto; font-size: .56rem; letter-spacing: .05em; }}
-    .trend {{ width: .9rem; }}
+    .poang {{ width: 3rem; font-size: 1.05rem; }}
+    /* Fast bredd nu när rekommendationen är sista kolumnen — med width:auto
+       slutar KÖP och AVVAKTA på olika x och högerkanten fransar sig. */
+    .crek {{ width: 3.2rem; font-size: .56rem; letter-spacing: .05em; }}
     .detalj-inner {{ padding-left: 2.4rem; padding-bottom: 1rem; }}
     /* Tightare mobilrytm: mindre glapp mellan delarna */
     [data-testid="stMainBlockContainer"] [data-testid="stVerticalBlock"] {{ gap: .6rem; }}
     /* Mobilen har redan tightare rytm (gap .6rem) → mildare uppdragning */
     .st-key-fgexp {{ margin-top: -.15rem !important; }}
+    /* Utfällt sentiment: kapa luften runt mätaren (figurens egen döda höjd
+       styrs av hojd= i fear_greed_gauge). Etikettens undermarginal är det
+       som annars ger 30+ px ner till bildtexten. */
+    .st-key-fgexp [data-testid="stExpanderDetails"] {{
+        padding-top: .1rem !important; padding-bottom: .1rem !important; }}
+    .st-key-fggauge-d {{ display: none; }}
+    .st-key-fggauge-m {{ display: block; }}
+    /* Centrerkolumnerna [1,4,1] staplas på mobil — den tomma första kolumnen
+       lämnar då bara ett gap kvar ovanför mätaren. */
+    .st-key-fgexp [data-testid="stHorizontalBlock"] {{ gap: 0 !important; }}
+    .st-key-fgexp .fg-etikett {{ margin: -.7rem 0 .2rem; font-size: 1.4rem; }}
+    /* Förklaringsrutan på smal skärm: spänn över hela lägesraden i stället för
+       att centreras på värdet. Ett värde nära kanten hade annars fått rutan att
+       hamna utanför skärmen. Tricket är att göra .tip static — då blir
+       .lagesrad (position: relative) det som ::after positioneras mot. */
+    .lagesrad {{ position: relative; }}
+    .lagesrad .tip {{ position: static; }}
+    /* Under lägesraden på mobil, inte över: ovanför hamnar den mitt över
+       wordmarken. Nedanför täcker den listan, som är lättare att offra. */
+    .lagesrad .tip::after {{
+        left: 0; right: 0; width: auto; max-width: none; transform: none;
+        bottom: auto; top: 100%; margin-top: .45rem; font-size: .72rem; }}
     .hero-sub {{ margin-bottom: .9rem; }}
-    .sub-lang {{ display: none; }}   /* mobil: kortad undertext (bara poäng + länk) */
     .nyckeltal {{ gap: .7rem 1.6rem; margin-bottom: .9rem; }}
     .delpoang {{ gap: .35rem; }}
     .fg-mini {{ flex-wrap: wrap; }}
@@ -455,6 +644,17 @@ def _num(v, suf="", dec=1):
     return "—" if v is None else f"{v:.{dec}f}{suf}".replace(".", ",")
 
 
+def _ar_tal(v):
+    """True bara för ett läsbart tal — sållar bort både None och NaN.
+
+    NaN når UI:t via senaste_analys.json: Pythons json skriver ut NaN utan att
+    klaga (trots att det inte är giltig JSON enligt standarden) och läser
+    tillbaka det som float('nan'). Ett NaN passerar `is not None`, så den
+    vanliga null-kontrollen räcker inte — därav den här.
+    """
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and not math.isnan(v)
+
+
 def nya_pa_listan(log, typ, dagar=7):
     """Tickers som fått en '{typ}'-loggpost de senaste `dagar` dagarna."""
     from datetime import date, timedelta
@@ -537,6 +737,52 @@ def _sv1(v):
     return f"{v:.1f}".replace(".", ",")
 
 
+def _pct(v):
+    """Procent med tecken och svensk decimal, eller '—' vid null."""
+    return "—" if v is None else f"{v:+.1f}".replace(".", ",") + " %"
+
+
+def sparkline(ohlc, farg, bredd=120, hojd=26):
+    """Inline SVG-sparkline ur kursserien (SCHEMA: analyses[tk].ohlc, ~90 dgr).
+
+    Ritas som SVG direkt i HTML-strängen, inte som ett diagramwidget: Bästa
+    köp-listan är EN markdown-blob med CSS-driven utfällning, och en widget per
+    rad hade brutit den strukturen. SVG:n sträcks till radens bredd
+    (preserveAspectRatio="none") medan linjebredden hålls konstant med
+    vector-effect, så den inte deformeras.
+
+    MA200 ritas som svag referenslinje i samma skala — ligger kursen över den
+    är trenden intakt, vilket är exakt det hårda köpkriteriet i poängmodellen.
+    """
+    if not ohlc:
+        return ""
+    serie = [(p.get("c"), p.get("ma200")) for p in ohlc if p.get("c") is not None]
+    if len(serie) < 2:
+        return ""
+    stangn = [c for c, _ in serie]
+    ma_varden = [m for _, m in serie if m is not None]
+    lo = min(stangn + ma_varden)
+    hi = max(stangn + ma_varden)
+    spann = (hi - lo) or 1.0
+    steg = bredd / (len(serie) - 1)
+
+    def y(v):
+        return hojd - 2 - (v - lo) / spann * (hojd - 4)
+
+    kurs = " ".join(f"{i * steg:.1f},{y(c):.1f}" for i, (c, _) in enumerate(serie))
+    # MA200 saknas tidigt i serien → rita bara den sammanhängande svansen.
+    ma_pkt = [(i, m) for i, (_, m) in enumerate(serie) if m is not None]
+    ma_linje = ""
+    if len(ma_pkt) >= 2:
+        d = " ".join(f"{i * steg:.1f},{y(m):.1f}" for i, m in ma_pkt)
+        ma_linje = (f'<polyline points="{d}" fill="none" stroke="{HAIRLINE}" '
+                    f'stroke-width="1" vector-effect="non-scaling-stroke"/>')
+    return (f'<svg class="spark" viewBox="0 0 {bredd} {hojd}" preserveAspectRatio="none" '
+            f'aria-hidden="true">{ma_linje}'
+            f'<polyline points="{kurs}" fill="none" stroke="{farg}" stroke-width="1.4" '
+            f'stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>')
+
+
 def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max, analys_map):
     """Bästa köp som redaktionell hover/klick-lista (ren HTML/CSS, inga widgets).
 
@@ -551,10 +797,9 @@ def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max, analys_
         cl = claude_map.get(tk) or {}
         crek = cl.get("rekommendation", "—")
         farg = rek_farg.get(crek, MUTED)
-        if r["trend_ok"]:
-            trendmark = f'<span class="trend" style="color:{MOSS}">▲</span>'
-        else:
-            trendmark = f'<span class="trend" style="color:{RUST}">▼</span>'
+        # Trendpilen ▲▼ är borttagen: sparklinens färg och KÖP/AVVAKTA bar redan
+        # samma budskap, och tre signaler för en sak läser som brus. trend_ok
+        # styr numera bara sparklinens färg.
         ikon = bransch_ikon(tk, bransch_map)
         img = f'<img class="bikon" src="{ikon}">' if ikon else '<span class="bikon"></span>'
 
@@ -615,15 +860,32 @@ def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max, analys_
             tldr_html = (f'<div class="ctldr" style="border-color:{farg}">'
                          f'{html.escape(text)}</div>')
 
+        # PROTOTYP: sparkline + kurs + avkastning ersätter poängstapeln. Poängen
+        # är en abstraktion; kursbilden är det man faktiskt vill se först.
+        a_pro = analys_map.get(tk) or {}
+        spark_farg = MOSS if r["trend_ok"] else RUST
+        spark = sparkline(a_pro.get("ohlc"), spark_farg)
+        kurs_txt = _num(a_pro.get("pris"), dec=2)
+        av1 = a_pro.get("avkastning_1m_%")
+        av3 = a_pro.get("avkastning_3m_%")
+
+        def _delta_span(v, klass):
+            f = MOSS if (v or 0) > 0 else (RUST if (v or 0) < 0 else MUTED)
+            return f'<span class="{klass}" style="color:{f}">{_pct(v)}</span>'
+
         rader.append(
             f'<div class="stock">'
             f'<input type="checkbox" id="st_{tk}" class="stoggle">'
             f'<label class="rad" for="st_{tk}">'
             f'<span class="rang">{i:02d}</span>{img}'
             f'<span class="tk">{tk}</span>'
-            f'<span class="meter"><span class="fill" style="width:{poang:.0f}%"></span></span>'
+            f'<span class="sparkbox">{spark}</span>'
+            f'<span class="pris">{kurs_txt}</span>'
+            f'{_delta_span(av1, "delta")}'
+            f'{_delta_span(av3, "delta delta-3m")}'
+            f'<span class="vikt">{_num(r.get("foreslagen_vikt_%"), " %")}</span>'
             f'<span class="poang">{_sv1(poang)}</span>'
-            f'<span class="crek" style="color:{farg}">{crek}</span>{trendmark}'
+            f'<span class="crek" style="color:{farg}">{crek}</span>'
             f'</label>'
             f'<div class="detalj"><div class="detalj-inner">'
             f'<div class="nyckeltal">{nyckel_html}</div>'
@@ -655,8 +917,14 @@ def fg_zon(v):
     return FG_ZONER[-1][1], FG_ZONER[-1][2]
 
 
-def fear_greed_gauge(varde):
-    """CNN-lik halvcirkelmätare (Plotly go.Indicator) med fem färgzoner + nål."""
+def fear_greed_gauge(varde, hojd=300):
+    """CNN-lik halvcirkelmätare (Plotly go.Indicator) med fem färgzoner + nål.
+
+    hojd styr figurhöjden. Plotly centrerar mätaren i figuren och låter bågens
+    storlek begränsas av den minsta av bredd/höjd — är figuren högre än vad
+    bågen behöver blir mellanskillnaden tomrum över och under. Utfället på
+    Bästa köp är smalt (särskilt på mobil) och skickar därför en lägre höjd.
+    """
     import plotly.graph_objects as go
 
     fig = go.Figure(go.Indicator(
@@ -682,8 +950,13 @@ def fear_greed_gauge(varde):
         domain={"x": [0, 1], "y": [0, 1]},
     ))
     # t-marginalen måste rymma de översta zonetiketterna (45/55) — annars klipps
-    # de av figurkanten. Höjden höjs lika mycket så själva bågen behåller storleken.
-    fig.update_layout(height=300, margin=dict(l=24, r=24, t=34, b=0),
+    # de av figurkanten. Plotly reserverar ingen plats för dem: de ritas ovanför
+    # bågen och sticker upp mer ju större bågen är. Frestas inte att krympa den
+    # för den låga figuren — på en bred skärm är bågen höjdbegränsad och därmed
+    # stor, och då klipps 45/55 bort (testat: t=12 klipper på desktop).
+    # l/r måste rymma ändetiketterna 0 och 100 — den tresiffriga hänger annars
+    # utanför figurkanten och sista nollan klipps (mätt: 310 px i en 308 px figur).
+    fig.update_layout(height=hojd, margin=dict(l=36, r=36, t=34, b=0),
                       paper_bgcolor="rgba(0,0,0,0)", font={"family": "Space Grotesk"})
     return fig
 
@@ -812,15 +1085,17 @@ if data:
 # Sidhuvud: wordmark (vänstra hörnet) + fördjupningsmeny (byter mittsektion)
 # ----------------------------------------------------------------------
 # (nyckel, etikett): vyn lagras på nyckeln, menyn visar etiketten (rom. siffror).
+# Siffran märks med :gray[] — Streamlits färgmarkdown — så den kan sättas i dov
+# ton och mindre grad via CSS (span:et nedan) utan att etiketten påverkas.
 VYER = [
     ("Bästa köp", "Bästa köp"),
-    ("Konsensus", "I · Konsensus"),
-    ("Divergens", "II · Divergens"),
-    ("Claude", "III · Claude"),
-    ("Ändringar", "IV · Ändringar"),
-    ("Historik", "V · Historik"),
-    ("Portföljer", "VI · Portföljer"),
-    ("Sentiment", "VII · Sentiment"),
+    ("Konsensus", ":gray[I] Konsensus"),
+    ("Divergens", ":gray[II] Divergens"),
+    ("Claude", ":gray[III] Claude"),
+    ("Ändringar", ":gray[IV] Ändringar"),
+    ("Historik", ":gray[V] Historik"),
+    ("Portföljer", ":gray[VI] Portföljer"),
+    ("Sentiment", ":gray[VII] Sentiment"),
 ]
 st.session_state.setdefault("view", "Bästa köp")
 
@@ -851,21 +1126,30 @@ with st.container(key="header"):
                     st.session_state["view"] = _key
                     st.rerun()
 
-# Understryk den aktiva menypunkten (dynamiskt per vy).
-_aktiv = _navslug(st.session_state["view"])
-st.markdown(
-    f"<style>div.st-key-nav_{_aktiv} button {{ color: {TEXT} !important; "
-    f"border-bottom: 1px solid {TEXT} !important; }}</style>",
-    unsafe_allow_html=True,
-)
-# Mobilmenyns kryssruta lever i DOM:en och nollas inte av Streamlit vid rerun.
-# En liten script-komponent (kör vid varje rerun, t.ex. vyval) fäller ihop menyn.
-# Vy-taggen gör att iframen laddas om vid vybyte så scriptet garanterat körs.
-st.components.v1.html(
-    f"<script>try{{const c=window.parent.document.getElementById('mm-cb');"
-    f"if(c)c.checked=false;}}catch(e){{}}/*{_aktiv}*/</script>",
-    height=0, width=0,
-)
+    # De två teknikelementen nedan renderar inget synligt (stil-tagg + 0×0-iframe)
+    # men ligger INUTI header-containern med flit — som egna toppnivåelement fick
+    # var och en samma 16 px flex-gap som huvudinnehållets sektioner, vilket drog
+    # upp ett dött mellanrum på ~50 px mellan menyn och hårlinjen under.
+    # Understryk den aktiva menypunkten (dynamiskt per vy).
+    _aktiv = _navslug(st.session_state["view"])
+    # Samma understrykningsteknik som hover (bakgrundsbild på <p>), inte en
+    # border på knappen — annars hamnar aktiv och hovrad linje på olika höjd.
+    # OBS prefixet stMainBlockContainer: basregeln för menyns <p> har två
+    # attributselektorer och vinner annars över en ren klassregel här.
+    st.markdown(
+        f"<style>div.st-key-nav_{_aktiv} button {{ color: {TEXT} !important; }}"
+        f'[data-testid="stMainBlockContainer"] div.st-key-nav_{_aktiv} button p '
+        f"{{ background-size: 100% 1px; }}</style>",
+        unsafe_allow_html=True,
+    )
+    # Mobilmenyns kryssruta lever i DOM:en och nollas inte av Streamlit vid rerun.
+    # En liten script-komponent (kör vid varje rerun, t.ex. vyval) fäller ihop menyn.
+    # Vy-taggen gör att iframen laddas om vid vybyte så scriptet garanterat körs.
+    st.components.v1.html(
+        f"<script>try{{const c=window.parent.document.getElementById('mm-cb');"
+        f"if(c)c.checked=false;}}catch(e){{}}/*{_aktiv}*/</script>",
+        height=0, width=0,
+    )
 
 st.markdown('<hr class="fullrule">', unsafe_allow_html=True)
 
@@ -930,14 +1214,105 @@ if view == "Bästa köp":
             with st.container(key="rapportbadge"):
                 st.caption(f":material/event_upcoming: **Rapport inom en vecka:** {badges}")
 
+        # Lägesrad: marknadsläge, sentiment, listans storlek och dagens
+        # ändringar finns redan som data men låg utspridda på fem vyer. Samlade
+        # här ger de hela marknadsläget på en rad, innan man läser listan.
+        _st_delar = []
+        _rgd = data.get("regim") or {}
+        _rg = _rgd.get("regim")
+        _sp, _sm = _rgd.get("spy_pris"), _rgd.get("spy_ma200")
+        # Etiketten härleds av backend UR de här två talen. Går de inte att läsa
+        # (NaN) är etiketten inte att lita på — den blir RÖD, eftersom villkoret
+        # för RÖD är formulerat som frånvaro av "över" och "stigande" och alla
+        # jämförelser med NaN är falska. Visa OKÄND i stället för att påstå en
+        # nedtrend vi inte har underlag för. Orsaken sitter i backendens
+        # regimberäkning; det här är bara ett skydd mot att UI:t ljuger.
+        _tal_lasbara = _ar_tal(_sp) and _ar_tal(_sm)
+        _nedgraderad = bool(_rg) and _rg != "OKÄND" and not _tal_lasbara and _sp is not None
+        if _nedgraderad:
+            _rg = "OKÄND"
+        if _rg:
+            _rgf = {"GRÖN": MOSS, "GUL": SAND, "RÖD": RUST}.get(_rg, MUTED)
+            # Förklaringen bygger på de FAKTISKA värdena (index mot MA200), inte
+            # bara en generisk definition — hela poängen med en tooltip här är
+            # att slippa gå till en annan vy för att se vad läget grundas på.
+            _rgtxt = {
+                "GRÖN": "Indexet ligger över sitt 200-dagars glidande medelvärde "
+                        "och medelvärdet stiger — bred upptrend.",
+                "RÖD": "Indexet ligger under sitt 200-dagars glidande medelvärde "
+                       "och medelvärdet faller — bred nedtrend.",
+                "GUL": "Blandat läge: indexet och dess 200-dagars medelvärde pekar "
+                       "åt olika håll.",
+                "OKÄND": "Kunde inte beräknas den här körningen — behandlas som GRÖN.",
+            }.get(_rg, "")
+            _kalla = _rgd.get("regim_kalla") or "index"
+            if _nedgraderad:
+                # Var uttrycklig om VARFÖR, annars ser det ut som ett vanligt
+                # hämtningsfel och orsaken blir svår att hitta igen.
+                _rgtxt = ("Marknadsläget kunde inte läsas: indexkursen saknade värde i "
+                          "senaste körningen, så jämförelsen mot 200-dagars medelvärdet "
+                          "gick inte att göra. Behandlas som GRÖN, precis som ett "
+                          "misslyckat hämtningsförsök.")
+            elif _tal_lasbara:
+                _rgtxt += f" {_kalla} {_num(_sp, dec=2)} mot MA200 {_num(_sm, dec=2)}."
+            _rgtxt += (" Påverkar aldrig poängen — bara RÖD har effekt, och då "
+                       "nedgraderas Claudes köptext till „KÖP (vänta på marknaden)”.")
+            if _rgd.get("notis"):
+                _rgtxt += f" {_rgd['notis']}"
+            _st_delar.append(
+                f'Marknadsläge <b class="tip" tabindex="0" '
+                f'data-tip="{html.escape(_rgtxt, quote=True)}" '
+                f'style="color:{_rgf}">{_rg}</b>')
+        _fgd = data.get("fear_greed") or {}
+        if _fgd.get("varde") is not None:
+            _fgv2 = _fgd["varde"]
+            _fge2 = _fgd.get("etikett") or fg_zon(_fgv2)[0]
+            # Rå &-tecken här: html.escape() nedan gör om den till &amp; en gång.
+            # Skrevs den redan escapad blev det &amp;amp; och rutan visade "&amp;".
+            _fgtxt = (f"CNN:s Fear & Greed-index mäter marknadens känsloläge på en "
+                      f"skala 0–100, från extrem rädsla till extrem girighet. "
+                      f"{_num(_fgv2, dec=0)} = {_fge2}. Zonerna: 0–25 Extreme Fear · "
+                      f"25–45 Fear · 45–55 Neutral · 55–75 Greed · 75–100 Extreme Greed. "
+                      f"Rent informationsfält — påverkar varken poäng eller marknadsläge.")
+            if _fgd.get("notis"):
+                _fgtxt += f" {_fgd['notis']}"
+            _st_delar.append(
+                f'Sentiment <b class="tip" tabindex="0" '
+                f'data-tip="{html.escape(_fgtxt, quote=True)}" '
+                f'style="color:{fg_zon(_fgv2)[1]}">{_fgv2:.0f} {_fge2}</b>')
+        _st_delar.append(f'<b>{len(ranking)}</b> konsensusaktier')
+        _log_idag = data.get("historik") or []
+        if _log_idag:
+            _antal_idag = sum(1 for e in _log_idag if e["datum"] == _log_idag[0]["datum"])
+            _ord = "ändring" if _antal_idag == 1 else "ändringar"
+            _st_delar.append(f'<b>{_antal_idag}</b> {_ord} {_log_idag[0]["datum"]}')
+        # "Uppdaterad" hörde hemma där man faktiskt tittar, inte bara i sidfoten —
+        # på en finansyta är datats ålder en trovärdighetsuppgift.
+        _tp = data.get("tidpunkt")
+        if _tp:
+            _st_delar.append(f'Uppdaterad <b>{_tp.replace("T", " ")}</b>')
+        st.markdown(f'<div class="lagesrad">{" · ".join(_st_delar)}</div>',
+                    unsafe_allow_html=True)
+
+        st.markdown(
+            '<div class="kolhuvud"><span class="kh-vanster"></span>'
+            '<span class="kh-spark">90 dagar</span>'
+            '<span class="kh-pris">Kurs</span>'
+            '<span class="kh-delta">1 mån</span>'
+            '<span class="kh-delta delta-3m">3 mån</span>'
+            '<span class="kh-vikt">Vikt</span>'
+            '<span class="kh-poang">Poäng</span>'
+            '<span class="kh-rek"></span></div>',
+            unsafe_allow_html=True)
         st.markdown(hero_html(ranking, claude, consensus, bransch, KOMP_MAX, analyses), unsafe_allow_html=True)
 
         # Undertext om poängen ligger UNDER listan. "Så räknas poängen" inline
         # (native <details>/<summary> → samma rad, expanderar utan rerun).
+        # Den tidigare bruksanvisningen ("Håll muspekaren över eller klicka på en
+        # aktie för …") är borta: ett verktyg som förklarar sin egen hovereffekt
+        # läser som en manual. Kolumnhuvudet ger nu kontexten i stället.
         st.markdown(
-            '<div class="hero-sub">Sammanvägd poäng 0–100. '
-            '<span class="sub-lang">Håll muspekaren över eller klicka '
-            'på en aktie för poänguppdelning och nyckeltal. </span>'
+            '<div class="hero-sub">'
             '<details class="poang-inline"><summary>Så räknas poängen</summary>'
             '<span class="poang-text">'
             '<strong>Poängmodellen (§12, omviktad):</strong> Trend 25 p · Momentum 20 p '
@@ -963,11 +1338,29 @@ if view == "Bästa köp":
                 with st.expander(f"Marknadssentiment · {_fgv:.0f} · {_fge}"):
                     _fgc = st.columns([1, 4, 1])
                     with _fgc[1]:
-                        st.plotly_chart(fear_greed_gauge(_fgv), use_container_width=True,
-                                        config={"displayModeBar": False})
+                        # Rätt figurhöjd beror på bredden: smal (mobil) → bågen
+                        # begränsas av bredden och en hög figur blir mest tomrum;
+                        # bred (desktop) → bågen begränsas av höjden och en låg
+                        # figur ger en onödigt liten mätare. Plotly ritar i fasta
+                        # pixlar, så CSS kan inte skala om en och samma figur utan
+                        # att beskära den. Därför två, en dold per media query —
+                        # samma mönster som breda tabeller vs mobilkort nedan.
+                        for _nyckel, _h in (("fggauge-d", 300), ("fggauge-m", 195)):
+                            with st.container(key=_nyckel):
+                                st.plotly_chart(fear_greed_gauge(_fgv, hojd=_h),
+                                                use_container_width=True,
+                                                config={"displayModeBar": False})
                         st.markdown(f'<div class="fg-etikett" style="color:{_fgf}">{_fge}</div>',
                                     unsafe_allow_html=True)
-                    st.caption("Full vy med historik under **VII · Sentiment**.")
+                    # Genväg till Sentiment-vyn. En ren <a> kan inte byta vy —
+                    # navigeringen går via session_state — så det är en knapp som
+                    # CSS:en klär som en textlänk. Vyn har redan lästs ur
+                    # session_state längre upp, därav en explicit rerun.
+                    with st.container(key="fglank"):
+                        if st.button("Full vy med historik under VII · Sentiment",
+                                     key="btn_fg_till_sentiment"):
+                            st.session_state["view"] = "Sentiment"
+                            st.rerun()
             # Färga sammanfattningsraden i zonens färg.
             st.markdown(f"<style>.st-key-fgexp summary {{ color: {_fgf} !important; }}</style>",
                         unsafe_allow_html=True)
@@ -1020,9 +1413,13 @@ if view == "Bästa köp":
         vikt_rader = [t for _, t in sorted(vikt_rader, key=lambda x: -x[0])][:6]
 
         if lista_rader or vikt_rader:
-            st.markdown('<hr class="fullrule" style="margin-top:2.4rem">', unsafe_allow_html=True)
-            _shl, _shc, _shr = st.columns([1, 4, 1])
-            with _shc:
+            # Ingen inline margin-top här: .fullrule sätter margin med !important
+            # och vinner över inline-stil. Luften ovanför rubriken styrs i stället
+            # av .sh-rubrik:s toppmarginal.
+            st.markdown('<hr class="fullrule">', unsafe_allow_html=True)
+            # Samma bredd och vänsterkant som aktielistan (.stocklist, 900 px) —
+            # centrerkolumner [1,4,1] gav 867 px och en annan vänsterkant.
+            with st.container(key="shbox"):
                 st.markdown('<div class="sh-rubrik">Senaste händelser</div>',
                             unsafe_allow_html=True)
                 # 1. Förändringar i listorna
@@ -1567,7 +1964,7 @@ if view == "Sentiment":
         '<div class="hero-title">Marknadssentiment</div>'
         '<div class="hero-sub">CNN:s Fear &amp; Greed-index — marknadens känsloläge från '
         'extrem rädsla (0) till extrem girighet (100). Rent informationsfält, '
-        'ingen påverkan på poäng eller regim.</div>',
+        'ingen påverkan på poäng eller marknadsläge.</div>',
         unsafe_allow_html=True,
     )
     fg = data.get("fear_greed")
