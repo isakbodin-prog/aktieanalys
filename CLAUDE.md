@@ -200,6 +200,22 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
    körningens analys (samma mönster som riktkurs-fallbacken); SPY-regimen
    återanvänder på samma sätt förra kända GRÖN/GUL/RÖD i stället för att
    visa OKÄND.
+   PRISDATA-RESERV (sedan 2026-07-06, commit 2bbd807): misslyckas Yahoo helt
+   för en ticker (ingen prishistorik alls, inte bara .info/.eps_trend) provas
+   Alpha Vantage (ALPHAVANTAGE_API_KEY, gratisnivå 25 anrop/dag — måste sättas
+   manuellt i Render-dashboarden, render.yaml deklarerar bara variabelnamnet).
+   Misslyckas BÅDA återanvänds hela förra körningens analysrad för tickern
+   (analyses[tk].datakälla = "cache") i stället för en tom/felaktig rad.
+   ÅLDERSVARNING (2026-08-04, efter en incident där Yahoo+Alpha Vantage båda
+   blockerades flera dagar i rad på Render och det gick obemärkt förbi):
+   varje analysrad har `pris_datum` (vilken handelsdags stängning priset
+   faktiskt är) som ärvs OFÖRÄNDRAT genom cache-kedjan, till skillnad från
+   `cache_datum` som bara visar FÖRRA körningens tidpunkt och därför vandrar
+   framåt varje dag även om priset inte gör det. Är `pris_datum` mer än
+   ANALYS_CACHE_ALDER_VARNING_HANDELSDAGAR (1) handelsdag gammal vid
+   cache-fallback sätts analyses[tk].notis till en synlig varning — lägre
+   tröskel än regim/F&G (3–5 dagar) eftersom ett aktiepris förväntas
+   uppdateras varje handelsdag. Se SCHEMA.md för fältformat.
    Värderingspoängen (§7, se UTBYGGNAD_screener_v2.md) blir NEUTRAL (5/10)
    om data helt saknas — aldrig 0, som annars är omöjligt att skilja från
    en genuint dyr aktie. Excel-kommentar flaggar cellen när detta slår till.

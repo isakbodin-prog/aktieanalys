@@ -869,6 +869,7 @@ def analyze_ticker(ticker):
             "valuta": info.get("currency") or ("USD" if source == "Alpha Vantage" else None),
             "ohlc": ohlc,
             "pris": round(price, 2),
+            "pris_datum": hist.index[-1].strftime("%Y-%m-%d"),
             "MA50": round(ma50, 2),
             "MA200": round(ma200, 2) if ma200 else None,
             "över_MA200": price > ma200 if ma200 else None,
@@ -1364,6 +1365,17 @@ FEAR_GREED_ETIKETTER = {
     "extreme greed": "Extreme Greed",
 }
 FG_ALDER_VARNING_HANDELSDAGAR = 3
+
+# Samma reservmönster för per-aktie-prisdata: när Yahoo OCH Alpha Vantage
+# båda misslyckas återanvänds hela förra körningens analysrad (se run_analysis
+# nedan). Utan en åldersvarning maskeras det tyst av att `cache_datum` bara
+# visar FÖRRA KÖRNINGENS tidpunkt — vid flera dagars sammanhängande blockering
+# vandrar cache_datum framåt varje dag trots att priset (pris_datum) står
+# stilla. Tröskeln mäts därför mot pris_datum, inte cache_datum. Lägre
+# tröskel än regim/F&G (1 handelsdag, inte 3–5) eftersom en akties pris
+# förväntas uppdateras VARJE handelsdag — redan 2 dagars eftersläpning är
+# en tydlig avvikelse för en poängmodell som fattar köp/sälj-underlag.
+ANALYS_CACHE_ALDER_VARNING_HANDELSDAGAR = 1
 
 
 def hamta_fear_greed():
@@ -2792,8 +2804,16 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
             cached = dict(pa)
             cached["datakälla"] = "cache"
             cached["cache_datum"] = (prev.get("tidpunkt") or "")[:16].replace("T", " kl. ")
+            pris_datum = cached.get("pris_datum")   # ärvs oförändrat från pa — vandrar
+            alder = (_handelsdagar_mellan(pris_datum, date.today().isoformat())
+                     if pris_datum else None)        # INTE framåt bara för att vi cachar igen
+            if alder is not None and alder > ANALYS_CACHE_ALDER_VARNING_HANDELSDAGAR:
+                cached["notis"] = f"⚠ prisdata baserad på {alder} dagar gammal information ({pris_datum})"
+            else:
+                cached["notis"] = "återanvänd — datakällorna svarade inte"
             analyses[ticker] = cached
-            print(f"    {ticker}: datakällorna svarade inte — återanvänder analysen från {cached['cache_datum']}")
+            print(f"    {ticker}: datakällorna svarade inte — återanvänder analysen från {cached['cache_datum']}"
+                  + (f" [{cached['notis']}]" if alder is not None and alder > ANALYS_CACHE_ALDER_VARNING_HANDELSDAGAR else ""))
     for ticker, a in analyses.items():
         if "error" in a or a.get("riktkurs"):
             continue
