@@ -52,6 +52,18 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
   samma endpoints igen utan ny information.
 
 ## Kända miljöbegränsningar
+- **Render kör containerklockan i UTC, inte Europe/Stockholm** (fixat
+  2026-08-04): `date.today()`/`datetime.now()` följer den ambienta
+  systemtidszonen — lokalt (Mac) råkar den redan vara Stockholm så felet
+  syntes bara i produktion. `tidpunkt` (visas som "Uppdaterad kl. …" i
+  appen) blev 1–2 timmar fel beroende på sommar-/vintertid. `_idag()`/
+  `_nu()` (definierade direkt under `PROFILES`) ersätter nu ALLA
+  `date.today()`/`datetime.now()`-anrop i filen — de tvingar alltid fram
+  Europe/Stockholm-lokaltid via `pytz` oavsett servertidszon. Skriv ALDRIG
+  `date.today()`/`datetime.now()` direkt i nya tillägg — använd `_idag()`/
+  `_nu()`. `app.py` har motsvarande anrop kvar (bl.a. auto-refresh-
+  jämförelsen mot `tidpunkt`) — frontend-sessionens att åtgärda, se
+  SCHEMA.md-changeloggen 2026-08-04.
 - **Yahoo/yfinance-blockering på Render är INTERMITTENT och ASYMMETRISK**
   (verifierat 2026-07-17, körning 09:17 UTC): per-aktiefälten (§7–§10:
   EPS-rev, forward P/E, PEG, riktkursspridning, nästa rapport, sektor)
@@ -66,6 +78,16 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
     återanvända regimen är äldre än REGIM_ALDER_VARNING_HANDELSDAGAR (5).
   - Motåtgärd för per-aktiefälten: fältvis återanvändning från förra
     körningen (se Pipeline steg 3–4 ovan).
+  - **NaN-platsrad, separat felläge från blockering** (fixat 2026-08-04,
+    flaggat av frontend-sessionen): Yahoo returnerar ibland en giltig,
+    icke-tom historik men med en NaN-rad för innevarande dag (handeln inte
+    avslutad än) — `history.empty` är då `False` så det gamla felet
+    smet förbi tomhetskontrollen. `pris > MA200` med NaN är alltid
+    `False`, vilket gjorde saknad data omöjlig att skilja från en äkta
+    nedtrend (RÖD). `_hamta_regim_for_ticker()` kör nu `close.dropna()`
+    innan beräkningen. `analyze_ticker()` (per-aktie, §3) hade redan detta
+    skydd sedan tidigare (`pd.isna(hist["Close"].iloc[-1])`-kollen) — bara
+    regimberäkningen saknade det.
   - Nästa eskaleringssteg OM blockeringen förvärras (implementera INTE
     förrän det faktiskt behövs): beräkna regimen lokalt (utanför Render)
     och gist-synka resultatet, så Render aldrig behöver nå Yahoo för just
@@ -200,6 +222,22 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
    körningens analys (samma mönster som riktkurs-fallbacken); SPY-regimen
    återanvänder på samma sätt förra kända GRÖN/GUL/RÖD i stället för att
    visa OKÄND.
+   PRISDATA-RESERV (sedan 2026-07-06, commit 2bbd807): misslyckas Yahoo helt
+   för en ticker (ingen prishistorik alls, inte bara .info/.eps_trend) provas
+   Alpha Vantage (ALPHAVANTAGE_API_KEY, gratisnivå 25 anrop/dag — måste sättas
+   manuellt i Render-dashboarden, render.yaml deklarerar bara variabelnamnet).
+   Misslyckas BÅDA återanvänds hela förra körningens analysrad för tickern
+   (analyses[tk].datakälla = "cache") i stället för en tom/felaktig rad.
+   ÅLDERSVARNING (2026-08-04, efter en incident där Yahoo+Alpha Vantage båda
+   blockerades flera dagar i rad på Render och det gick obemärkt förbi):
+   varje analysrad har `pris_datum` (vilken handelsdags stängning priset
+   faktiskt är) som ärvs OFÖRÄNDRAT genom cache-kedjan, till skillnad från
+   `cache_datum` som bara visar FÖRRA körningens tidpunkt och därför vandrar
+   framåt varje dag även om priset inte gör det. Är `pris_datum` mer än
+   ANALYS_CACHE_ALDER_VARNING_HANDELSDAGAR (1) handelsdag gammal vid
+   cache-fallback sätts analyses[tk].notis till en synlig varning — lägre
+   tröskel än regim/F&G (3–5 dagar) eftersom ett aktiepris förväntas
+   uppdateras varje handelsdag. Se SCHEMA.md för fältformat.
    Värderingspoängen (§7, se UTBYGGNAD_screener_v2.md) blir NEUTRAL (5/10)
    om data helt saknas — aldrig 0, som annars är omöjligt att skilja från
    en genuint dyr aktie. Excel-kommentar flaggar cellen när detta slår till.

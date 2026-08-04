@@ -16,6 +16,38 @@
 Notera datum + ändring varje gång ett fält som UI:t läser ändras
 (nytt/borttaget/omdöpt/typändrat). Nyast överst.
 
+- **2026-08-04** — Tidszonsfix: ALLA datum/tider som backend skriver (`tidpunkt`,
+  `regim.datum`/`regim_datum`, `claude_datum`, `fear_greed.hämtad`/
+  `hämtad_datum`, `pris_datum`, historik- och innehavsdatum, m.fl.) är nu
+  alltid Europe/Stockholm-lokaltid, oavsett vilken systemtidszon skriptet
+  faktiskt körs i. Bakgrund: Render kör containerklockan i UTC — `tidpunkt`
+  (visas rakt av i appen som "Uppdaterad kl. …") blev 1–2 timmar fel
+  beroende på sommar-/vintertid. `_idag()`/`_nu()` (etoro_analys.py) ersätter
+  `date.today()`/`datetime.now()` överallt i backend. INGEN fältform/typ
+  ändrad — bara värdena, som nu äntligen stämmer med användarens klocka.
+  OBS till frontend: `app.py` har egna `date.today()`-anrop (bl.a. den som
+  avgör om `tidpunkt` är "dagens" data och triggar auto-refresh) som
+  fortfarande följer Renders systemtidszon — om appen körs server-side kan
+  den jämförelsen bli fel nära midnatt även efter denna fix, eftersom
+  `tidpunkt` nu är Stockholm-tid men jämförs mot en UTC-baserad "idag".
+  Frontend-sessionens att åtgärda i så fall.
+- **2026-08-04** — Analyses: nytt fält `analyses[tk].pris_datum` (str, ISO-datum)
+  — vilken handelsdags stängning `pris` faktiskt representerar (senaste
+  raden i den hämtade prishistoriken, oavsett källa). Finns i BÅDA formerna
+  (Yahoo/Alpha Vantage-fetch och cache-fallback) — vid cache ärvs värdet
+  oförändrat från förra körningens rad i stället för att sättas till dagens
+  datum, så det inte falskt ser färskt ut. Bakgrund: en incident där Yahoo +
+  Alpha Vantage båda blockerades flera dagar i rad på Render, och
+  `cache_datum` (som bara visar FÖRRA KÖRNINGENS tidpunkt) gav intrycket av
+  färsk data trots att det underliggande priset var en vecka gammalt.
+  Samtidigt: nytt fält `analyses[tk].notis` (str | null) — sätts ENDAST när
+  `datakälla == "cache"`. Normalt en neutral text ("återanvänd —
+  datakällorna svarade inte"), eskalerad till en varning
+  ("⚠ prisdata baserad på X dagar gammal information (datum)") när
+  `pris_datum` är mer än 1 handelsdag gammal (samma reservmönster/stil som
+  `regim`/`fear_greed`, se `ANALYS_CACHE_ALDER_VARNING_HANDELSDAGAR`). `null`
+  i den vanliga (icke-cache) formen. UI bör visa varningsformen färgad, som
+  regim-notisen.
 - **2026-08-01** — Analyses: nytt fält `analyses[tk].bolagsnamn` (str | null)
   — kort bolagsnamn (t.ex. `"Micron"`) härlett ur eToro-instrumentlistans
   `instrumentDisplayName` i samma veva som ticker-uppslaget (inga extra
@@ -126,7 +158,7 @@ finns ALLTID (skrivs ovillkorligt). Tomma tillstånd representeras med `{}`,
 
 | Nyckel | Typ | Alltid? | Beskrivning |
 |---|---|---|---|
-| `tidpunkt` | str | ✅ | ISO-datumtid, minutupplösning: `"2026-07-13T23:10"` |
+| `tidpunkt` | str | ✅ | ISO-datumtid, minutupplösning: `"2026-07-13T23:10"`. Alltid Europe/Stockholm-lokaltid oavsett var skriptet kördes (se changelog 2026-08-04) — ingen tidszonskonvertering behövs i UI:t. |
 | `profiler` | list[str] | ✅ | Signalgruppens användarnamn, t.ex. `["thomaspj", …, "ingruc"]`. Längden = gruppstorleken N. |
 | `portfolios` | dict | ✅ | `{användarnamn: {ticker: vikt_pct}}`. Varje profils innehav. |
 | `consensus` | dict | ✅ | Konsensusaktier. Se **Konsensus-entry**. Kan vara `{}`. |
@@ -196,10 +228,12 @@ Nyckel = ticker. Värdet har **två möjliga former**:
 | `ticker` | str | nej | |
 | `bolagsnamn` | str \| null | ja | Kort bolagsnamn (t.ex. `"Micron"`, `"NVIDIA"`), härlett ur eToro-instrumentlistans `instrumentDisplayName` (juridiska suffix som Inc/Corporation/Holdings/Technology + `.com` kapas). `null` om okänt. Frontend inleder Bästa köp-sammanfattningen med detta i stället för tickern. Sedan 2026-08-01. |
 | `datakälla` | str | nej | `"Yahoo"`, `"Alpha Vantage"` eller `"cache"`. |
-| `cache_datum` | str | *bara vid cache* | Sätts endast när `datakälla == "cache"` — tidpunkt datan är från. |
+| `cache_datum` | str | *bara vid cache* | Sätts endast när `datakälla == "cache"` — FÖRRA KÖRNINGENS tidpunkt (inte nödvändigtvis samma som `pris_datum`, se nedan). |
+| `notis` | str \| null | ja | Sätts endast när `datakälla == "cache"`, annars `null`. Neutral text normalt, eskalerad till en varning ("⚠ prisdata baserad på X dagar gammal information …") när `pris_datum` är mer än 1 handelsdag gammal. Sedan 2026-08-04 — visa varningsformen färgad, samma mönster som `regim`/`fear_greed`. |
 | `valuta` | str \| null | ja | Handelsvaluta, t.ex. `"USD"`. `null` = okänd. |
 | `ohlc` | list | nej (kan vara `[]`) | Candlestick-serie, ~90 dagar. Se **OHLC-punkt**. |
 | `pris` | float | nej | Senaste pris (2 dec). |
+| `pris_datum` | str | nej | ISO-datum för den handelsdag `pris` avser (senaste raden i prishistoriken). Vid cache ärvs detta OFÖRÄNDRAT från förra körningen — det är den här som visar hur gammalt priset egentligen är, till skillnad från `cache_datum`. Sedan 2026-08-04. |
 | `MA50` | float | nej | |
 | `MA200` | float \| null | ja | `null` om < 200 dagars historik. |
 | `över_MA200` | bool \| null | ja | |
