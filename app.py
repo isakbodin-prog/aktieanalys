@@ -644,6 +644,21 @@ def _num(v, suf="", dec=1):
     return "—" if v is None else f"{v:.{dec}f}{suf}".replace(".", ",")
 
 
+def _idag():
+    """Dagens datum i Europe/Stockholm, oavsett serverns systemtidszon.
+
+    Motsvarar backendens _idag() (etoro_analys.py) och MÅSTE göra det: alla
+    datum backend skriver är sedan 2026-08-04 Stockholmstid, och jämförs de mot
+    ett UTC-baserat "idag" blir de fel nära midnatt. TZ=Europe/Stockholm är satt
+    i render.yaml, men det räcker inte som enda skydd — deployas appen någon
+    annanstans, eller skapas tjänsten utan blueprintet, försvinner den
+    inställningen tyst. Därför explicit här, precis som i backend.
+    """
+    import pytz
+    from datetime import datetime as _dt
+    return _dt.now(pytz.timezone("Europe/Stockholm")).date()
+
+
 def _ar_tal(v):
     """True bara för ett läsbart tal — sållar bort både None och NaN.
 
@@ -657,8 +672,8 @@ def _ar_tal(v):
 
 def nya_pa_listan(log, typ, dagar=7):
     """Tickers som fått en '{typ}'-loggpost de senaste `dagar` dagarna."""
-    from datetime import date, timedelta
-    cutoff = (date.today() - timedelta(days=dagar)).isoformat()
+    from datetime import timedelta
+    cutoff = (_idag() - timedelta(days=dagar)).isoformat()
     return {e["ticker"] for e in log if e["typ"] == typ and e["datum"] >= cutoff}
 
 
@@ -1021,12 +1036,16 @@ def logglista_html(records):
 # innan vyerna renderas.
 # ----------------------------------------------------------------------
 def data_ar_fran_idag(d):
-    from datetime import date
+    # Måste använda _idag(): `tidpunkt` skrivs av backend i Stockholmstid, och
+    # jämförs den mot ett UTC-baserat "idag" ser datat ut att vara från igår
+    # mellan midnatt och kl. 02 svensk tid — appen skulle då köra en onödig
+    # analys varje natt. Samma sak för helgkollen, som annars byter dygn fel.
     if not d:
         return False
-    if date.today().weekday() in (5, 6):
+    idag = _idag()
+    if idag.weekday() in (5, 6):
         return True   # helg: marknaden stängd, befintlig data är per definition färsk
-    return d.get("tidpunkt", "")[:10] == date.today().isoformat()
+    return d.get("tidpunkt", "")[:10] == idag.isoformat()
 
 
 with_claude = st.session_state.setdefault("with_claude", True)
@@ -1599,8 +1618,8 @@ if view == "Konsensus":
         st.markdown(mobilkort_html(near_kort), unsafe_allow_html=True)
 
     # Lämnat listorna — när investerarna kliver av
-    from datetime import date as _date, timedelta as _timedelta
-    lamnat_cutoff = (_date.today() - _timedelta(days=30)).isoformat()
+    from datetime import timedelta as _timedelta
+    lamnat_cutoff = (_idag() - _timedelta(days=30)).isoformat()
     lamnat = [e for e in log
               if e["typ"] in ("UT UR KONSENSUS", "UT UR NÄRA KONSENSUS")
               and e["datum"] >= lamnat_cutoff]
