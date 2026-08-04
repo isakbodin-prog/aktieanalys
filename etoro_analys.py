@@ -43,6 +43,24 @@ OUTPUT_FILE = "portfolj_analys.xlsx"
 
 API_BASE = "https://public-api.etoro.com/api/v1"
 
+# Appen är byggd för en enda användare i Sverige, men körs ibland lokalt
+# (Mac, redan satt till Europe/Stockholm) och ibland på Render, vars
+# containrar kör systemklockan i UTC. date.today()/datetime.now() följer
+# den ambienta systemtidszonen — på Render blev alla datum/tider (bl.a.
+# `tidpunkt`, som visas rakt av i appen som "Uppdaterad kl. …") 1–2 timmar
+# fel beroende på sommar-/vintertid. _idag()/_nu() nedan används i stället
+# överallt i filen så resultatet blir detsamma oavsett var skriptet körs.
+def _idag():
+    import pytz
+    from datetime import datetime
+    return datetime.now(pytz.timezone("Europe/Stockholm")).date()
+
+
+def _nu():
+    import pytz
+    from datetime import datetime
+    return datetime.now(pytz.timezone("Europe/Stockholm")).replace(tzinfo=None)
+
 
 def load_env_file():
     """Läs nycklar från .env i skriptets mapp om de inte redan finns i miljön."""
@@ -149,7 +167,7 @@ def _ladda_instrument_cache_fil():
     try:
         with open(INSTRUMENT_CACHE_FIL, encoding="utf-8") as f:
             d = json.load(f)
-        alder_h = (datetime.now() - datetime.fromisoformat(d["sparad"])).total_seconds() / 3600
+        alder_h = (_nu() - datetime.fromisoformat(d["sparad"])).total_seconds() / 3600
         if alder_h > INSTRUMENT_CACHE_TTL_TIMMAR:
             return False
         _instrument_cache.update({int(k): v for k, v in d["instrument"].items()})
@@ -166,7 +184,7 @@ def _spara_instrument_cache_fil():
     from datetime import datetime
     try:
         with open(INSTRUMENT_CACHE_FIL, "w", encoding="utf-8") as f:
-            json.dump({"sparad": datetime.now().isoformat(),
+            json.dump({"sparad": _nu().isoformat(),
                        "instrument": {str(k): v for k, v in _instrument_cache.items()},
                        "industri": _industry_cache,
                        "namn": _name_cache}, f, ensure_ascii=False)
@@ -355,7 +373,7 @@ def compute_consensus(portfolios, port_meta=None, previous_consensus=None):
     port_meta = port_meta or {}
     previous_consensus = previous_consensus or set()
     in_krav, kvar_krav = konsensus_trosklar(len(portfolios))
-    today = date.today()
+    today = _idag()
     consensus, near_consensus, bubblar_niva = {}, {}, {}
     all_tickers = set()
     for positions in portfolios.values():
@@ -461,7 +479,7 @@ def run_screener():
         })
 
     with open(BG_MEMBERS_FILE, "w") as f:
-        json.dump({"datum": date.today().isoformat(),
+        json.dump({"datum": _idag().isoformat(),
                    "kriterier": {"perioder": list(SCREENER_PERIODS), **SCREENER_FILTER},
                    "profiler": medlemmar}, f, ensure_ascii=False, indent=2)
 
@@ -521,7 +539,7 @@ def load_background_portfolios(refresh=False):
 
     print(f"  {len(ports)} bakgrundsportföljer hämtade.")
     with open(BG_CACHE_FILE, "w") as f:
-        json.dump({"datum": date.today().isoformat(), "medlemslista_datum": members.get("datum"),
+        json.dump({"datum": _idag().isoformat(), "medlemslista_datum": members.get("datum"),
                    "portfolios": ports}, f, ensure_ascii=False)
     return ports
 
@@ -683,7 +701,7 @@ def next_earnings_date(t, ticker="?"):
             _logga_yf_miss(ticker, "calendar", detalj="kunde inte tolka datumen i svaret")
             return None
         kandidater.sort()
-        idag = date.today()
+        idag = _idag()
         framtida = [d for d in kandidater if d >= idag]
         return (framtida[0] if framtida else kandidater[-1]).isoformat()
     except Exception as e:
@@ -995,7 +1013,7 @@ def compute_netflow_30d(history_log, tickers, dagar=30):
     if span < 7:
         return {}
 
-    cutoff = (date.today() - timedelta(days=dagar)).isoformat()
+    cutoff = (_idag() - timedelta(days=dagar)).isoformat()
     netto = {}
     for e in history_log:
         if e["datum"] < cutoff or e["typ"] not in ("VIKTÄNDRING", "NYTT INNEHAV", "SÅLT INNEHAV"):
@@ -1333,12 +1351,12 @@ def compute_market_regime():
         if resultat is not None:
             resultat["regim_kalla"] = ticker
             resultat["notis"] = None
-            resultat["datum"] = date.today().isoformat()
-            resultat["regim_datum"] = date.today().isoformat()
+            resultat["datum"] = _idag().isoformat()
+            resultat["regim_datum"] = _idag().isoformat()
             return resultat
     return {"regim": "OKÄND", "spy_pris": None, "spy_ma200": None, "regim_kalla": None,
             "notis": f"alla index i fallbackkedjan misslyckades ({', '.join(REGIM_TICKER_KEDJA)})",
-            "datum": date.today().isoformat(), "regim_datum": None}
+            "datum": _idag().isoformat(), "regim_datum": None}
 
 
 REGIM_ALDER_VARNING_HANDELSDAGAR = 5
@@ -1433,8 +1451,8 @@ def hamta_fear_greed():
             "ett_ar_sedan": _r(fg.get("previous_1_year")),
             "cnn_tidsstämpel": fg.get("timestamp"),
             "källa": "CNN Fear & Greed Index (inofficiell endpoint)",
-            "hämtad": datetime.now().isoformat(timespec="minutes"),
-            "hämtad_datum": date.today().isoformat(),
+            "hämtad": _nu().isoformat(timespec="minutes"),
+            "hämtad_datum": _idag().isoformat(),
             "notis": None,
         }
     except requests.exceptions.RequestException as e:
@@ -1466,7 +1484,7 @@ def _fear_greed_med_reserv(ny, prev_fg):
     if prev_fg.get("varde") is None:
         return None
     hämtad_datum = prev_fg.get("hämtad_datum")
-    alder = _handelsdagar_mellan(hämtad_datum, date.today().isoformat()) if hämtad_datum else None
+    alder = _handelsdagar_mellan(hämtad_datum, _idag().isoformat()) if hämtad_datum else None
     if alder is not None and alder > FG_ALDER_VARNING_HANDELSDAGAR:
         notis = f"⚠ Fear & Greed baserad på {alder} dagar gammal data"
     else:
@@ -1686,7 +1704,7 @@ def behover_ny_analys(ticker, dagens_data, senaste_analys):
 
     genererad = senaste_analys.get("genererad")
     if genererad:
-        alder = (date.today() - date.fromisoformat(genererad)).days
+        alder = (_idag() - date.fromisoformat(genererad)).days
         if alder > MAX_ANALYS_ALDER_DAGAR:
             return True, f"text äldre än {MAX_ANALYS_ALDER_DAGAR} dagar ({alder} dagar)"
 
@@ -1893,7 +1911,7 @@ def claude_analysis(jobb, körningsläge="standard"):
     )
 
     from datetime import date, datetime
-    idag = date.today().isoformat()
+    idag = _idag().isoformat()
     results = {}
     forbrukning = []
     for ticker, job in jobb.items():
@@ -1952,7 +1970,7 @@ def claude_analysis(jobb, körningsläge="standard"):
             forbrukning.append({
                 "typ": "anrop",
                 "datum": idag,
-                "tidsstämpel": datetime.now().isoformat(timespec="seconds"),
+                "tidsstämpel": _nu().isoformat(timespec="seconds"),
                 "ticker": ticker,
                 "orsak": orsak,
                 "modell": modell,
@@ -2022,7 +2040,7 @@ def _komprimera_forbrukning(logg):
     veckosummeringar och färska anropsposter lämnas orörda.
     """
     from datetime import date, timedelta
-    gräns = (date.today() - timedelta(days=FORBRUKNING_KOMPRIMERA_ALDRE_AN_DAGAR)).isoformat()
+    gräns = (_idag() - timedelta(days=FORBRUKNING_KOMPRIMERA_ALDRE_AN_DAGAR)).isoformat()
     behåll, komprimera = [], []
     for p in logg:
         if p.get("typ") == "anrop" and p.get("datum", "") < gräns:
@@ -2255,7 +2273,7 @@ def update_history(portfolios, consensus_tickers, near_tickers=None, exit_status
     near_tickers = near_tickers or []
     exit_status = exit_status or {}
     from datetime import date
-    today = date.today().isoformat()
+    today = _idag().isoformat()
 
     state = {"senaste": None, "logg": []}
     if os.path.exists(HISTORY_FILE):
@@ -2364,7 +2382,7 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
     from openpyxl.comments import Comment
 
     holding_info = holding_info or {}
-    nyhets_cutoff = (date.today() - timedelta(days=7)).isoformat()
+    nyhets_cutoff = (_idag() - timedelta(days=7)).isoformat()
     rank_by_ticker = {r["ticker"]: r for r in (ranking or [])}
 
     def is_new(ticker, typ):
@@ -2485,7 +2503,7 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
                "P/E (forward)", "PEG", "Riktkurs spridning", "Nästa rapport"])
     style_header(ws)
     varning_fill = PatternFill("solid", start_color="FFEB9C")
-    idag = date.today()
+    idag = _idag()
     consensus_order = sorted(consensus.items(), key=lambda x: (-x[1]["count"], -x[1]["avg_weight"]))
     for ticker, info in consensus_order:
         a = analyses.get(ticker, {})
@@ -2541,7 +2559,7 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
                        h.get("längst_dagar"), h.get("snitt_vinst_pct")])
 
     # Lämnat listorna nyligen (senaste 30 dagarna)
-    lamnat_cutoff = (date.today() - timedelta(days=30)).isoformat()
+    lamnat_cutoff = (_idag() - timedelta(days=30)).isoformat()
     lamnat = [e for e in history_log or []
               if e["typ"] in ("UT UR KONSENSUS", "UT UR NÄRA KONSENSUS")
               and e["datum"] >= lamnat_cutoff]
@@ -2558,7 +2576,7 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
 
     # Teknisk analys (indikatorer + Claudes text)
     exit_by_ticker = {r["ticker"]: r for r in (exit_lista or [])}
-    today_str = date.today().isoformat()
+    today_str = _idag().isoformat()
     ws = wb.create_sheet("Teknisk analys", 3)
     ws.append(["Instrument", "Stigande trend", "Över MA200", "MA200 stigande",
                "Pris", "MA50", "MA200", "Golden cross", "RSI14",
@@ -2760,7 +2778,7 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
         prev_regim = prev.get("regim") or {}
         if prev_regim.get("regim") and prev_regim["regim"] != "OKÄND":
             regim_datum = prev_regim.get("regim_datum") or prev_regim.get("datum")
-            alder = _handelsdagar_mellan(regim_datum, date.today().isoformat()) if regim_datum else None
+            alder = _handelsdagar_mellan(regim_datum, _idag().isoformat()) if regim_datum else None
             if alder is not None and alder > REGIM_ALDER_VARNING_HANDELSDAGAR:
                 notis = f"⚠ regim baserad på {alder} dagar gammal data"
             else:
@@ -2813,7 +2831,7 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
             cached["datakälla"] = "cache"
             cached["cache_datum"] = (prev.get("tidpunkt") or "")[:16].replace("T", " kl. ")
             pris_datum = cached.get("pris_datum")   # ärvs oförändrat från pa — vandrar
-            alder = (_handelsdagar_mellan(pris_datum, date.today().isoformat())
+            alder = (_handelsdagar_mellan(pris_datum, _idag().isoformat())
                      if pris_datum else None)        # INTE framåt bara för att vi cachar igen
             if alder is not None and alder > ANALYS_CACHE_ALDER_VARNING_HANDELSDAGAR:
                 cached["notis"] = f"⚠ prisdata baserad på {alder} dagar gammal information ({pris_datum})"
@@ -2866,7 +2884,7 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     # Innehavstid + investerarnas upparbetade vinst (från positionernas
     # openTimestamp/netProfit) för konsensus- och nära konsensus-aktier
     holding_info = {}
-    today_d = date.today()
+    today_d = _idag()
     for ticker in list(consensus) + list(near_consensus) + list(bubblar_niva):
         per_profil = {}
         for prof, meta in port_meta.items():
@@ -2925,7 +2943,7 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     # aktier med väsentliga förändringar sedan texten skrevs om.
     prev_claude = prev.get("claude") or {}
     prev_datum = prev.get("claude_datum")
-    today = date.today().isoformat()
+    today = _idag().isoformat()
 
     def _bygg_jobb(tickers, force_alla):
         jobb = {}
@@ -2956,7 +2974,7 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     claude_texts = {}
     claude_datum = None
     forbrukning_denna_körning = []
-    helg = date.today().weekday() in (5, 6)   # lördag/söndag — marknaden stängd
+    helg = _idag().weekday() in (5, 6)   # lördag/söndag — marknaden stängd
     if with_claude:
         if helg and prev_claude and not force_claude:
             # Helgvila: kurserna är fredagens, så senaste analysen gäller ännu
@@ -3013,7 +3031,7 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
             c["rekommendation_visning"] = rek
 
     result = {
-        "tidpunkt": datetime.now().isoformat(timespec="minutes"),
+        "tidpunkt": _nu().isoformat(timespec="minutes"),
         "profiler": list(portfolios.keys()),
         "portfolios": portfolios,
         "consensus": consensus,
@@ -3268,7 +3286,7 @@ def mät_episoder(episoder, facit, yf, sektor_map):
     """
     from datetime import date
     cache = {}
-    idag = date.today().isoformat()
+    idag = _idag().isoformat()
 
     # facit-uppslag: närmaste rad PÅ eller EFTER inträdesdatumet per ticker
     facit_by_tk = {}
@@ -3349,7 +3367,7 @@ def utvardera_pappersportfoljer(yf):
     from datetime import date
     cache = {}
     datum = [d["datum"] for d in hist]
-    perioder = list(zip(datum, datum[1:] + [date.today().isoformat()]))   # sista → idag
+    perioder = list(zip(datum, datum[1:] + [_idag().isoformat()]))   # sista → idag
     portnamn = ["likaviktad", "poangviktad", "claude"]
 
     def periodavk(vikter, d0, d1):
@@ -3384,7 +3402,7 @@ def utvardera_pappersportfoljer(yf):
 
     # P3: SPY buy-and-hold över hela perioden (datum[0] → idag)
     spy = _adj_close("SPY", yf, cache)
-    s0, s1 = _price_asof(spy, datum[0]), _price_asof(spy, date.today().isoformat())
+    s0, s1 = _price_asof(spy, datum[0]), _price_asof(spy, _idag().isoformat())
     spy_tot = round((s1 / s0 - 1) * 100, 1) if (s0 and s1) else None
     resultat["benchmark_spy"] = {"totalavkastning": spy_tot}
 
@@ -3398,7 +3416,7 @@ def utvardera_pappersportfoljer(yf):
     diffar.append(("Claude-rekommendationens värde (P4 − P2)", round(p4 - p2, 1)))
 
     return {"resultat": resultat, "diffar": diffar, "n": len(perioder),
-            "start": datum[0], "slut": date.today().isoformat()}
+            "start": datum[0], "slut": _idag().isoformat()}
 
 
 def run_utvardering():

@@ -16,6 +16,21 @@
 Notera datum + ändring varje gång ett fält som UI:t läser ändras
 (nytt/borttaget/omdöpt/typändrat). Nyast överst.
 
+- **2026-08-04** — Tidszonsfix: ALLA datum/tider som backend skriver (`tidpunkt`,
+  `regim.datum`/`regim_datum`, `claude_datum`, `fear_greed.hämtad`/
+  `hämtad_datum`, `pris_datum`, historik- och innehavsdatum, m.fl.) är nu
+  alltid Europe/Stockholm-lokaltid, oavsett vilken systemtidszon skriptet
+  faktiskt körs i. Bakgrund: Render kör containerklockan i UTC — `tidpunkt`
+  (visas rakt av i appen som "Uppdaterad kl. …") blev 1–2 timmar fel
+  beroende på sommar-/vintertid. `_idag()`/`_nu()` (etoro_analys.py) ersätter
+  `date.today()`/`datetime.now()` överallt i backend. INGEN fältform/typ
+  ändrad — bara värdena, som nu äntligen stämmer med användarens klocka.
+  OBS till frontend: `app.py` har egna `date.today()`-anrop (bl.a. den som
+  avgör om `tidpunkt` är "dagens" data och triggar auto-refresh) som
+  fortfarande följer Renders systemtidszon — om appen körs server-side kan
+  den jämförelsen bli fel nära midnatt även efter denna fix, eftersom
+  `tidpunkt` nu är Stockholm-tid men jämförs mot en UTC-baserad "idag".
+  Frontend-sessionens att åtgärda i så fall.
 - **2026-08-04** — Analyses: nytt fält `analyses[tk].pris_datum` (str, ISO-datum)
   — vilken handelsdags stängning `pris` faktiskt representerar (senaste
   raden i den hämtade prishistoriken, oavsett källa). Finns i BÅDA formerna
@@ -143,7 +158,7 @@ finns ALLTID (skrivs ovillkorligt). Tomma tillstånd representeras med `{}`,
 
 | Nyckel | Typ | Alltid? | Beskrivning |
 |---|---|---|---|
-| `tidpunkt` | str | ✅ | ISO-datumtid, minutupplösning: `"2026-07-13T23:10"` |
+| `tidpunkt` | str | ✅ | ISO-datumtid, minutupplösning: `"2026-07-13T23:10"`. Alltid Europe/Stockholm-lokaltid oavsett var skriptet kördes (se changelog 2026-08-04) — ingen tidszonskonvertering behövs i UI:t. |
 | `profiler` | list[str] | ✅ | Signalgruppens användarnamn, t.ex. `["thomaspj", …, "ingruc"]`. Längden = gruppstorleken N. |
 | `portfolios` | dict | ✅ | `{användarnamn: {ticker: vikt_pct}}`. Varje profils innehav. |
 | `consensus` | dict | ✅ | Konsensusaktier. Se **Konsensus-entry**. Kan vara `{}`. |

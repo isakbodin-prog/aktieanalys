@@ -52,6 +52,18 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
   samma endpoints igen utan ny information.
 
 ## Kända miljöbegränsningar
+- **Render kör containerklockan i UTC, inte Europe/Stockholm** (fixat
+  2026-08-04): `date.today()`/`datetime.now()` följer den ambienta
+  systemtidszonen — lokalt (Mac) råkar den redan vara Stockholm så felet
+  syntes bara i produktion. `tidpunkt` (visas som "Uppdaterad kl. …" i
+  appen) blev 1–2 timmar fel beroende på sommar-/vintertid. `_idag()`/
+  `_nu()` (definierade direkt under `PROFILES`) ersätter nu ALLA
+  `date.today()`/`datetime.now()`-anrop i filen — de tvingar alltid fram
+  Europe/Stockholm-lokaltid via `pytz` oavsett servertidszon. Skriv ALDRIG
+  `date.today()`/`datetime.now()` direkt i nya tillägg — använd `_idag()`/
+  `_nu()`. `app.py` har motsvarande anrop kvar (bl.a. auto-refresh-
+  jämförelsen mot `tidpunkt`) — frontend-sessionens att åtgärda, se
+  SCHEMA.md-changeloggen 2026-08-04.
 - **Yahoo/yfinance-blockering på Render är INTERMITTENT och ASYMMETRISK**
   (verifierat 2026-07-17, körning 09:17 UTC): per-aktiefälten (§7–§10:
   EPS-rev, forward P/E, PEG, riktkursspridning, nästa rapport, sektor)
