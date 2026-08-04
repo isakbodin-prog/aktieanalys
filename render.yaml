@@ -6,6 +6,14 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
     envVars:
+      # Renders containrar kör UTC. Utan detta blir datetime.now() två timmar
+      # fel på sommaren (en på vintern) — vilket inte bara visar fel klockslag
+      # i UI:t, utan också flyttar dygnsgränsen: "dagens data saknas"-kollen och
+      # helgvilan använder date.today() och skulle byta dygn kl. 02 svensk tid.
+      # Står här med värde i stället för i kontrollpanelen (den är inte hemlig)
+      # så den följer med om tjänsten återskapas.
+      - key: TZ
+        value: Europe/Stockholm
       - key: ETORO_API_KEY
         sync: false
       - key: ETORO_USER_KEY
