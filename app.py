@@ -644,6 +644,21 @@ def _num(v, suf="", dec=1):
     return "—" if v is None else f"{v:.{dec}f}{suf}".replace(".", ",")
 
 
+def _idag():
+    """Dagens datum i Europe/Stockholm, oavsett serverns systemtidszon.
+
+    Motsvarar backendens _idag() (etoro_analys.py) och MÅSTE göra det: alla
+    datum backend skriver är sedan 2026-08-04 Stockholmstid, och jämförs de mot
+    ett UTC-baserat "idag" blir de fel nära midnatt. TZ=Europe/Stockholm är satt
+    i render.yaml, men det räcker inte som enda skydd — deployas appen någon
+    annanstans, eller skapas tjänsten utan blueprintet, försvinner den
+    inställningen tyst. Därför explicit här, precis som i backend.
+    """
+    import pytz
+    from datetime import datetime as _dt
+    return _dt.now(pytz.timezone("Europe/Stockholm")).date()
+
+
 def _ar_tal(v):
     """True bara för ett läsbart tal — sållar bort både None och NaN.
 
@@ -657,8 +672,8 @@ def _ar_tal(v):
 
 def nya_pa_listan(log, typ, dagar=7):
     """Tickers som fått en '{typ}'-loggpost de senaste `dagar` dagarna."""
-    from datetime import date, timedelta
-    cutoff = (date.today() - timedelta(days=dagar)).isoformat()
+    from datetime import timedelta
+    cutoff = (_idag() - timedelta(days=dagar)).isoformat()
     return {e["ticker"] for e in log if e["typ"] == typ and e["datum"] >= cutoff}
 
 
@@ -1021,12 +1036,16 @@ def logglista_html(records):
 # innan vyerna renderas.
 # ----------------------------------------------------------------------
 def data_ar_fran_idag(d):
-    from datetime import date
+    # Måste använda _idag(): `tidpunkt` skrivs av backend i Stockholmstid, och
+    # jämförs den mot ett UTC-baserat "idag" ser datat ut att vara från igår
+    # mellan midnatt och kl. 02 svensk tid — appen skulle då köra en onödig
+    # analys varje natt. Samma sak för helgkollen, som annars byter dygn fel.
     if not d:
         return False
-    if date.today().weekday() in (5, 6):
+    idag = _idag()
+    if idag.weekday() in (5, 6):
         return True   # helg: marknaden stängd, befintlig data är per definition färsk
-    return d.get("tidpunkt", "")[:10] == date.today().isoformat()
+    return d.get("tidpunkt", "")[:10] == idag.isoformat()
 
 
 with_claude = st.session_state.setdefault("with_claude", True)
@@ -1368,8 +1387,8 @@ if view == "Bästa köp":
     # Senaste händelser — kondenserad översikt direkt under hjälten
     log = data.get("historik", [])
     if log:
-        from datetime import date as _d, timedelta as _td
-        cut30 = (_d.today() - _td(days=30)).isoformat()
+        from datetime import timedelta as _td
+        cut30 = (_idag() - _td(days=30)).isoformat()
         senaste_datum = log[0]["datum"]
         dagens = [e for e in log if e["datum"] == senaste_datum]
 
@@ -1412,35 +1431,42 @@ if view == "Bästa köp":
                     f'{pil} **{m["profil"]}** {verb} **{tk}** ({_pe(m["delta"])})'))
         vikt_rader = [t for _, t in sorted(vikt_rader, key=lambda x: -x[0])][:6]
 
-        if lista_rader or vikt_rader:
-            # Ingen inline margin-top här: .fullrule sätter margin med !important
-            # och vinner över inline-stil. Luften ovanför rubriken styrs i stället
-            # av .sh-rubrik:s toppmarginal.
-            st.markdown('<hr class="fullrule">', unsafe_allow_html=True)
-            # Samma bredd och vänsterkant som aktielistan (.stocklist, 900 px) —
-            # centrerkolumner [1,4,1] gav 867 px och en annan vänsterkant.
-            with st.container(key="shbox"):
-                st.markdown('<div class="sh-rubrik">Senaste händelser</div>',
-                            unsafe_allow_html=True)
-                # 1. Förändringar i listorna
-                st.markdown('<div class="sh-kol">Förändringar i listorna '
-                            '<span>· senaste 30 dagarna</span></div>', unsafe_allow_html=True)
-                if lista_rader:
-                    for rad in lista_rader[:6]:
-                        st.markdown(f'<div class="sh-post">{_md_bold(rad)}</div>',
-                                    unsafe_allow_html=True)
-                else:
-                    st.caption("Inga in- eller utträden den senaste månaden.")
-                # 2. Största viktändringarna
-                st.markdown('<div class="sh-kol" style="margin-top:1.9rem">Största viktändringarna '
-                            f'<span>· {senaste_datum}</span></div>', unsafe_allow_html=True)
-                if vikt_rader:
-                    for rad in vikt_rader:
-                        st.markdown(f'<div class="sh-post">{_md_bold(rad)}</div>',
-                                    unsafe_allow_html=True)
-                else:
-                    st.caption("Inga större viktändringar senaste ändringsdagen.")
-                st.caption("Fullständiga flöden finns under **Konsensus** och **Ändringar** i toppmenyn.")
+        # Renderas så fort det finns HISTORIK (log), inte bara när dagens filter
+        # gav träffar. Båda underdelarna har redan egna reservtexter för "inget
+        # att visa" ("Inga in- eller utträden …" / "Inga större viktändringar …"),
+        # som tidigare var ouppnåeliga bakom ett `if lista_rader or vikt_rader:`
+        # som gömde HELA sektionen (rubrik inräknad) så fort båda råkade vara
+        # tomma samtidigt. Det inträffar inte sällan: inga konsensusflöden
+        # senaste 30 dagarna + dagens viktändringar under 3pp-tröskeln räcker.
+        #
+        # Ingen inline margin-top här: .fullrule sätter margin med !important
+        # och vinner över inline-stil. Luften ovanför rubriken styrs i stället
+        # av .sh-rubrik:s toppmarginal.
+        st.markdown('<hr class="fullrule">', unsafe_allow_html=True)
+        # Samma bredd och vänsterkant som aktielistan (.stocklist, 900 px) —
+        # centrerkolumner [1,4,1] gav 867 px och en annan vänsterkant.
+        with st.container(key="shbox"):
+            st.markdown('<div class="sh-rubrik">Senaste händelser</div>',
+                        unsafe_allow_html=True)
+            # 1. Förändringar i listorna
+            st.markdown('<div class="sh-kol">Förändringar i listorna '
+                        '<span>· senaste 30 dagarna</span></div>', unsafe_allow_html=True)
+            if lista_rader:
+                for rad in lista_rader[:6]:
+                    st.markdown(f'<div class="sh-post">{_md_bold(rad)}</div>',
+                                unsafe_allow_html=True)
+            else:
+                st.caption("Inga in- eller utträden den senaste månaden.")
+            # 2. Största viktändringarna
+            st.markdown('<div class="sh-kol" style="margin-top:1.9rem">Största viktändringarna '
+                        f'<span>· {senaste_datum}</span></div>', unsafe_allow_html=True)
+            if vikt_rader:
+                for rad in vikt_rader:
+                    st.markdown(f'<div class="sh-post">{_md_bold(rad)}</div>',
+                                unsafe_allow_html=True)
+            else:
+                st.caption("Inga större viktändringar senaste ändringsdagen.")
+            st.caption("Fullständiga flöden finns under **Konsensus** och **Ändringar** i toppmenyn.")
 
 if view == "Konsensus":
     trosklar = data.get("konsensus_trosklar") or {}
@@ -1599,8 +1625,8 @@ if view == "Konsensus":
         st.markdown(mobilkort_html(near_kort), unsafe_allow_html=True)
 
     # Lämnat listorna — när investerarna kliver av
-    from datetime import date as _date, timedelta as _timedelta
-    lamnat_cutoff = (_date.today() - _timedelta(days=30)).isoformat()
+    from datetime import timedelta as _timedelta
+    lamnat_cutoff = (_idag() - _timedelta(days=30)).isoformat()
     lamnat = [e for e in log
               if e["typ"] in ("UT UR KONSENSUS", "UT UR NÄRA KONSENSUS")
               and e["datum"] >= lamnat_cutoff]
