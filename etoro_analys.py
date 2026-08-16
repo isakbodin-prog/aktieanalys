@@ -2670,9 +2670,14 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     till RESULTS_FILE + portfolj_analys.xlsx. Kastar RuntimeError vid fel
     (så att webbappen kan visa felet i stället för att dö).
 
-    Claude-analysen körs max en gång per dag (kostar API-credits) — har den
-    redan körts idag återanvänds texterna. Nya konsensusaktier analyseras
-    dock alltid. force_claude=True kringgår dagsspärren.
+    Claude-analysen körs i normalfallet max en gång per dag PER AKTIE (kostar
+    API-credits) — har den redan körts idag återanvänds texten. Nya
+    konsensusaktier analyseras alltid. Dessutom omanalyseras en redan
+    idag-analyserad aktie ÄNDÅ, samma dag, om en väsentlig förändring
+    inträffar sedan morgonens text (nivåbrott, RSI-korsning, etc. — se
+    behover_ny_analys) — annars kunde en köptrigger stå kvar självmotsägande
+    mot ett pris som redan passerat den, resten av dagen (fixat 2026-08-04).
+    force_claude=True kringgår dagsspärren helt.
 
     refresh_background=True (--divergens) hämtar om bakgrundsgruppens
     portföljer; annars används befintlig cache utan extra API-anrop.
@@ -2984,9 +2989,22 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
         elif prev_datum == today and not force_claude:
             claude_texts = {t: c for t, c in prev_claude.items() if t in consensus}
             claude_datum = prev_datum
-            jobb = _bygg_jobb([t for t in analyses if t not in claude_texts], force_alla=False)
+            # Triggerfiltret gäller nu även INOM dagen, inte bara på dagens
+            # första körning — annars kan t.ex. ett nivåbrott (priset klev
+            # över en köptrigger) inträffa efter morgonens körning och texten
+            # står inaktuell (självmotsägande mot det visade priset) resten
+            # av dagen. _bygg_jobb jämför ändå mot morgonens indikator_
+            # snapshot, så bara aktier med en genuin väsentlig förändring
+            # sedan dess omanalyseras — inte alla, varje gång.
+            jobb = _bygg_jobb(list(analyses.keys()), force_alla=False)
             if jobb:
-                print(f"\nClaude-analys körd idag — analyserar {len(jobb)} nya aktier...")
+                nya = [t for t in jobb if t not in claude_texts]
+                omanalyser = [t for t in jobb if t in claude_texts]
+                verb = f"Claude-analys körd idag — {len(nya)} nya aktier"
+                if omanalyser:
+                    detalj = ", ".join(f"{t} ({jobb[t]['orsak']})" for t in omanalyser)
+                    verb += f", {len(omanalyser)} omanalyseras (väsentlig förändring: {detalj})"
+                print(f"\n{verb}...")
                 nya_texter, forbrukning_denna_körning = claude_analysis(jobb, körningsläge)
                 claude_texts.update(nya_texter)
             else:

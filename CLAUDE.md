@@ -274,14 +274,19 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
    thinking med mer marginal (max_tokens=2000), eftersom thinking äter av
    samma budget. Trimningen (2026-07-16) sänkte snittförbrukningen från
    ~10 300 till ~1 600 tokens/anrop (85 %) utan kvalitetsförlust.
-   DAGSSPÄRR: körs max 1 gång/dag (claude_datum i senaste_analys.json);
-   samma dag återanvänds texterna, men NYA konsensusaktier analyseras.
-   Kringgå med force_claude=True / CLI-flaggan --force-claude.
+   DAGSSPÄRR: claude_datum i senaste_analys.json. Texterna återanvänds som
+   default samma dag, men det är INTE en blankt "max 1 gång/dag oavsett" —
+   se CLAUDE-TRIGGERFILTER nedan, som (sedan 2026-08-04-fixet) körs på VARJE
+   körning samma dag, inte bara dagens första. Utan det kunde en köptrigger
+   stå kvar självmotsägande mot ett pris som redan passerat den, resten av
+   dagen — precis det nivåbrottsfiltret var till för att förhindra, fast det
+   bara utvärderades på dagens första körning innan fixet. Nya konsensus-
+   aktier analyseras alltid. Kringgå hela dagsspärren med force_claude=True
+   / CLI-flaggan --force-claude.
    HELGVILA: lördag/söndag återanvänds senaste analysen (marknaden
    stängd) och appen hämtar ingen ny data — fredagens data är färsk.
-   CLAUDE-TRIGGERFILTER (inom dagsspärren/helgvilan, ändrar den INTE):
-   behover_ny_analys(ticker, dagens_data, senaste_analys) avgör om en
-   redan analyserad aktie omanalyseras — bara vid väsentlig förändring
+   CLAUDE-TRIGGERFILTER: behover_ny_analys(ticker, dagens_data, senaste_analys)
+   avgör om en redan analyserad aktie omanalyseras — bara vid väsentlig förändring
    sedan claude[tk].indikator_snapshot sparades (RSI korsat 30/70, pris
    korsat MA200, MACD korsat signallinjen, golden/death cross, pris brutit
    igenom en frusen motstånds-/stödnivå som köptriggern/ogiltigt-om byggdes
