@@ -92,11 +92,25 @@ def headers():
 
 
 def api_get(path, params=None, quiet=False, retries=3):
-    """GET-anrop mot eToro:s publika API med felhantering och 429-respekt."""
+    """GET-anrop mot eToro:s publika API med felhantering och 429-respekt.
+
+    Fångar även nätverksfel (timeout, avbruten anslutning) — utan detta
+    kraschade ett enda ReadTimeout mot en enskild bakgrundsprofil hela
+    skriptet okontrollerat (ingen RuntimeError, så main()s felhantering
+    missade den). Verifierat i GitHub Actions-loggen 2026-08-22:
+    requests.exceptions.ReadTimeout mot /portfolio/live för en
+    bakgrundsprofil — samma nätverksglapp som 429-hanteringen redan
+    skyddar mot, bara en annan feltyp."""
     import time
     url = f"{API_BASE}{path}"
-    for _ in range(retries):
-        r = requests.get(url, headers=headers(), params=params, timeout=30)
+    for försök in range(retries):
+        try:
+            r = requests.get(url, headers=headers(), params=params, timeout=30)
+        except requests.exceptions.RequestException as e:
+            if not quiet or försök == retries - 1:
+                print(f"  GET {path} misslyckades: {type(e).__name__}: {e}")
+            time.sleep(5)
+            continue
         if r.status_code == 429:
             wait = int(r.headers.get("Retry-After", 15))
             print(f"  Rate limit — väntar {wait}s...")
