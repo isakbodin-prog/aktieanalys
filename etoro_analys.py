@@ -1690,12 +1690,9 @@ KONSENSUS_TRIGGER_DIFF = 1.0
 # indikatorregim ändrats. Marginalen filtrerar bort stängningar som bara nuddar
 # nivån (ren brus) — se _pris_brot_nivaer / behover_ny_analys.
 NIVA_BROTT_MARGINAL = 0.005  # 0,5 %
-# Output-tak: Sonnet-omanalyser kör UTAN thinking (ren textbudget, ~120 ord
-# räcker med marginal). Opus-grundanalyser behåller adaptive thinking, som
-# äter av samma max_tokens-budget — mer marginal krävs där (se incidenten
-# 2026-07-16 där 2000 utan uppdelning gav tomma svar för två aktier).
-CLAUDE_MAX_TOKENS_OMANALYS = 600
-CLAUDE_MAX_TOKENS_NY = 4000   # thinking räknas mot taket även när texten inte returneras
+# Output-tak för alla analyser (adaptive thinking äter av samma budget — se
+# incidenten 2026-07-16 där 2000 gav tomma svar för två aktier).
+CLAUDE_MAX_TOKENS = 4000   # thinking räknas mot taket även när texten inte returneras
 # Höjs varje gång textstrukturen/systemprompten ändras i grunden (senast:
 # 2026-07-18, domslut → teknisk lägesbeskrivning med trigger/ogiltigt-villkor)
 # så att ALLA befintliga texter omanalyseras en gång automatiskt — se
@@ -2024,12 +2021,10 @@ def claude_analysis(jobb, körningsläge="standard"):
         data = job["data"]
         modell = job.get("model") or CLAUDE_MODELL_NY
         orsak = job.get("orsak", "?")
-        # Omanalyser: ingen extended thinking (ren textbudget) — på Sonnet 5.5
-        # heter det läget "between_tools"; "disabled" ger 400. Grundanalyser
-        # ("ny på listan"): adaptive thinking med mer max_tokens-marginal.
-        är_ny = bool(job.get("ny"))
-        thinking_param = {"type": "adaptive"} if är_ny else {"type": "between_tools"}
-        max_tok = CLAUDE_MAX_TOKENS_NY if är_ny else CLAUDE_MAX_TOKENS_OMANALYS
+        # Adaptive thinking för alla analyser (sedan 2026-10-05) — omanalyser
+        # utan thinking gav självmotsägande nivåer. Thinking räknas mot max_tokens.
+        thinking_param = {"type": "adaptive"}
+        max_tok = CLAUDE_MAX_TOKENS
         print(f"  Claude analyserar {ticker} ({modell}, orsak: {orsak})...")
         try:
             resp = client.messages.create(
