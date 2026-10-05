@@ -15,6 +15,30 @@ Automatiskt hämta och jämföra 5 eToro-investerares portföljer, identifiera
 konsensusinnehav (aktier i ≥3 av 5 portföljer), och berika med teknisk
 analys + analytikerdata till en rankad Excel-rapport.
 
+## URVAL TILL BÄSTA KÖP: DIVERGENSGRIND (sedan 2026-10-05)
+Konsensusgrinden (in 4 av 6) gav bara AMZN/MU/NVDA i fyra månader och är
+ERSATT — allt nedan i dokumentet som beskriver "konsensus ≥3 av 5", "in 4/6,
+kvar 3/6", "nära konsensus" och "bubblarnivå" är historik. Gällande regel
+(compute_kandidater, spec i UTBYGGNAD_divergensgrind.md):
+- KANDIDAT = minst KANDIDAT_MIN_AGARE (2) i signalgruppen OCH högst
+  KANDIDAT_MAX_BAKGRUND_IN_PCT (10 %) av bakgrundsgruppen äger aktien.
+  Hysteres: redan listad aktie ligger kvar upp till 15 %. "Nästan" = 10–20 %.
+- Variabeln/JSON-nyckeln heter kvar `consensus` (samma entry-format + tre
+  nya fält) så frontend och allt nedströms fungerar. Se SCHEMA.md 2026-10-05.
+- Saknas bakgrundscachen går grinden inte att räkna → reserv: gamla
+  compute_consensus. Bakgrunden är alltså nu ett HÅRT beroende för urvalet.
+- Poängens Konsensus-komponent (v2) = divergens 9 + färskhet 6 + snittvikt 5
+  + nettoflöde ±5. v1-poängen är orörd.
+- Claude analyserar bara ranking[:CLAUDE_MAX_KANDIDATER] (6).
+- _yahoo_ticker() mappar eToro-suffix till Yahoo (.NV→.AS, .ZU→.SW, .LSB→.LS,
+  femsiffriga .HK). _SAMMA_BOLAG slår ihop bakgrundsägandet för dubbel-
+  noterade bolag (ASML/ASML.NV) — utöka när en ny dubblett dyker upp.
+- Bakgrundsgruppen filtreras skiftlägesokänsligt mot PROFILES ('Michalhla'
+  låg i topp 50 trots att 'michalhla' är signalprofil) → 49 portföljer tills
+  --screener körs om.
+- INTE gjort ur specen: skuggportfölj för gamla grinden i --utvardera, och
+  uppdelning av --utvardera per `regel` (fältet loggas men används inte än).
+
 ## Profiler som bevakas
 thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
 

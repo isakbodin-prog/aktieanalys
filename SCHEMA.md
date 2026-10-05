@@ -16,6 +16,39 @@
 Notera datum + ändring varje gång ett fält som UI:t läser ändras
 (nytt/borttaget/omdöpt/typändrat). Nyast överst.
 
+- **2026-10-05** — DIVERGENSGRIND ersätter konsensusgrinden som urval till
+  Bästa köp (UTBYGGNAD_divergensgrind.md). Nycklarna behåller namn och form
+  så UI:t inte kraschar, men INNEHÅLLET har bytt betydelse:
+  - `consensus` = KANDIDATER: minst 2 av signalgruppen äger aktien och högst
+    10 % av bakgrundsgruppen (kvar upp till 15 % om den redan låg på listan).
+    Typiskt 10–15 aktier i stället för 4. Varje entry har tre nya fält:
+    `bakgrund_antal` (int), `bakgrund_andel_pct` (float), `divergens_pp` (float).
+    `tröskel` är nu ägarkravet (2), `hysteres` = ligger kvar på 15 %-taket.
+  - `nara_konsensus` = NÄSTAN KANDIDAT: klarar ägarkravet men 10–20 % av
+    bakgrunden äger den. Samma tre nya fält. `divergens_nara` avser nu dessa.
+  - `bubblar_niva` = alltid `{}` (nivån finns inte längre; nyckeln ligger kvar).
+  - `konsensus_trosklar` = `{in: 2, kvar: 2, n, in_pct: 33, kvar_pct: 33}` —
+    bara ägarkravet. Ny toppnyckel `kandidat_trosklar` (dict | null):
+    `{regel, min_agare, n, max_bakgrund_in_pct, max_bakgrund_kvar_pct,
+    nara_max_bakgrund_pct}`; `null` om bakgrundscachen saknas (då används
+    gamla konsensusgrinden som reserv och `consensus` betyder som förr).
+  - `ranking[].delpoäng["Konsensus"]`: samma nyckel och tak (25), nytt
+    innehåll (divergens 9 + färskhet 6 + snittvikt 5 + nettoflöde ±5).
+  - `claude`: bara de 6 högst rankade i `ranking` får text. Övriga kandidater
+    SAKNAR nyckel i `claude` — UI måste tåla det (gällde redan för nya aktier).
+  - `exit_lista` blir betydligt längre än förr (ovanliga aktier är oftare i
+    fallande trend) — 7 av 11 kandidater vid bytet.
+  - Historiktyperna heter kvar `IN I/UT UR KONSENSUS` och `IN I/UT UR NÄRA
+    KONSENSUS`; `detalj` säger "ny kandidat …" / "utgår som kandidat …".
+    Bytesdagen loggas alla gamla ut och alla nya in.
+  - Utländska tickers (`RR.L`, `RHM.DE`, `1810.HK`, `MC.PA` …) förekommer nu i
+    `consensus`/`ranking`; `analyses[tk].valuta` kan vara `EUR`, `GBp`, `HKD`.
+  - `screener_facit.json`-rader och `pappersportfolj.json`-poster har nytt
+    fält `regel` (saknas på rader före bytet).
+  UI-TEXTER ATT BYTA (frontend): rubriker/förklaringar som säger "Konsensus",
+  "in vid X av N portföljer", "Nära konsensus" och "Bubblare" stämmer inte
+  längre med innehållet.
+
 - **2026-08-04** — Tidszonsfix: ALLA datum/tider som backend skriver (`tidpunkt`,
   `regim.datum`/`regim_datum`, `claude_datum`, `fear_greed.hämtad`/
   `hämtad_datum`, `pris_datum`, historik- och innehavsdatum, m.fl.) är nu
