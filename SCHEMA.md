@@ -16,6 +16,10 @@
 Notera datum + ändring varje gång ett fält som UI:t läser ändras
 (nytt/borttaget/omdöpt/typändrat). Nyast överst.
 
+- **2026-10-05** — Claude-modell: alla analyser (grundanalys och omanalys) körs
+  nu på `claude-sonnet-5-5`. `claude[tk].modell` får det värdet på nya texter;
+  äldre texter kan fortfarande bära `claude-opus-4-8` / `claude-sonnet-4-6`.
+
 - **2026-10-05** — DIVERGENSGRIND ersätter konsensusgrinden som urval till
   Bästa köp (UTBYGGNAD_divergensgrind.md). Nycklarna behåller namn och form
   så UI:t inte kraschar, men INNEHÅLLET har bytt betydelse:

@@ -39,6 +39,16 @@ kvar 3/6", "nära konsensus" och "bubblarnivå" är historik. Gällande regel
 - INTE gjort ur specen: skuggportfölj för gamla grinden i --utvardera, och
   uppdelning av --utvardera per `regel` (fältet loggas men används inte än).
 
+## CLAUDE-MODELL (sedan 2026-10-05)
+Alla analyser körs på `claude-sonnet-5-5` (CLAUDE_MODELL_NY = CLAUDE_MODELL_
+OMANALYS) — texten längre ner om Opus 4.8 för "ny på listan" och Sonnet 4.6
+för omanalys är historik. Sonnet 5.5 avvisar `thinking: disabled` (400):
+omanalyser skickar `{"type": "between_tools"}` (ingen extended thinking,
+max_tokens 600), grundanalyser `{"type": "adaptive"}` med max_tokens 4000
+(thinking räknas mot taket). job["ny"] styr vilket, inte modellnamnet. Tomt
+svar (refusal/max_tokens) sparas inte som analys. Server-side refusal-fallback
+är INTE påslagen.
+
 ## Profiler som bevakas
 thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
 

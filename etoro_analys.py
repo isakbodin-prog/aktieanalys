@@ -1676,9 +1676,12 @@ def build_ranking(analyses, consensus, history_log=None, exit_info=None):
 # ----------------------------------------------------------------------
 # Steg 4 — Claude-triggerfilter: bara väsentliga förändringar omanalyseras
 # ----------------------------------------------------------------------
-CLAUDE_MODELL_NY = "claude-opus-4-8"        # grundanalys — aktien saknar text
-CLAUDE_MODELL_OMANALYS = "claude-sonnet-4-6"   # omanalys av befintlig aktie
-MODELL_KORTNAMN = {CLAUDE_MODELL_NY: "opus", CLAUDE_MODELL_OMANALYS: "sonnet"}
+# En modell för allt sedan 2026-10-05 (tidigare Opus 4.8 för grundanalys och
+# Sonnet 4.6 för omanalys). Skillnaden mellan de två jobbtyperna ligger kvar i
+# thinking/max_tokens, se claude_analysis.
+CLAUDE_MODELL_NY = CLAUDE_MODELL_OMANALYS = "claude-sonnet-5-5"
+MODELL_KORTNAMN = {"claude-sonnet-5-5": "sonnet", "claude-sonnet-4-6": "sonnet",
+                   "claude-opus-4-8": "opus"}   # gamla ID:n finns kvar i förbrukningsloggen
 MAX_ANALYS_ALDER_DAGAR = 7
 POANG_TRIGGER_DIFF = 10.0
 KONSENSUS_TRIGGER_DIFF = 1.0
@@ -1692,7 +1695,7 @@ NIVA_BROTT_MARGINAL = 0.005  # 0,5 %
 # äter av samma max_tokens-budget — mer marginal krävs där (se incidenten
 # 2026-07-16 där 2000 utan uppdelning gav tomma svar för två aktier).
 CLAUDE_MAX_TOKENS_OMANALYS = 600
-CLAUDE_MAX_TOKENS_NY = 2000
+CLAUDE_MAX_TOKENS_NY = 4000   # thinking räknas mot taket även när texten inte returneras
 # Höjs varje gång textstrukturen/systemprompten ändras i grunden (senast:
 # 2026-07-18, domslut → teknisk lägesbeskrivning med trigger/ogiltigt-villkor)
 # så att ALLA befintliga texter omanalyseras en gång automatiskt — se
@@ -1918,8 +1921,8 @@ def claude_analysis(jobb, körningsläge="standard"):
 
     jobb: {ticker: {"data": analysdikt, "model": modell-id, "orsak": str,
     "snapshot": indikator_snapshot}} — modell och orsak väljs av anroparen
-    (§ Claude-triggerfilter): claude-opus-4-8 för "ny på listan"
-    (grundanalys), annars claude-sonnet-4-6 (omanalys av befintlig aktie).
+    (§ Claude-triggerfilter) — samma modell (CLAUDE_MODELL_*) för båda sedan
+    2026-10-05; job["ny"] styr thinking och max_tokens.
     körningsläge: "standard" | "divergens" | "force" — taggas på varje
     tokenförbrukningspost (se logga_forbrukning).
 
@@ -2021,10 +2024,11 @@ def claude_analysis(jobb, körningsläge="standard"):
         data = job["data"]
         modell = job.get("model") or CLAUDE_MODELL_NY
         orsak = job.get("orsak", "?")
-        # Sonnet-omanalyser: ingen thinking (ren textbudget). Opus-grundanalyser
-        # ("ny på listan"): behåller adaptive thinking, med mer max_tokens-marginal.
-        är_ny = modell == CLAUDE_MODELL_NY
-        thinking_param = {"type": "adaptive"} if är_ny else {"type": "disabled"}
+        # Omanalyser: ingen extended thinking (ren textbudget) — på Sonnet 5.5
+        # heter det läget "between_tools"; "disabled" ger 400. Grundanalyser
+        # ("ny på listan"): adaptive thinking med mer max_tokens-marginal.
+        är_ny = bool(job.get("ny"))
+        thinking_param = {"type": "adaptive"} if är_ny else {"type": "between_tools"}
         max_tok = CLAUDE_MAX_TOKENS_NY if är_ny else CLAUDE_MAX_TOKENS_OMANALYS
         print(f"  Claude analyserar {ticker} ({modell}, orsak: {orsak})...")
         try:
@@ -2039,6 +2043,9 @@ def claude_analysis(jobb, körningsläge="standard"):
                 }],
             )
             text = next((b.text for b in resp.content if b.type == "text"), "").strip()
+            if not text:   # refusal eller max_tokens uppätet av thinking — spara ingen tom analys
+                print(f"    Claude gav ingen text för {ticker} (stop_reason: {resp.stop_reason}) — hoppar över.")
+                continue
             rating = "?"
             sammanfattning = None
             # Konsumera ledande header-rader (REKOMMENDATION / SAMMANFATTNING) i
@@ -3086,7 +3093,7 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
                     cons.get("viktad_konsensus"), dv.get("divergens_pp"),
                     tk in exit_info)
                 jobb[tk] = {"data": claude_input, "orsak": orsak, "snapshot": snapshot,
-                           "model": CLAUDE_MODELL_NY if ny else CLAUDE_MODELL_OMANALYS}
+                           "model": CLAUDE_MODELL_NY if ny else CLAUDE_MODELL_OMANALYS, "ny": ny}
         return jobb
 
     claude_texts = {}
