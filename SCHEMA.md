@@ -16,6 +16,16 @@
 Notera datum + ändring varje gång ett fält som UI:t läser ändras
 (nytt/borttaget/omdöpt/typändrat). Nyast överst.
 
+- **2026-10-06** — EXIT FLAGGAR i stället för att dölja: `ranking` innehåller
+  nu ÄVEN exit-aktierna (§B dödskors), sist i listan (sortering: stigande
+  trend → övriga → exit; poäng inom varje grupp). En exit-rad känns igen på
+  att `exit_datum` (str) och `exit_villkor` (str) finns på ranking-entryn —
+  övriga rader saknar nycklarna. `exit_lista` ligger kvar oförändrad med
+  samma rader (frontend läste den aldrig, så exit-aktierna var osynliga på
+  sajten). UI bör visa exit-raderna i Bästa köp med en tydlig varning, inte
+  som vanliga rader. Pappersportföljerna utesluter dem fortfarande;
+  `screener_facit.json`-rader fick fältet `exit` (bool).
+
 - **2026-10-06** — `analyses[tk].analytiker_kalla` (str | null, nytt): varifrån
   analytikerfälten (riktkurs, rekommendation, antal analytiker, P/E, PEG,
   EPS-rev, nästa rapport, sektor, valuta) kom: `"Yahoo"` (live i körningen),
@@ -222,7 +232,7 @@ finns ALLTID (skrivs ovillkorligt). Tomma tillstånd representeras med `{}`,
 | `analyses` | dict | ✅ | Teknisk/fundamental analys PER KONSENSUSAKTIE. Se **Analysis-entry**. |
 | `claude` | dict | ✅ | Claudes text per konsensusaktie. Se **Claude-entry**. Kan vara `{}`. |
 | `claude_datum` | str \| null | ✅ | Datum då Claude-texterna genererades, eller `null`. |
-| `ranking` | list | ✅ | Rangordnade konsensusaktier, bästa köp först. Se **Ranking-entry**. Innehåller ALDRIG exit-aktier (se `exit_lista`). |
+| `ranking` | list | ✅ | Rangordnade kandidater, bästa köp först, exit-flaggade SIST (sedan 2026-10-06 — tidigare uteslutna). Se **Ranking-entry**; exit-rader har `exit_datum`/`exit_villkor`. |
 | `exit_lista` | list | ✅ | Konsensusaktier i EXIT (§B trendbrott), uteslutna ur `ranking`/Bästa köp. Kan vara `[]`. Se **Exit-entry**. |
 | `regim` | dict | ✅ | Marknadsregim (§A). Se **Regim**. |
 | `fear_greed` | dict \| null | ✅ | CNN Fear & Greed-index, rent informationsfält (ingen poäng-/regimpåverkan). `null` om varken ny hämtning eller tidigare känd data finns — dölj widgeten då, visa inte noll. Se **Fear & Greed**. |

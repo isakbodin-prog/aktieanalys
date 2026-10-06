@@ -48,6 +48,14 @@ räknas mot taket) — omanalyser utan thinking gav självmotsägande nivåer. T
 svar (refusal/max_tokens) sparas inte som analys. Server-side refusal-fallback
 är INTE påslagen.
 
+## EXITREGELN FLAGGAR, DÖLJER INTE (sedan 2026-10-06)
+Allt nedan som säger att exit-aktier "flyttas från ranking till exit_lista"
+eller "utesluts ur Bästa köp" är historik för VISNINGEN: build_ranking lägger
+numera exit-raden i BÅDE ranking (sist, med exit_datum/exit_villkor) och
+exit_lista. Pappersportföljerna och facit-/episodmätningen mäter däremot
+fortfarande exitregeln som strategi — pappersportfolj_vikter() filtrerar
+bort exit-rader själv, facit-raderna bär fältet `exit`.
+
 ## Profiler som bevakas
 thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
 

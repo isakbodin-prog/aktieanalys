@@ -1745,10 +1745,10 @@ def build_ranking(analyses, consensus, history_log=None, exit_info=None):
     Analytiker25/Konsensus20) sparas som poäng_v1/delpoäng_v1 för jämförelse
     under övergångsperioden, tills --utvardera hunnit kalibrera vikterna.
 
-    exit_info: {ticker: exit_datum} för aktier i EXIT (§B trendbrott) — de
-    beräknas som vanligt (poängen får inte förorenas) men returneras separat
-    i exit_lista i stället för ranking, så Bästa köp/pappersportföljerna
-    utesluter dem automatiskt. Konsensuslistan påverkas inte av detta.
+    exit_info: {ticker: exit_datum} för aktier i EXIT (§B trendbrott). Sedan
+    2026-10-06 FLAGGAS de i stället för att döljas: raden ligger kvar i
+    ranking (sist, med exit_datum/exit_villkor) OCH i exit_lista. Pappers-
+    portföljerna utesluter dem fortfarande själva (de mäter exitregeln).
     """
     exit_info = exit_info or {}
     giltiga = [tk for tk in consensus if "error" not in analyses.get(tk, {})]
@@ -1790,9 +1790,9 @@ def build_ranking(analyses, consensus, history_log=None, exit_info=None):
             rad["exit_datum"] = exit_info[ticker]
             rad["exit_villkor"] = EXIT_VILLKOR_TEXT
             exit_lista.append(rad)
-        else:
-            ranking.append(rad)
-    ranking.sort(key=lambda r: (not r["trend_ok"], -r["poäng"]))
+        ranking.append(rad)
+    # Stigande trend först, sedan övriga, exit-flaggade sist — inom varje grupp på poäng
+    ranking.sort(key=lambda r: ("exit_datum" in r, not r["trend_ok"], -r["poäng"]))
     exit_lista.sort(key=lambda r: r["exit_datum"])
     return ranking, exit_lista
 
@@ -2662,6 +2662,10 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
                        d.get("Värdering"), rs.get("rs_pe"), r.get("foreslagen_vikt_%"),
                        c_rek.get("rekommendation_visning") or c_rek.get("rekommendation", "")])
             ws.cell(row=ws.max_row, column=5).fill = green if r["trend_ok"] else red
+            if r.get("exit_datum"):
+                ws.cell(row=ws.max_row, column=2).fill = exit_fill
+                ws.cell(row=ws.max_row, column=2).comment = Comment(
+                    f"EXIT sedan {r['exit_datum']}: {r['exit_villkor']}", "System")
             if r.get("vardering_neutral"):
                 ws.cell(row=ws.max_row, column=10).comment = Comment(
                     "Data saknas → neutral (5/10)", "System")
@@ -2671,8 +2675,8 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
 
         if exit_lista:
             ws.append([])
-            ws.append([f"EXIT (TRENDBROTT) — {len(exit_lista)} st, uteslutna ur Bästa köp "
-                       "(kvar i konsensus, se Konsensus & Analys)"])
+            ws.append([f"EXIT (TRENDBROTT) — {len(exit_lista)} st, flaggade (gulmarkerade ovan), "
+                       "ingår inte i pappersportföljerna"])
             ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
             ws.append(["Instrument", "Exit-datum", "Villkor", "Poäng vid exit"])
             for c in ws[ws.max_row]:
@@ -3383,6 +3387,7 @@ def logga_facit(datum, ranking, divergence, analyses, consensus, claude_texts=No
             "datum": datum,
             "regel": KONSENSUS_REGEL,
             "ticker": tk,
+            "exit": "exit_datum" in r,
             "poäng": r["poäng"],
             "komponenter": r["delpoäng"],
             "pris": a.get("pris"),
@@ -3413,8 +3418,9 @@ def _normalisera(raw):
 def pappersportfolj_vikter(ranking, claude_texts=None, regim=None, tidigare_ombalanseringar=None):
     """Målvikter för de tre aktiva pappersportföljerna (P3 = SPY, inga vikter).
 
-    Universum = Bästa köp = konsensusaktier med poäng ≥ BASTA_KOP_MIN_POANG
-    (exit-aktier ingår aldrig — build_ranking har redan sorterat ut dem).
+    Universum = Bästa köp = kandidater med poäng ≥ BASTA_KOP_MIN_POANG, utom
+    exit-flaggade (ranking visar dem sedan 2026-10-06, men pappersportföljerna
+    mäter exitregeln och utesluter dem fortfarande).
     Vikter är andelar (summa ≤ 1); resten hålls som 0 %-avkastande kassa.
 
     - likaviktad (P1): 1/N över universumet — mäter urvalets värde.
@@ -3431,7 +3437,7 @@ def pappersportfolj_vikter(ranking, claude_texts=None, regim=None, tidigare_omba
     """
     claude_texts = claude_texts or {}
     universum = [r["ticker"] for r in ranking
-                 if r.get("poäng", 0) >= BASTA_KOP_MIN_POANG]
+                 if r.get("poäng", 0) >= BASTA_KOP_MIN_POANG and "exit_datum" not in r]
 
     nya_i_kassa = []
     if (regim or {}).get("regim") == "RÖD" and tidigare_ombalanseringar:
