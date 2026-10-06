@@ -1155,6 +1155,9 @@ ETIK_KATEGORIER = {
 ETIK_TICKER = {   # manuella tillägg: ticker → kategorier
     "VST": ["fossila bränslen"],
 }
+ETIK_UNDANTAG = {   # manuella undantag: ticker → kategorier som INTE ska flaggas
+    "RR.L": ["vapen"],   # Rolls-Royce: mest civila flygmotorer, branschkoden säger "Aerospace & Defense"
+}
 
 
 def etikvarning(ticker, industry):
@@ -1164,7 +1167,7 @@ def etikvarning(ticker, industry):
     for kategori, nycklar in ETIK_KATEGORIER.items():
         if kategori not in kategorier and any(n in ind for n in nycklar):
             kategorier.append(kategori)
-    return kategorier
+    return [k for k in kategorier if k not in ETIK_UNDANTAG.get(ticker, [])]
 
 
 # ----------------------------------------------------------------------

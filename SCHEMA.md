@@ -19,8 +19,9 @@ Notera datum + ändring varje gång ett fält som UI:t läser ändras
 - **2026-10-06** — `analyses[tk].etikvarning` (list[str], nytt, alltid satt —
   `[]` = ingen varning): kategorier bland `"fossila bränslen"`, `"vapen"`,
   `"tobak"`, `"spel"`, härledda ur Yahoos `industry` (grovt: "Aerospace &
-  Defense" ger `vapen` även för RR.L) plus en manuell lista (`ETIK_TICKER`,
-  i dag VST → fossila bränslen). Ingen poängpåverkan. UI: visa som en liten
+  Defense" ger `vapen` även för RR.L) plus manuella tillägg (`ETIK_TICKER`,
+  i dag VST → fossila bränslen) och undantag (`ETIK_UNDANTAG`, i dag RR.L ej
+  vapen). Ingen poängpåverkan. UI: visa som en liten
   varningsmarkering vid aktien, t.ex. i Bästa köp och Konsensus.
 
 - **2026-10-06** — EXIT FLAGGAR i stället för att dölja: `ranking` innehåller
