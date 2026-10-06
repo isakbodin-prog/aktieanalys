@@ -1140,6 +1140,34 @@ def _fyll_analytikerdata(analyses, gistdata):
 
 
 # ----------------------------------------------------------------------
+# Etikvarning — liten flagga på aktier i branscher som skadar människor eller
+# klimat (fossila bränslen, vapen, tobak, spel). Ingen poängpåverkan, bara
+# information. Grunden är Yahoos industry-sträng (grov: "Aerospace & Defense"
+# träffar även civilflyg som RR.L) plus en manuell lista för bolag vars
+# industry döljer saken (VST: gas-/kolkraft under "Independent Power Producers").
+# ----------------------------------------------------------------------
+ETIK_KATEGORIER = {
+    "fossila bränslen": ("oil & gas", "oil and gas", "coal", "petroleum"),
+    "vapen": ("aerospace & defense", "aerospace and defense", "defense"),
+    "tobak": ("tobacco",),
+    "spel": ("gambling", "casinos"),
+}
+ETIK_TICKER = {   # manuella tillägg: ticker → kategorier
+    "VST": ["fossila bränslen"],
+}
+
+
+def etikvarning(ticker, industry):
+    """Lista med kategorier (tom = ingen varning)."""
+    kategorier = list(ETIK_TICKER.get(ticker, []))
+    ind = (industry or "").lower()
+    for kategori, nycklar in ETIK_KATEGORIER.items():
+        if kategori not in kategorier and any(n in ind for n in nycklar):
+            kategorier.append(kategori)
+    return kategorier
+
+
+# ----------------------------------------------------------------------
 # Steg 3b: Sammanvägd poäng och rangordning
 # ----------------------------------------------------------------------
 def compute_correlation_clusters(analyses, tickers, threshold=0.7, min_overlap=40):
@@ -2649,7 +2677,7 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
         ws.append(["Rang", "Instrument", "Poäng (0–100)", "Poäng (v1)", "Stigande trend",
                    "Trend (25)", "Momentum (20)", "Analytiker (20)", "Konsensus (25)",
                    "Värdering (10)", "Relativ styrka (pe)", "Föreslagen vikt (%)",
-                   "Claudes rekommendation"])
+                   "Claudes rekommendation", "Etikvarning"])
         for c in ws[ws.max_row]:
             c.font, c.fill = hfont, hfill
         for i, r in enumerate(ranking or [], start=1):
@@ -2660,7 +2688,8 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
                        "JA" if r["trend_ok"] else "NEJ",
                        d.get("Trend"), d.get("Momentum"), d.get("Analytiker"), d.get("Konsensus"),
                        d.get("Värdering"), rs.get("rs_pe"), r.get("foreslagen_vikt_%"),
-                       c_rek.get("rekommendation_visning") or c_rek.get("rekommendation", "")])
+                       c_rek.get("rekommendation_visning") or c_rek.get("rekommendation", ""),
+                       ", ".join(analyses.get(r["ticker"], {}).get("etikvarning") or [])])
             ws.cell(row=ws.max_row, column=5).fill = green if r["trend_ok"] else red
             if r.get("exit_datum"):
                 ws.cell(row=ws.max_row, column=2).fill = exit_fill
@@ -3137,6 +3166,7 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     # instrumentlista som ticker-uppslaget (inga extra API-anrop); None om okänt.
     for ticker, a in analyses.items():
         a["bolagsnamn"] = _name_cache.get(ticker)
+        a["etikvarning"] = etikvarning(ticker, a.get("industry"))
 
     # §B Exitregel (trendbrott): pris < MA200 OCH MA50 < MA200 — beräknas här
     # (kräver bara analyses) men appliceras i update_history/build_ranking nedan

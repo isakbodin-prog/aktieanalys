@@ -57,6 +57,12 @@ exit_lista. Pappersportföljerna och facit-/episodmätningen mäter däremot
 fortfarande exitregeln som strategi — pappersportfolj_vikter() filtrerar
 bort exit-rader själv, facit-raderna bär fältet `exit`.
 
+## ETIKVARNING (sedan 2026-10-06)
+analyses[tk].etikvarning = kategorier ur ETIK_KATEGORIER (industry-matchning)
++ ETIK_TICKER (manuell lista). Ren information, ingen poängpåverkan. Nya
+kategorier/bolag läggs till i de två konstanterna; användaren avgör gräns-
+fall (PLTR försvarsmjukvara är t.ex. INTE flaggad).
+
 ## Profiler som bevakas
 thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
 

@@ -16,6 +16,13 @@
 Notera datum + ändring varje gång ett fält som UI:t läser ändras
 (nytt/borttaget/omdöpt/typändrat). Nyast överst.
 
+- **2026-10-06** — `analyses[tk].etikvarning` (list[str], nytt, alltid satt —
+  `[]` = ingen varning): kategorier bland `"fossila bränslen"`, `"vapen"`,
+  `"tobak"`, `"spel"`, härledda ur Yahoos `industry` (grovt: "Aerospace &
+  Defense" ger `vapen` även för RR.L) plus en manuell lista (`ETIK_TICKER`,
+  i dag VST → fossila bränslen). Ingen poängpåverkan. UI: visa som en liten
+  varningsmarkering vid aktien, t.ex. i Bästa köp och Konsensus.
+
 - **2026-10-06** — EXIT FLAGGAR i stället för att dölja: `ranking` innehåller
   nu ÄVEN exit-aktierna (§B dödskors), sist i listan (sortering: stigande
   trend → övriga → exit; poäng inom varje grupp). En exit-rad känns igen på
@@ -291,6 +298,7 @@ Nyckel = ticker. Värdet har **två möjliga former**:
 | Fält | Typ | Kan vara null? | Beskrivning |
 |---|---|---|---|
 | `ticker` | str | nej | |
+| `etikvarning` | list[str] | nej (kan vara `[]`) | Etiska kategorier: `"fossila bränslen"`, `"vapen"`, `"tobak"`, `"spel"`. Tom lista = ingen varning. Sedan 2026-10-06. |
 | `bolagsnamn` | str \| null | ja | Kort bolagsnamn (t.ex. `"Micron"`, `"NVIDIA"`), härlett ur eToro-instrumentlistans `instrumentDisplayName` (juridiska suffix som Inc/Corporation/Holdings/Technology + `.com` kapas). `null` om okänt. Frontend inleder Bästa köp-sammanfattningen med detta i stället för tickern. Sedan 2026-08-01. |
 | `datakälla` | str | nej | `"Yahoo"`, `"Alpha Vantage"` eller `"cache"`. |
 | `cache_datum` | str | *bara vid cache* | Sätts endast när `datakälla == "cache"` — FÖRRA KÖRNINGENS tidpunkt (inte nödvändigtvis samma som `pris_datum`, se nedan). |
