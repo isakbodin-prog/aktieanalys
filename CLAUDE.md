@@ -148,6 +148,13 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
 - `python3 etoro_analys.py --divergens` — hämtar om bakgrundsgruppens
   portföljer (kräver att --screener körts, annars RuntimeError) till
   bakgrund_cache.json och kör sedan hela analysen.
+- `python3 etoro_analys.py --analytikerdata` — hämtar analytikerfälten (det
+  Yahoo .info/.eps_trend/.calendar ger) för alla aktier med ≥2 ägare i signal-
+  gruppen till analytikerdata.json i gisten. Körs VARDAGAR 05:15 UTC från
+  GitHub Actions (analytikerdata.yml) eftersom Yahoo blockerar .info på Render
+  men inte på GitHubs runners. run_analysis fyller saknade fält därifrån FÖRE
+  förra körningens värden (analyses[tk].analytiker_kalla anger källan). Kör
+  inte analysen. Kräver bara GIST_ID/GITHUB_TOKEN.
 - `python3 etoro_analys.py --utvardera` — utvärderar poängmodellen mot
   faktisk forward-avkastning (21/63/126 dgr) ur screener_facit.json
   (loggas automatiskt vid varje analyskörning, gist-synkad). Rapport per

@@ -16,6 +16,15 @@
 Notera datum + ändring varje gång ett fält som UI:t läser ändras
 (nytt/borttaget/omdöpt/typändrat). Nyast överst.
 
+- **2026-10-06** — `analyses[tk].analytiker_kalla` (str | null, nytt): varifrån
+  analytikerfälten (riktkurs, rekommendation, antal analytiker, P/E, PEG,
+  EPS-rev, nästa rapport, sektor, valuta) kom: `"Yahoo"` (live i körningen),
+  `"gist ÅÅÅÅ-MM-DD"` (daglig GitHub Actions-hämtning, `analytikerdata.json`
+  i gisten — Yahoo blockerar .info på Render men inte på GitHubs runners),
+  `"förra körningen ÅÅÅÅ-MM-DD"` eller `null` (saknas helt → Analytiker-poängen
+  neutral, se `analytiker_neutral`). Ny gist-fil `analytikerdata.json`
+  (`{datum, tidpunkt, data: {tk: {fält…, hämtad}}}`) — UI läser den inte.
+
 - **2026-10-06** — `ranking[].analytiker_neutral` (bool, nytt): `true` när all
   analytikerdata saknades (Yahoo .info blockerad på Render och ingen tidigare
   körning att återanvända från — typiskt nya aktier). Analytiker-delpoängen

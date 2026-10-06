@@ -827,9 +827,12 @@ def eps_revision_pct(t, ticker="?"):
 # eToro-suffix som Yahoo skriver annorlunda (övriga, t.ex. .DE/.L/.CO/.HK/.PA,
 # är identiska). Utökas när en ny börs dyker upp bland kandidaterna.
 _YAHOO_SUFFIX = {".NV": ".AS", ".ZU": ".SW", ".LSB": ".LS"}
+_YAHOO_TICKER = {"BRK.B": "BRK-B"}   # hela tickern avviker (punkt = börssuffix hos Yahoo)
 
 
 def _yahoo_ticker(ticker):
+    if ticker in _YAHOO_TICKER:
+        return _YAHOO_TICKER[ticker]
     for etoro, yahoo in _YAHOO_SUFFIX.items():
         if ticker.endswith(etoro):
             return ticker[:-len(etoro)] + yahoo
@@ -1025,6 +1028,115 @@ def analyze_ticker(ticker):
         }
     except Exception as e:
         return {"ticker": ticker, "error": str(e)}
+
+
+# ----------------------------------------------------------------------
+# Analytikerdata från GitHub Actions (--analytikerdata). Yahoo blockerar .info/
+# .eps_trend/.calendar på Render men inte på GitHubs runners, så en daglig
+# workflow hämtar fälten för alla tänkbara kandidater (≥2 ägare i signal-
+# gruppen) och lägger dem i gisten; run_analysis fyller luckor därifrån före
+# förra körningens värden. Kursdata hämtas fortfarande live på Render.
+# ----------------------------------------------------------------------
+ANALYTIKER_FALT = ["rekommendation", "riktkurs", "antal_analytiker", "riktkurs_hog",
+                   "riktkurs_lag", "riktkurs_spridningskvot", "eps_rev_90d_pct",
+                   "forward_pe", "peg_ratio", "nasta_rapport", "sector", "industry", "valuta"]
+
+
+def hamta_analytikerdata(tickers):
+    """{ticker: {ANALYTIKER_FALT..., "hämtad": datum}} för de tickers Yahoo svarade på."""
+    import time
+    import yfinance as yf
+    ut, idag = {}, _idag().isoformat()
+    for i, tk in enumerate(sorted(tickers)):
+        if i:
+            time.sleep(0.6)
+        try:
+            t = yf.Ticker(_yahoo_ticker(tk))
+            info = t.info or {}
+        except Exception as e:
+            _logga_yf_miss(tk, "info", e)
+            continue
+        if len(info) < 5:
+            _logga_yf_miss(tk, "info", detalj=f"misstänkt tunt svar ({len(info)} nycklar)")
+            continue
+        target = info.get("targetMeanPrice")
+        hog, lag = info.get("targetHighPrice"), info.get("targetLowPrice")
+        fpe = info.get("forwardPE") or info.get("trailingPE")
+        ut[tk] = {
+            "rekommendation": info.get("recommendationKey", "n/a"),
+            "riktkurs": target,
+            "antal_analytiker": info.get("numberOfAnalystOpinions"),
+            "riktkurs_hog": hog, "riktkurs_lag": lag,
+            "riktkurs_spridningskvot": round((hog - lag) / target, 2) if hog and lag and target else None,
+            "eps_rev_90d_pct": eps_revision_pct(t, tk),
+            "forward_pe": round(fpe, 1) if fpe else None,
+            "peg_ratio": round(info["pegRatio"], 2) if info.get("pegRatio") else None,
+            "nasta_rapport": next_earnings_date(t, tk),
+            "sector": info.get("sector"), "industry": info.get("industry"),
+            "valuta": info.get("currency"),
+            "hämtad": idag,
+        }
+        print(f"  {tk:<10} rek {ut[tk]['rekommendation']:<11} riktkurs {target} ({ut[tk]['antal_analytiker']} analytiker)")
+    return ut
+
+
+def run_analytikerdata():
+    """CLI --analytikerdata: hämta analytikerfält för alla aktier med ≥2 ägare i
+    signalgruppen (= alla som kan bli kandidater i morgon) och spara till gisten."""
+    gist_pull()
+    try:
+        with open(RESULTS_FILE) as f:
+            senaste = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        raise RuntimeError(f"{RESULTS_FILE} saknas — kör analysen minst en gång först.")
+    agare = {}
+    for p in (senaste.get("portfolios") or {}).values():
+        for tk in p:
+            agare[tk] = agare.get(tk, 0) + 1
+    tickers = {tk for tk, n in agare.items() if n >= KANDIDAT_MIN_AGARE}
+    tickers |= set(senaste.get("consensus") or {}) | set(senaste.get("nara_konsensus") or {})
+    print(f"\nHämtar analytikerdata för {len(tickers)} aktier (≥{KANDIDAT_MIN_AGARE} ägare)...")
+    data = hamta_analytikerdata(tickers)
+    gammal = {}
+    if os.path.exists(ANALYTIKER_FILE):
+        try:
+            with open(ANALYTIKER_FILE) as f:
+                gammal = json.load(f).get("data") or {}
+        except (OSError, json.JSONDecodeError):
+            gammal = {}
+    # Aktier Yahoo inte svarade på i dag behåller gårdagens rad (med sitt hämtad-datum)
+    sammanslagen = {**{tk: v for tk, v in gammal.items() if tk in tickers}, **data}
+    with open(ANALYTIKER_FILE, "w") as f:
+        json.dump({"datum": _idag().isoformat(), "tidpunkt": _nu().isoformat(timespec="minutes"),
+                   "data": sammanslagen}, f, ensure_ascii=False, indent=1)
+    print(f"  {len(data)} hämtade, {len(sammanslagen) - len(data)} behållna från tidigare → {ANALYTIKER_FILE}")
+    gist_push()
+
+
+def _fyll_analytikerdata(analyses, gistdata):
+    """Fyll saknade analytikerfält i analyses från gistens analytikerdata.
+    Sätter analyses[tk]["analytiker_kalla"]: "Yahoo" (live), "gist <datum>" eller None."""
+    gistdata = gistdata or {}
+    for tk, a in analyses.items():
+        if "error" in a:
+            continue
+        a["analytiker_kalla"] = None if _analytikerdata_saknas(a) else "Yahoo"
+        g = gistdata.get(tk)
+        if not g:
+            continue
+        fyllda = []
+        for falt in ANALYTIKER_FALT:
+            saknas = a.get(falt) is None or (falt == "rekommendation" and a.get(falt) == "n/a")
+            if saknas and g.get(falt) is not None:
+                a[falt] = g[falt]
+                fyllda.append(falt)
+        if "riktkurs" in fyllda and a.get("pris"):
+            a["uppsida_%"] = round((a["riktkurs"] / a["pris"] - 1) * 100, 1)
+        if fyllda and a["analytiker_kalla"] != "Yahoo":
+            a["analytiker_kalla"] = f"gist {g.get('hämtad', '?')}"
+        if fyllda:
+            print(f"    {tk}: {len(fyllda)} analytikerfält från gisten ({g.get('hämtad', '?')})")
+    return analyses
 
 
 # ----------------------------------------------------------------------
@@ -2318,9 +2430,10 @@ PAPPER_FILE = "pappersportfolj.json"
 # konsensusaktier (nuvarande UI-beteende). Konstant för reproducerbara
 # episoder (§3b Del A) — höj bara medvetet.
 BASTA_KOP_MIN_POANG = 0
+ANALYTIKER_FILE = "analytikerdata.json"   # hämtas av GitHub Actions (--analytikerdata), läses av Render
 GIST_FILES = ("portfolj_historik.json", "senaste_analys.json",
               "bakgrund_topp50.json", "bakgrund_cache.json", FACIT_FILE, PAPPER_FILE,
-              FORBRUKNING_FILE)
+              FORBRUKNING_FILE, ANALYTIKER_FILE)
 
 
 def _gist_headers():
@@ -2972,6 +3085,17 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
             analyses[ticker] = cached
             print(f"    {ticker}: datakällorna svarade inte — återanvänder analysen från {cached['cache_datum']}"
                   + (f" [{cached['notis']}]" if alder is not None and alder > ANALYS_CACHE_ALDER_VARNING_HANDELSDAGAR else ""))
+    # Analytikerdata från GitHub Actions-gisten (fräschare än förra körningen,
+    # och täcker nya aktier som saknar tidigare körning) — se hamta_analytikerdata.
+    gist_analytiker = {}
+    if os.path.exists(ANALYTIKER_FILE):
+        try:
+            with open(ANALYTIKER_FILE) as f:
+                gist_analytiker = json.load(f).get("data") or {}
+        except (OSError, json.JSONDecodeError):
+            gist_analytiker = {}
+    _fyll_analytikerdata(analyses, gist_analytiker)
+
     for ticker, a in analyses.items():
         if "error" in a or a.get("riktkurs"):
             continue
@@ -2982,6 +3106,7 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
             a["antal_analytiker"] = pa.get("antal_analytiker")
             if a.get("pris"):
                 a["uppsida_%"] = round((pa["riktkurs"] / a["pris"] - 1) * 100, 1)
+            a["analytiker_kalla"] = f"förra körningen {prev.get('tidpunkt', '')[:10]}"
             print(f"    {ticker}: analytikerdata återanvänd från {prev.get('tidpunkt', 'förra körningen')[:10]}")
 
     # Yahoo kan blockera .info/.eps_trend/.calendar separat från historik/pris
@@ -3884,6 +4009,10 @@ def main():
                              "körts någon gång) och kör sedan hela analysen")
     parser.add_argument("--force-claude", action="store_true",
                         help="kör Claude-analysen även om den redan körts idag (drar credits)")
+    parser.add_argument("--analytikerdata", action="store_true",
+                        help=f"hämta analytikerfält (riktkurs, rek, P/E, …) för alla tänkbara "
+                             f"kandidater till {ANALYTIKER_FILE} i gisten — körs dagligen från "
+                             "GitHub Actions eftersom Yahoo blockerar .info på Render. Kör inte analysen")
     parser.add_argument("--utvardera", action="store_true",
                         help="utvärdera poängmodellen mot faktisk forward-avkastning "
                              f"({FACIT_FILE}) — kör inte analysen")
@@ -3893,6 +4022,9 @@ def main():
     try:
         if args.utvardera:
             run_utvardering()
+            return
+        if args.analytikerdata:
+            run_analytikerdata()
             return
         if args.screener:
             if not API_KEY or not USER_KEY:

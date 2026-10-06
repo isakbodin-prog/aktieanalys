@@ -1,0 +1,22 @@
+name: Daglig analytikerdata
+
+on:
+  schedule:
+    - cron: "15 5 * * 1-5"   # vardagar 05:15 UTC = 07:15 svensk sommartid (06:15 vintertid)
+  workflow_dispatch: {}      # kan även köras manuellt från GitHub
+
+jobs:
+  analytikerdata:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Hämta analytikerdata från Yahoo (Render blockeras) och spara i gisten
+        run: python3 etoro_analys.py --analytikerdata
+        env:
+          GIST_ID: ${{ secrets.GIST_ID }}
+          GITHUB_TOKEN: ${{ secrets.GIST_TOKEN }}
