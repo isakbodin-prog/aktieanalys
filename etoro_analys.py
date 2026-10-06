@@ -3206,8 +3206,11 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     prev_datum = prev.get("claude_datum")
     today = _idag().isoformat()
 
-    # Kostnadstak: bara de högst rankade kandidaterna får Claude-text.
-    claude_urval = {r["ticker"] for r in ranking[:CLAUDE_MAX_KANDIDATER]}
+    # Kostnadstak: bara de högst rankade kandidaterna får Claude-text — och
+    # inga exit-flaggade (de visas i ranking sedan 2026-10-06, men en köp-
+    # analys av en aktie i dödskors är inte värd anropet).
+    claude_urval = {r["ticker"] for r in
+                    [r for r in ranking if "exit_datum" not in r][:CLAUDE_MAX_KANDIDATER]}
 
     def _bygg_jobb(tickers, force_alla):
         jobb = {}

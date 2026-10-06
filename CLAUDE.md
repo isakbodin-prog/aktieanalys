@@ -29,7 +29,8 @@ kvar 3/6", "nära konsensus" och "bubblarnivå" är historik. Gällande regel
   compute_consensus. Bakgrunden är alltså nu ett HÅRT beroende för urvalet.
 - Poängens Konsensus-komponent (v2) = divergens 9 + färskhet 6 + snittvikt 5
   + nettoflöde ±5. v1-poängen är orörd.
-- Claude analyserar bara ranking[:CLAUDE_MAX_KANDIDATER] (6).
+- Claude analyserar bara de CLAUDE_MAX_KANDIDATER (6) högst rankade som INTE är
+  exit-flaggade (sedan 2026-10-06).
 - _yahoo_ticker() mappar eToro-suffix till Yahoo (.NV→.AS, .ZU→.SW, .LSB→.LS,
   femsiffriga .HK). _SAMMA_BOLAG slår ihop bakgrundsägandet för dubbel-
   noterade bolag (ASML/ASML.NV) — utöka när en ny dubblett dyker upp.
