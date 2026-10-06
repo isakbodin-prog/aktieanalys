@@ -16,6 +16,14 @@
 Notera datum + ändring varje gång ett fält som UI:t läser ändras
 (nytt/borttaget/omdöpt/typändrat). Nyast överst.
 
+- **2026-10-06** — `ranking[].analytiker_neutral` (bool, nytt): `true` när all
+  analytikerdata saknades (Yahoo .info blockerad på Render och ingen tidigare
+  körning att återanvända från — typiskt nya aktier). Analytiker-delpoängen
+  sätts då till NEUTRAL 10/20 i stället för 0, samma princip som
+  `vardering_neutral`. UI bör markera poängen som osäker, inte som låg.
+  `analyses[tk].valuta` hämtas nu även ur kursdatans metadata när `.info`
+  blockeras — var `null` för alla nya aktier i körningen 2026-10-05 22:04.
+
 - **2026-10-05** — Claude-modell: alla analyser (grundanalys och omanalys) körs
   nu på `claude-sonnet-5-5`. `claude[tk].modell` får det värdet på nya texter;
   äldre texter kan fortfarande bära `claude-opus-4-8` / `claude-sonnet-4-6`.

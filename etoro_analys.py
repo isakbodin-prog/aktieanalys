@@ -980,7 +980,9 @@ def analyze_ticker(ticker):
         return {
             "ticker": ticker,
             "datakälla": source,
-            "valuta": info.get("currency") or ("USD" if source == "Alpha Vantage" else None),
+            "valuta": (info.get("currency")
+                       or (getattr(t, "history_metadata", None) or {}).get("currency")   # .info blockerad (Render)
+                       or ("USD" if source == "Alpha Vantage" else None)),
             "ohlc": ohlc,
             "pris": round(price, 2),
             "pris_datum": hist.index[-1].strftime("%Y-%m-%d"),
@@ -1288,7 +1290,7 @@ def compute_score(a, cons, cluster_factor=1.0, nettoflode_pe=None):
     eps_rev = a.get("eps_rev_90d_pct")
     if eps_rev is not None:   # stigande estimat +, fallande − (fångar uppsidefällan)
         ana += 10 if eps_rev > 5 else (-10 if eps_rev < -5 else 0)
-    delpoang["Analytiker"] = round(max(0.0, min(25.0, ana)), 1)
+    delpoang["Analytiker"] = 12.5 if _analytikerdata_saknas(a) else round(max(0.0, min(25.0, ana)), 1)
 
     # Konsensus (max 20, före klusterjustering) — eniga, övertygade OCH
     # färska investerare, plus flödesriktning; delat med sqrt(klusterstorlek)
@@ -1306,6 +1308,11 @@ def compute_score(a, cons, cluster_factor=1.0, nettoflode_pe=None):
 
     total = round(sum(delpoang.values()), 1)
     return total, delpoang
+
+
+def _analytikerdata_saknas(a):
+    return (a.get("uppsida_%") is None and not a.get("antal_analytiker")
+            and a.get("rekommendation") in (None, "n/a") and a.get("eps_rev_90d_pct") is None)
 
 
 def compute_score_v2(a, cons, cluster_factor=1.0, nettoflode_pe=None,
@@ -1348,7 +1355,11 @@ def compute_score_v2(a, cons, cluster_factor=1.0, nettoflode_pe=None,
     mom += rs_bonus
     delpoang["Momentum"] = round(max(0.0, min(20.0, mom)), 1)
 
-    # Analytiker (tak 20): uppsidan halveras vid hög riktkursspridning (§8)
+    # Analytiker (tak 20): uppsidan halveras vid hög riktkursspridning (§8).
+    # Saknas ALL analytikerdata (Yahoo .info blockerad på Render, ingen tidigare
+    # körning att återanvända från — nya aktier) → NEUTRAL 10/20, samma princip
+    # som Värdering: 0 gick inte att skilja från "analytikerna ogillar aktien".
+    analytiker_neutral = _analytikerdata_saknas(a)
     ana = 0.0
     uppsida = a.get("uppsida_%")
     if uppsida is not None:
@@ -1362,7 +1373,7 @@ def compute_score_v2(a, cons, cluster_factor=1.0, nettoflode_pe=None,
     eps_rev = a.get("eps_rev_90d_pct")
     if eps_rev is not None:
         ana += 10 if eps_rev > 5 else (-10 if eps_rev < -5 else 0)
-    delpoang["Analytiker"] = round(max(0.0, min(20.0, ana)), 1)
+    delpoang["Analytiker"] = 10.0 if analytiker_neutral else round(max(0.0, min(20.0, ana)), 1)
 
     # Konsensus (tak 25). Med divergensgrinden: divergens 9 + färskhet 6 +
     # snittvikt 5 + nettoflöde 5 — den gamla formeln (antal ägare × 3) straffade
@@ -1389,7 +1400,7 @@ def compute_score_v2(a, cons, cluster_factor=1.0, nettoflode_pe=None,
     delpoang["Värdering"] = värdering_poäng
 
     total = round(sum(delpoang.values()), 1)
-    return total, delpoang, värdering_neutral
+    return total, delpoang, värdering_neutral, analytiker_neutral
 
 
 # ----------------------------------------------------------------------
@@ -1644,7 +1655,7 @@ def build_ranking(analyses, consensus, history_log=None, exit_info=None):
         nf = netto.get(ticker)
         rs_bonus = rs.get(ticker, {}).get("bonus", 0)
 
-        total, delpoang, värdering_neutral = compute_score_v2(
+        total, delpoang, värdering_neutral, analytiker_neutral = compute_score_v2(
             a, cons, cluster_factor=kf, nettoflode_pe=nf,
             rs_bonus=rs_bonus, sector_medians=sector_medians)
         total_v1, delpoang_v1 = compute_score(a, cons, cluster_factor=kf, nettoflode_pe=nf)
@@ -1657,6 +1668,7 @@ def build_ranking(analyses, consensus, history_log=None, exit_info=None):
             "delpoäng": delpoang,
             "delpoäng_v1": delpoang_v1,
             "vardering_neutral": värdering_neutral,
+            "analytiker_neutral": analytiker_neutral,
             "kluster": kluster.get(ticker),
             "nettoflode_30d_pe": nf,
             "relativ_styrka": rs.get(ticker),
@@ -2540,6 +2552,9 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
             if r.get("vardering_neutral"):
                 ws.cell(row=ws.max_row, column=10).comment = Comment(
                     "Data saknas → neutral (5/10)", "System")
+            if r.get("analytiker_neutral"):
+                ws.cell(row=ws.max_row, column=8).comment = Comment(
+                    "Analytikerdata saknas → neutral (10/20)", "System")
 
         if exit_lista:
             ws.append([])
