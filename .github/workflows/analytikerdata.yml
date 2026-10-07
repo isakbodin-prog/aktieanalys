@@ -2,7 +2,10 @@ name: Daglig analytikerdata
 
 on:
   schedule:
-    - cron: "15 5 * * 1-5"   # vardagar 05:15 UTC = 07:15 svensk sommartid (06:15 vintertid)
+    # Vardagar 00:00 UTC. GitHub kör schemalagda jobb för det här repot 4–6 h
+    # försenat (divergens-cron 06:00 UTC startade 10:00–12:13 UTC) — så tidigt
+    # att datan ändå finns i gisten innan sidan öppnas på morgonen.
+    - cron: "0 0 * * 1-5"
   workflow_dispatch: {}      # kan även köras manuellt från GitHub
 
 jobs:

@@ -166,8 +166,9 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
   bakgrund_cache.json och kör sedan hela analysen.
 - `python3 etoro_analys.py --analytikerdata` — hämtar analytikerfälten (det
   Yahoo .info/.eps_trend/.calendar ger) för alla aktier med ≥2 ägare i signal-
-  gruppen till analytikerdata.json i gisten. Körs VARDAGAR 05:15 UTC från
-  GitHub Actions (analytikerdata.yml) eftersom Yahoo blockerar .info på Render
+  gruppen till analytikerdata.json i gisten. Körs VARDAGAR 00:00 UTC från
+  GitHub Actions (analytikerdata.yml — OBS: GitHub startar schemalagda jobb i
+  det här repot 4–6 h försenat, därför så tidigt) eftersom Yahoo blockerar .info på Render
   men inte på GitHubs runners. run_analysis fyller saknade fält därifrån FÖRE
   förra körningens värden (analyses[tk].analytiker_kalla anger källan). Kör
   inte analysen. Kräver bara GIST_ID/GITHUB_TOKEN.
