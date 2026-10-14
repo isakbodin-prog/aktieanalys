@@ -51,8 +51,9 @@ KANDIDAT_MIN_AGARE = 2
 KANDIDAT_MAX_BAKGRUND_IN_PCT = 10.0
 KANDIDAT_MAX_BAKGRUND_KVAR_PCT = 15.0
 KANDIDAT_NARA_MAX_BAKGRUND_PCT = 20.0
-# Claude analyserar bara de högst rankade kandidaterna (kostnadstak).
-CLAUDE_MAX_KANDIDATER = 6
+# Claude analyserar alla kandidater utom exit-flaggade (sedan 2026-10-14 inget
+# antalstak — None). Sätt ett tal för att begränsa kostnaden igen.
+CLAUDE_MAX_KANDIDATER = None
 OUTPUT_FILE = "portfolj_analys.xlsx"
 
 API_BASE = "https://public-api.etoro.com/api/v1"
@@ -3239,11 +3240,11 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     prev_datum = prev.get("claude_datum")
     today = _idag().isoformat()
 
-    # Kostnadstak: bara de högst rankade kandidaterna får Claude-text — och
-    # inga exit-flaggade (de visas i ranking sedan 2026-10-06, men en köp-
+    # Alla kandidater får Claude-text (valfritt antalstak i CLAUDE_MAX_KANDIDATER)
+    # — utom exit-flaggade (de visas i ranking sedan 2026-10-06, men en köp-
     # analys av en aktie i dödskors är inte värd anropet).
     claude_urval = {r["ticker"] for r in
-                    [r for r in ranking if "exit_datum" not in r][:CLAUDE_MAX_KANDIDATER]}
+                    [r for r in ranking if "exit_datum" not in r][:CLAUDE_MAX_KANDIDATER or None]}
 
     def _bygg_jobb(tickers, force_alla):
         jobb = {}

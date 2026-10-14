@@ -73,8 +73,8 @@ Notera datum + ändring varje gång ett fält som UI:t läser ändras
     gamla konsensusgrinden som reserv och `consensus` betyder som förr).
   - `ranking[].delpoäng["Konsensus"]`: samma nyckel och tak (25), nytt
     innehåll (divergens 9 + färskhet 6 + snittvikt 5 + nettoflöde ±5).
-  - `claude`: bara de 6 högst rankade i `ranking` som inte är exit-flaggade
-    får text (exit-undantaget sedan 2026-10-06). Övriga kandidater
+  - `claude`: alla rader i `ranking` som inte är exit-flaggade får text
+    (sedan 2026-10-14; 2026-10-06..13 bara de 6 högst rankade). Exit-rader
     SAKNAR nyckel i `claude` — UI måste tåla det (gällde redan för nya aktier).
   - `exit_lista` blir betydligt längre än förr (ovanliga aktier är oftare i
     fallande trend) — 7 av 11 kandidater vid bytet.
