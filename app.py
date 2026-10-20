@@ -141,7 +141,13 @@ st.markdown(f"""
       height: auto !important; font-family: 'Space Grotesk', sans-serif !important;
       color: {MUTED} !important; text-decoration: underline;
       text-underline-offset: 2px; text-decoration-thickness: 1px; }}
-  .st-key-fglank button p {{ font-size: .78rem !important; }}
+  /* .stButton med i selektorn för att vinna på SPECIFICITET, inte på radordning:
+     den generella knapp-p-regeln längre ned sätter både grad och Newsreader på
+     varje .stButton-etikett och ligger senare i filen. Länken ska behålla sin
+     egen typografi även om reglerna flyttas om. */
+  [data-testid="stMainBlockContainer"] .st-key-fglank .stButton button p {{
+      font-family: 'Space Grotesk', sans-serif !important;
+      font-size: .78rem !important; }}
   .st-key-fglank button:hover {{ color: {TEXT} !important; }}
   .stock {{ border-top: 1px solid {HAIRLINE}; }}
   .stock:last-child {{ border-bottom: 1px solid {HAIRLINE}; }}
@@ -334,17 +340,28 @@ st.markdown(f"""
       letter-spacing: .16em; color: {MUTED}; margin: .2rem 0 2.6rem; }}
   hr.navhr {{ margin: .8rem 0 0 !important; }}
 
-  /* Diskreta, textlika knappar/popover/nedladdning i huvudytan */
-  [data-testid="stMainBlockContainer"] .stButton > button,
-  [data-testid="stMainBlockContainer"] [data-testid="stDownloadButton"] > button,
+  /* Diskreta, textlika knappar/popover/nedladdning i huvudytan.
+     OBS `.stButton button` utan >: en knapp med help= lindas av Streamlit i
+     stTooltipHoverTarget, så direktbarn-selektorn missar just den. */
+  [data-testid="stMainBlockContainer"] .stButton button,
+  [data-testid="stMainBlockContainer"] [data-testid="stDownloadButton"] button,
   [data-testid="stMainBlockContainer"] [data-testid="stPopover"] button {{
       background: transparent !important; border: none !important; box-shadow: none !important;
       color: {MUTED} !important; font-family: 'Newsreader', Georgia, serif !important;
       font-weight: 400 !important; font-size: .84rem !important; text-transform: none;
-      letter-spacing: .01em; white-space: nowrap; border-radius: 0 !important;
+      letter-spacing: .01em; border-radius: 0 !important;
       padding: .3rem .3rem !important; min-height: 0 !important; }}
-  [data-testid="stMainBlockContainer"] .stButton > button:hover,
-  [data-testid="stMainBlockContainer"] [data-testid="stDownloadButton"] > button:hover,
+  /* Graden MÅSTE sättas på <p>:et också — Streamlit lägger etiketten i en egen
+     <p> med 16 px Space Grotesk, så regeln ovan nådde aldrig själva texten.
+     (Samma fälla som toppnavet och sentiment-länken.) */
+  [data-testid="stMainBlockContainer"] .stButton button p,
+  [data-testid="stMainBlockContainer"] [data-testid="stDownloadButton"] button p,
+  [data-testid="stMainBlockContainer"] [data-testid="stPopover"] button p {{
+      font-family: 'Newsreader', Georgia, serif !important;
+      font-size: .84rem !important; font-weight: 400 !important;
+      letter-spacing: .01em; }}
+  [data-testid="stMainBlockContainer"] .stButton button:hover,
+  [data-testid="stMainBlockContainer"] [data-testid="stDownloadButton"] button:hover,
   [data-testid="stMainBlockContainer"] [data-testid="stPopover"] button:hover {{
       color: {OLIV} !important; }}
 
@@ -358,7 +375,12 @@ st.markdown(f"""
      i en egen <p> med egen font-size, så en regel på knappen når aldrig texten
      (den gamla .48rem gav 7,7 px på knappen men 16 px på texten — större än
      brödtexten, och därför radbröts menyn vid 1280 px). */
-  [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button p {{
+  /* .stButton med i selektorn av samma skäl som vid .st-key-fglank ovan: den
+     generella knapp-p-regeln sätter grad OCH Newsreader på varje .stButton-
+     etikett, och navet är också .stButton. Med .stButton här vinner navet på
+     specificitet i stället för att bero på var i filen reglerna står. */
+  [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] .stButton button p {{
+      font-family: 'Space Grotesk', sans-serif !important;
       font-size: .64rem !important; letter-spacing: .1em; line-height: 1.5;
       /* Understrykning som växer fram från vänster (hover + aktiv vy). Ritas som
          bakgrundsbild i stället för border, så den ligger tätt mot texten och
@@ -431,8 +453,10 @@ st.markdown(f"""
     [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button {{
         letter-spacing: .1em; padding: .5rem .1rem !important; }}
     /* Graden måste sättas på <p>:et även här — se basregeln ovan. Utan denna
-       ärvs desktopens .64rem och mobilmenyn blir oläsligt liten. */
-    [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] button p {{
+       ärvs desktopens .64rem och mobilmenyn blir oläsligt liten. .stButton
+       med i selektorn för att matcha desktopregelns specificitet; en media
+       query höjer den inte, så utan detta vinner .64rem även här. */
+    [data-testid="stMainBlockContainer"] div[class*="st-key-nav_"] .stButton button p {{
         font-size: .82rem !important; }}
     .hero-title {{ font-size: 1.5rem; margin-top: 1.5rem; }}
     /* Samma toppmarginal som hjälterubriken ovan — mobilen har tightare rytm */
@@ -1049,7 +1073,6 @@ def data_ar_fran_idag(d):
 
 
 with_claude = st.session_state.setdefault("with_claude", True)
-force_claude = st.session_state.setdefault("force_claude", False)
 run_now = st.session_state.pop("kor_nu", False)
 
 # Vid sidöppning: synka först mot gisten (fångar t.ex. --divergens-körningar
@@ -1080,10 +1103,21 @@ if st.session_state.pop("kor_divergens", False):
         except RuntimeError as e:
             st.toast(str(e), icon="⚠️")
 
+# Enda stället som sätter force_claude=True. "Uppdatera" kör alltid utan, så en
+# vanlig uppdatering aldrig kan råka dra nya Claude-anrop — det var risken med
+# den tidigare kryssrutan, som låg kvar ikryssad mellan körningar.
+if st.session_state.pop("kor_claude", False):
+    with st.spinner("Hämtar färsk data och skriver om Claude-analyserna — tar 1–2 minuter..."):
+        try:
+            ea.run_analysis(with_claude=True, force_claude=True)
+            st.toast("Claude-analyserna är omskrivna!", icon="✅")
+        except RuntimeError as e:
+            st.toast(str(e), icon="⚠️")
+
 if run_now:
     with st.spinner("Hämtar portföljdata från eToro och räknar indikatorer — tar 1–2 minuter..."):
         try:
-            ea.run_analysis(with_claude=with_claude, force_claude=force_claude)
+            ea.run_analysis(with_claude=with_claude)
         except RuntimeError as e:
             st.toast(str(e), icon="⚠️")
 
@@ -2054,19 +2088,28 @@ def _sett_flagga(namn):
     st.session_state[namn] = True
 
 
-fcol_l, fcol_r = st.columns([6, 4], vertical_alignment="center")
+# 2/8 i stället för 6/4: med fem kontroller i högerspalten blev 4/10 så trångt
+# att "Kör om Claude-analyser" radbröts på fyra rader (112 px hög knapp mot 35
+# för de andra). Etiketten behöver 183 px på en rad; 2/8 ger ~196 px vid 1440.
+fcol_l, fcol_r = st.columns([2, 8], vertical_alignment="center")
 with fcol_l:
     st.markdown('<div class="footctrl-label">Verktyg</div>', unsafe_allow_html=True)
 with fcol_r:
-    f1, f2, f3, f4 = st.columns(4)
+    # vertical_alignment: i smalare fönster ryms inte "Kör om Claude-analyser"
+    # på en rad, och utan detta hänger de övriga fyra kvar i överkant mot en
+    # dubbelt så hög granne. Centrerade ser raden avsiktlig ut i båda lägena.
+    f1, f2, f3, f4, f5 = st.columns(5, vertical_alignment="center")
     f1.button("Uppdatera", key="btn_upp", on_click=_sett_flagga, args=("kor_nu",),
               use_container_width=True)
-    with f2.popover("Claude", use_container_width=True):
+    f2.button("Kör om Claude-analyser", key="btn_claude_om",
+              on_click=_sett_flagga, args=("kor_claude",), use_container_width=True,
+              help="Hämtar färsk data och skriver om ALLA Claude-texter, även de som "
+                   "redan körts idag. Kostar ca 2 cent per aktie. Exit-flaggade aktier "
+                   "analyseras inte.")
+    with f3.popover("Claude", use_container_width=True):
         st.checkbox("Inkludera Claude-analys", key="with_claude",
                     help="Claude körs max en gång per dag (drar API-credits) — annars återanvänds dagens analys.")
-        st.checkbox("Tvinga om Claude-analysen", key="force_claude",
-                    help="Kör Claude igen även om den redan körts idag. Drar credits!")
-    with f3.popover("Bakgrund", use_container_width=True):
+    with f4.popover("Bakgrund", use_container_width=True):
         def _fildatum(fil):
             try:
                 with open(fil) as f:
@@ -2085,7 +2128,7 @@ with fcol_r:
                   help="Hämtar bakgrundsgruppens 50 portföljer och kör om analysen. Tar 3–5 minuter.")
     if os.path.exists(ea.OUTPUT_FILE):
         with open(ea.OUTPUT_FILE, "rb") as _xf:
-            f4.download_button(
+            f5.download_button(
                 "Excel", _xf.read(), file_name=ea.OUTPUT_FILE,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
