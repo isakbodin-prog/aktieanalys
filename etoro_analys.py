@@ -37,8 +37,23 @@ PROFILES = ["thomaspj", "michalhla", "JeppeKirkBonde", "triangulacapital", "Smud
 # Antal ägare räknas mot ceil(andel × gruppstorlek): 6 profiler → IN 4, KVAR 3.
 KONSENSUS_ANDEL_IN = 0.60
 KONSENSUS_ANDEL_KVAR = 0.50
-KONSENSUS_REGEL = "andel_hysteres_v1"   # versionsmarkör i historiksnapshoten —
+KONSENSUS_REGEL = "divergensgrind_v1"   # versionsmarkör i historiksnapshoten —
 # nivåövergångar loggas bara mellan körningar med samma regelversion
+
+# Divergensgrind (UTBYGGNAD_divergensgrind.md, 2026-10-05) — ersätter
+# konsensusgrinden ovan som urval till Bästa köp. Konsensusgrinden släppte bara
+# igenom aktier nästan alla äger (AMZN/MU/NVDA i fyra månader). KANDIDAT =
+# minst KANDIDAT_MIN_AGARE i signalgruppen OCH högst KANDIDAT_MAX_BAKGRUND_IN_PCT
+# av bakgrundsgruppen äger den. Hysteres: redan listad aktie ligger kvar upp
+# till KVAR-taket. "Nästan" = klarar ägarkravet, bakgrund upp till NARA-taket.
+# KONSENSUS_ANDEL_* används bara som reserv när bakgrundscachen saknas.
+KANDIDAT_MIN_AGARE = 2
+KANDIDAT_MAX_BAKGRUND_IN_PCT = 10.0
+KANDIDAT_MAX_BAKGRUND_KVAR_PCT = 15.0
+KANDIDAT_NARA_MAX_BAKGRUND_PCT = 20.0
+# Claude analyserar alla kandidater utom exit-flaggade (sedan 2026-10-14 inget
+# antalstak — None). Sätt ett tal för att begränsa kostnaden igen.
+CLAUDE_MAX_KANDIDATER = None
 OUTPUT_FILE = "portfolj_analys.xlsx"
 
 API_BASE = "https://public-api.etoro.com/api/v1"
@@ -92,11 +107,25 @@ def headers():
 
 
 def api_get(path, params=None, quiet=False, retries=3):
-    """GET-anrop mot eToro:s publika API med felhantering och 429-respekt."""
+    """GET-anrop mot eToro:s publika API med felhantering och 429-respekt.
+
+    Fångar även nätverksfel (timeout, avbruten anslutning) — utan detta
+    kraschade ett enda ReadTimeout mot en enskild bakgrundsprofil hela
+    skriptet okontrollerat (ingen RuntimeError, så main()s felhantering
+    missade den). Verifierat i GitHub Actions-loggen 2026-08-22:
+    requests.exceptions.ReadTimeout mot /portfolio/live för en
+    bakgrundsprofil — samma nätverksglapp som 429-hanteringen redan
+    skyddar mot, bara en annan feltyp."""
     import time
     url = f"{API_BASE}{path}"
-    for _ in range(retries):
-        r = requests.get(url, headers=headers(), params=params, timeout=30)
+    for försök in range(retries):
+        try:
+            r = requests.get(url, headers=headers(), params=params, timeout=30)
+        except requests.exceptions.RequestException as e:
+            if not quiet or försök == retries - 1:
+                print(f"  GET {path} misslyckades: {type(e).__name__}: {e}")
+            time.sleep(5)
+            continue
         if r.status_code == 429:
             wait = int(r.headers.get("Retry-After", 15))
             print(f"  Rate limit — väntar {wait}s...")
@@ -316,7 +345,10 @@ def load_previous_consensus():
     """
     try:
         with open(HISTORY_FILE) as f:
-            return set((json.load(f).get("senaste") or {}).get("consensus") or [])
+            senaste = json.load(f).get("senaste") or {}
+            if senaste.get("regel") != KONSENSUS_REGEL:
+                return set()   # annan grind förra gången — ingen hysteres över regelbyten
+            return set(senaste.get("consensus") or [])
     except (OSError, json.JSONDecodeError):
         return set()
 
@@ -342,7 +374,7 @@ def farskhetsvikt(dagar_sedan_senaste_kop):
     return 0.5       # passivt innehav
 
 
-def compute_consensus(portfolios, port_meta=None, previous_consensus=None):
+def compute_consensus(portfolios, port_meta=None, previous_consensus=None, min_agare=None):
     """Beräkna konsensus, nära konsensus och bubblarnivå ur portföljerna.
 
     Procentuella trösklar med HYSTERES: en aktie kommer IN på listan vid
@@ -397,6 +429,10 @@ def compute_consensus(portfolios, port_meta=None, previous_consensus=None):
                  "senaste_köp_dagar": min(dagar_lista) if dagar_lista else None,
                  "tröskel": troskel,
                  "hysteres": hysteres}
+        if min_agare is not None:   # divergensgrinden: bara ägarkravet, se compute_kandidater
+            if len(holders) >= min_agare:
+                consensus[ticker] = entry
+            continue
         if hysteres:
             klarar_konsensus = len(holders) >= troskel   # bara antal på KVAR-nivån
         else:
@@ -408,6 +444,43 @@ def compute_consensus(portfolios, port_meta=None, previous_consensus=None):
         elif len(holders) == kvar_krav - 1:
             bubblar_niva[ticker] = entry
     return consensus, near_consensus, bubblar_niva
+
+
+def compute_kandidater(portfolios, port_meta, background, previous=None):
+    """Divergensgrinden: (kandidater, nastan) ur signalgruppens innehav.
+
+    Bygger på compute_consensus entry-format (count, avg_weight, holders,
+    viktad_konsensus, …) så allt nedströms fungerar oförändrat, plus
+    bakgrund_antal/bakgrund_andel_pct/divergens_pp per entry. `tröskel` =
+    ägarkravet, `hysteres` = aktien låg kvar på KVAR-taket.
+    """
+    previous = previous or set()
+    alla = {}
+    for grupp in compute_consensus(portfolios, port_meta, None, min_agare=KANDIDAT_MIN_AGARE):
+        alla.update(grupp)
+    div = compute_divergence(alla, portfolios, background)
+    kandidater, nastan = {}, {}
+    for tk, entry in alla.items():
+        dv = div[tk]
+        hysteres = tk in previous
+        tak = KANDIDAT_MAX_BAKGRUND_KVAR_PCT if hysteres else KANDIDAT_MAX_BAKGRUND_IN_PCT
+        entry.update({"tröskel": KANDIDAT_MIN_AGARE, "hysteres": hysteres,
+                      "bakgrund_antal": dv["bakgrund_antal"],
+                      "bakgrund_andel_pct": dv["bakgrund_andel_pct"],
+                      "divergens_pp": dv["divergens_pp"]})
+        if dv["bakgrund_andel_pct"] <= tak:
+            kandidater[tk] = entry
+        elif dv["bakgrund_andel_pct"] <= KANDIDAT_NARA_MAX_BAKGRUND_PCT:
+            nastan[tk] = entry
+    return kandidater, nastan
+
+
+def _utan_signalprofiler(ports):
+    """Bakgrundsportföljer utan signalgruppens egna profiler (skiftlägesokänsligt
+    — eToro returnerade 'Michalhla' i screenern trots 'michalhla' i PROFILES,
+    så samma trader räknades på båda sidor)."""
+    signal = {p.lower() for p in PROFILES}
+    return {u: w for u, w in (ports or {}).items() if u.lower() not in signal}
 
 
 # ----------------------------------------------------------------------
@@ -452,7 +525,7 @@ def run_screener():
             print(f"  OBS: inga träffar för {period} — avbryter.")
             return None
         pools[period] = {i["userName"]: i for i in data["items"]
-                         if i["userName"] not in PROFILES}   # grupperna hålls åtskilda
+                         if i["userName"].lower() not in {p.lower() for p in PROFILES}}   # grupperna hålls åtskilda
 
     # Kräv närvaro i båda perioderna (uthållighet, inte one-hit-wonders)
     gemensamma = set.intersection(*(set(p) for p in pools.values()))
@@ -511,7 +584,7 @@ def load_background_portfolios(refresh=False):
             cache = {}
 
     if not refresh:
-        ports = cache.get("portfolios")
+        ports = _utan_signalprofiler(cache.get("portfolios"))
         if ports:
             print(f"\nBakgrundsgrupp: {len(ports)} portföljer från cache ({cache.get('datum', '?')}).")
         return ports
@@ -520,7 +593,7 @@ def load_background_portfolios(refresh=False):
         raise RuntimeError(f"{BG_MEMBERS_FILE} saknas — kör 'python3 etoro_analys.py --screener' först.")
     with open(BG_MEMBERS_FILE) as f:
         members = json.load(f)
-    usernames = [m["userName"] for m in members.get("profiler", [])]
+    usernames = list(_utan_signalprofiler({m["userName"]: 1 for m in members.get("profiler", [])}))
     if not usernames:
         raise RuntimeError(f"{BG_MEMBERS_FILE} innehåller inga profiler.")
 
@@ -535,13 +608,18 @@ def load_background_portfolios(refresh=False):
 
     if not ports:
         print("  OBS: inga portföljer kunde hämtas — behåller gamla cachen.")
-        return cache.get("portfolios")
+        return _utan_signalprofiler(cache.get("portfolios"))
 
     print(f"  {len(ports)} bakgrundsportföljer hämtade.")
     with open(BG_CACHE_FILE, "w") as f:
         json.dump({"datum": _idag().isoformat(), "medlemslista_datum": members.get("datum"),
                    "portfolios": ports}, f, ensure_ascii=False)
     return ports
+
+
+# Samma bolag noterat på två börser: bakgrundsägandet räknas ihop, annars ser
+# den ovanligare noteringen "svår att hitta" ut (ASML.NV 8 % trots ASML 22 %).
+_SAMMA_BOLAG = [{"ASML", "ASML.NV"}]
 
 
 def compute_divergence(consensus, portfolios, background):
@@ -558,6 +636,12 @@ def compute_divergence(consensus, portfolios, background):
         for tk, w in weights.items():
             bg_owners[tk] = bg_owners.get(tk, 0) + 1
             bg_weightsum[tk] = bg_weightsum.get(tk, 0) + w
+    for grupp in _SAMMA_BOLAG:
+        antal = sum(1 for weights in background.values() if grupp & set(weights))
+        for tk in grupp:
+            if antal:
+                bg_weightsum[tk] = bg_weightsum.get(tk, 0) / (bg_owners.get(tk) or 1) * antal
+                bg_owners[tk] = antal
 
     out = {}
     for tk, info in consensus.items():
@@ -741,6 +825,23 @@ def eps_revision_pct(t, ticker="?"):
     return round(max(-50.0, min(50.0, pct)), 1)
 
 
+# eToro-suffix som Yahoo skriver annorlunda (övriga, t.ex. .DE/.L/.CO/.HK/.PA,
+# är identiska). Utökas när en ny börs dyker upp bland kandidaterna.
+_YAHOO_SUFFIX = {".NV": ".AS", ".ZU": ".SW", ".LSB": ".LS"}
+_YAHOO_TICKER = {"BRK.B": "BRK-B"}   # hela tickern avviker (punkt = börssuffix hos Yahoo)
+
+
+def _yahoo_ticker(ticker):
+    if ticker in _YAHOO_TICKER:
+        return _YAHOO_TICKER[ticker]
+    for etoro, yahoo in _YAHOO_SUFFIX.items():
+        if ticker.endswith(etoro):
+            return ticker[:-len(etoro)] + yahoo
+    if ticker.endswith(".HK"):   # eToro "01211.HK" → Yahoo "1211.HK" (fyra siffror)
+        return ticker[:-3].lstrip("0").zfill(4) + ".HK"
+    return ticker
+
+
 def analyze_ticker(ticker):
     """Hämta teknisk data + analytikerdata. Yahoo Finance i första hand,
     Stooq som reserv för kursdata (Yahoo blockerar ofta molnservrars IP)."""
@@ -748,8 +849,7 @@ def analyze_ticker(ticker):
     import pandas as pd
 
     # eToro-tickers -> Yahoo-tickers (justera vid behov)
-    yahoo_map = {"RR.L": "RR.L", "IAG.L": "IAG.L", "KBC.BR": "KBC.BR", "FUR.NV": "FUR.AS", "TI5A.NV": "TI5A.AS"}
-    yticker = yahoo_map.get(ticker, ticker)
+    yticker = _yahoo_ticker(ticker)
 
     hist, info, source = None, {}, "Yahoo"
     try:
@@ -884,7 +984,9 @@ def analyze_ticker(ticker):
         return {
             "ticker": ticker,
             "datakälla": source,
-            "valuta": info.get("currency") or ("USD" if source == "Alpha Vantage" else None),
+            "valuta": (info.get("currency")
+                       or (getattr(t, "history_metadata", None) or {}).get("currency")   # .info blockerad (Render)
+                       or ("USD" if source == "Alpha Vantage" else None)),
             "ohlc": ohlc,
             "pris": round(price, 2),
             "pris_datum": hist.index[-1].strftime("%Y-%m-%d"),
@@ -927,6 +1029,146 @@ def analyze_ticker(ticker):
         }
     except Exception as e:
         return {"ticker": ticker, "error": str(e)}
+
+
+# ----------------------------------------------------------------------
+# Analytikerdata från GitHub Actions (--analytikerdata). Yahoo blockerar .info/
+# .eps_trend/.calendar på Render men inte på GitHubs runners, så en daglig
+# workflow hämtar fälten för alla tänkbara kandidater (≥2 ägare i signal-
+# gruppen) och lägger dem i gisten; run_analysis fyller luckor därifrån före
+# förra körningens värden. Kursdata hämtas fortfarande live på Render.
+# ----------------------------------------------------------------------
+ANALYTIKER_FALT = ["rekommendation", "riktkurs", "antal_analytiker", "riktkurs_hog",
+                   "riktkurs_lag", "riktkurs_spridningskvot", "eps_rev_90d_pct",
+                   "forward_pe", "peg_ratio", "nasta_rapport", "sector", "industry", "valuta"]
+
+
+def hamta_analytikerdata(tickers):
+    """{ticker: {ANALYTIKER_FALT..., "hämtad": datum}} för de tickers Yahoo svarade på."""
+    import time
+    import yfinance as yf
+    ut, idag = {}, _idag().isoformat()
+    for i, tk in enumerate(sorted(tickers)):
+        if i:
+            time.sleep(0.6)
+        try:
+            t = yf.Ticker(_yahoo_ticker(tk))
+            info = t.info or {}
+        except Exception as e:
+            _logga_yf_miss(tk, "info", e)
+            continue
+        if len(info) < 5:
+            _logga_yf_miss(tk, "info", detalj=f"misstänkt tunt svar ({len(info)} nycklar)")
+            continue
+        target = info.get("targetMeanPrice")
+        hog, lag = info.get("targetHighPrice"), info.get("targetLowPrice")
+        fpe = info.get("forwardPE") or info.get("trailingPE")
+        ut[tk] = {
+            "rekommendation": info.get("recommendationKey", "n/a"),
+            "riktkurs": target,
+            "antal_analytiker": info.get("numberOfAnalystOpinions"),
+            "riktkurs_hog": hog, "riktkurs_lag": lag,
+            "riktkurs_spridningskvot": round((hog - lag) / target, 2) if hog and lag and target else None,
+            "eps_rev_90d_pct": eps_revision_pct(t, tk),
+            "forward_pe": round(fpe, 1) if fpe else None,
+            "peg_ratio": round(info["pegRatio"], 2) if info.get("pegRatio") else None,
+            "nasta_rapport": next_earnings_date(t, tk),
+            "sector": info.get("sector"), "industry": info.get("industry"),
+            "valuta": info.get("currency"),
+            "hämtad": idag,
+        }
+        print(f"  {tk:<10} rek {ut[tk]['rekommendation']:<11} riktkurs {target} ({ut[tk]['antal_analytiker']} analytiker)")
+    return ut
+
+
+def run_analytikerdata():
+    """CLI --analytikerdata: hämta analytikerfält för alla aktier med ≥2 ägare i
+    signalgruppen (= alla som kan bli kandidater i morgon) och spara till gisten."""
+    gist_pull()
+    try:
+        with open(RESULTS_FILE) as f:
+            senaste = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        raise RuntimeError(f"{RESULTS_FILE} saknas — kör analysen minst en gång först.")
+    agare = {}
+    for p in (senaste.get("portfolios") or {}).values():
+        for tk in p:
+            agare[tk] = agare.get(tk, 0) + 1
+    tickers = {tk for tk, n in agare.items() if n >= KANDIDAT_MIN_AGARE}
+    tickers |= set(senaste.get("consensus") or {}) | set(senaste.get("nara_konsensus") or {})
+    print(f"\nHämtar analytikerdata för {len(tickers)} aktier (≥{KANDIDAT_MIN_AGARE} ägare)...")
+    data = hamta_analytikerdata(tickers)
+    gammal = {}
+    if os.path.exists(ANALYTIKER_FILE):
+        try:
+            with open(ANALYTIKER_FILE) as f:
+                gammal = json.load(f).get("data") or {}
+        except (OSError, json.JSONDecodeError):
+            gammal = {}
+    # Aktier Yahoo inte svarade på i dag behåller gårdagens rad (med sitt hämtad-datum)
+    sammanslagen = {**{tk: v for tk, v in gammal.items() if tk in tickers}, **data}
+    with open(ANALYTIKER_FILE, "w") as f:
+        json.dump({"datum": _idag().isoformat(), "tidpunkt": _nu().isoformat(timespec="minutes"),
+                   "data": sammanslagen}, f, ensure_ascii=False, indent=1)
+    print(f"  {len(data)} hämtade, {len(sammanslagen) - len(data)} behållna från tidigare → {ANALYTIKER_FILE}")
+    gist_push()
+
+
+def _fyll_analytikerdata(analyses, gistdata):
+    """Fyll saknade analytikerfält i analyses från gistens analytikerdata.
+    Sätter analyses[tk]["analytiker_kalla"]: "Yahoo" (live), "gist <datum>" eller None."""
+    gistdata = gistdata or {}
+    for tk, a in analyses.items():
+        if "error" in a:
+            continue
+        a["analytiker_kalla"] = None if _analytikerdata_saknas(a) else "Yahoo"
+        g = gistdata.get(tk)
+        if not g:
+            continue
+        fyllda = []
+        for falt in ANALYTIKER_FALT:
+            saknas = a.get(falt) is None or (falt == "rekommendation" and a.get(falt) == "n/a")
+            if saknas and g.get(falt) is not None:
+                a[falt] = g[falt]
+                fyllda.append(falt)
+        if "riktkurs" in fyllda and a.get("pris"):
+            a["uppsida_%"] = round((a["riktkurs"] / a["pris"] - 1) * 100, 1)
+        if fyllda and a["analytiker_kalla"] != "Yahoo":
+            a["analytiker_kalla"] = f"gist {g.get('hämtad', '?')}"
+        if fyllda:
+            print(f"    {tk}: {len(fyllda)} analytikerfält från gisten ({g.get('hämtad', '?')})")
+    return analyses
+
+
+# ----------------------------------------------------------------------
+# Etikvarning — liten flagga på aktier i branscher som skadar människor eller
+# klimat (fossila bränslen, vapen, tobak, spel). Ingen poängpåverkan, bara
+# information. Grunden är Yahoos industry-sträng (grov: "Aerospace & Defense"
+# träffar även civilflyg som RR.L) plus en manuell lista för bolag vars
+# industry döljer saken (VST: gas-/kolkraft under "Independent Power Producers").
+# ----------------------------------------------------------------------
+ETIK_KATEGORIER = {
+    "fossila bränslen": ("oil & gas", "oil and gas", "coal", "petroleum"),
+    "vapen": ("aerospace & defense", "aerospace and defense", "defense"),
+    "tobak": ("tobacco",),
+    "spel": ("gambling", "casinos"),
+}
+ETIK_TICKER = {   # manuella tillägg: ticker → kategorier
+    "VST": ["fossila bränslen"],
+}
+ETIK_UNDANTAG = {   # manuella undantag: ticker → kategorier som INTE ska flaggas
+    "RR.L": ["vapen"],   # Rolls-Royce: mest civila flygmotorer, branschkoden säger "Aerospace & Defense"
+}
+
+
+def etikvarning(ticker, industry):
+    """Lista med kategorier (tom = ingen varning)."""
+    kategorier = list(ETIK_TICKER.get(ticker, []))
+    ind = (industry or "").lower()
+    for kategori, nycklar in ETIK_KATEGORIER.items():
+        if kategori not in kategorier and any(n in ind for n in nycklar):
+            kategorier.append(kategori)
+    return [k for k in kategorier if k not in ETIK_UNDANTAG.get(ticker, [])]
 
 
 # ----------------------------------------------------------------------
@@ -1192,7 +1434,7 @@ def compute_score(a, cons, cluster_factor=1.0, nettoflode_pe=None):
     eps_rev = a.get("eps_rev_90d_pct")
     if eps_rev is not None:   # stigande estimat +, fallande − (fångar uppsidefällan)
         ana += 10 if eps_rev > 5 else (-10 if eps_rev < -5 else 0)
-    delpoang["Analytiker"] = round(max(0.0, min(25.0, ana)), 1)
+    delpoang["Analytiker"] = 12.5 if _analytikerdata_saknas(a) else round(max(0.0, min(25.0, ana)), 1)
 
     # Konsensus (max 20, före klusterjustering) — eniga, övertygade OCH
     # färska investerare, plus flödesriktning; delat med sqrt(klusterstorlek)
@@ -1210,6 +1452,11 @@ def compute_score(a, cons, cluster_factor=1.0, nettoflode_pe=None):
 
     total = round(sum(delpoang.values()), 1)
     return total, delpoang
+
+
+def _analytikerdata_saknas(a):
+    return (a.get("uppsida_%") is None and not a.get("antal_analytiker")
+            and a.get("rekommendation") in (None, "n/a") and a.get("eps_rev_90d_pct") is None)
 
 
 def compute_score_v2(a, cons, cluster_factor=1.0, nettoflode_pe=None,
@@ -1252,7 +1499,11 @@ def compute_score_v2(a, cons, cluster_factor=1.0, nettoflode_pe=None,
     mom += rs_bonus
     delpoang["Momentum"] = round(max(0.0, min(20.0, mom)), 1)
 
-    # Analytiker (tak 20): uppsidan halveras vid hög riktkursspridning (§8)
+    # Analytiker (tak 20): uppsidan halveras vid hög riktkursspridning (§8).
+    # Saknas ALL analytikerdata (Yahoo .info blockerad på Render, ingen tidigare
+    # körning att återanvända från — nya aktier) → NEUTRAL 10/20, samma princip
+    # som Värdering: 0 gick inte att skilja från "analytikerna ogillar aktien".
+    analytiker_neutral = _analytikerdata_saknas(a)
     ana = 0.0
     uppsida = a.get("uppsida_%")
     if uppsida is not None:
@@ -1266,16 +1517,23 @@ def compute_score_v2(a, cons, cluster_factor=1.0, nettoflode_pe=None,
     eps_rev = a.get("eps_rev_90d_pct")
     if eps_rev is not None:
         ana += 10 if eps_rev > 5 else (-10 if eps_rev < -5 else 0)
-    delpoang["Analytiker"] = round(max(0.0, min(20.0, ana)), 1)
+    delpoang["Analytiker"] = 10.0 if analytiker_neutral else round(max(0.0, min(20.0, ana)), 1)
 
-    # Konsensus (tak 25) — identisk innehåll som v1, nya taket råkar matcha
-    # exakt (12+8+5=25) så ingen omskalning behövs
+    # Konsensus (tak 25). Med divergensgrinden: divergens 9 + färskhet 6 +
+    # snittvikt 5 + nettoflöde 5 — den gamla formeln (antal ägare × 3) straffade
+    # just de 2-ägaraktier grinden släpper in. Nyckeln heter kvar "Konsensus"
+    # för frontend/facit. Utan divergens (bakgrund saknas) gäller v1-formeln.
     kon = 0.0
     vk = cons.get("viktad_konsensus")
     if vk is None:
         vk = float(cons["count"])
-    kon += min(12.0, vk * 3.0)
-    kon += min(8.0, cons["avg_weight"] * 1.6)
+    if cons.get("divergens_pp") is not None:
+        kon += min(9.0, max(0.0, cons["divergens_pp"]) * 0.3)   # +30 pp → 9
+        kon += min(6.0, vk * 2.0)                               # två färska köpare → 6
+        kon += min(5.0, cons["avg_weight"])                     # 5 % snittvikt → 5
+    else:
+        kon += min(12.0, vk * 3.0)
+        kon += min(8.0, cons["avg_weight"] * 1.6)
     if nettoflode_pe is not None:
         kon += 5 if nettoflode_pe > 1.0 else (-5 if nettoflode_pe < -1.0 else 0)
     kon *= cluster_factor
@@ -1286,7 +1544,7 @@ def compute_score_v2(a, cons, cluster_factor=1.0, nettoflode_pe=None,
     delpoang["Värdering"] = värdering_poäng
 
     total = round(sum(delpoang.values()), 1)
-    return total, delpoang, värdering_neutral
+    return total, delpoang, värdering_neutral, analytiker_neutral
 
 
 # ----------------------------------------------------------------------
@@ -1519,10 +1777,10 @@ def build_ranking(analyses, consensus, history_log=None, exit_info=None):
     Analytiker25/Konsensus20) sparas som poäng_v1/delpoäng_v1 för jämförelse
     under övergångsperioden, tills --utvardera hunnit kalibrera vikterna.
 
-    exit_info: {ticker: exit_datum} för aktier i EXIT (§B trendbrott) — de
-    beräknas som vanligt (poängen får inte förorenas) men returneras separat
-    i exit_lista i stället för ranking, så Bästa köp/pappersportföljerna
-    utesluter dem automatiskt. Konsensuslistan påverkas inte av detta.
+    exit_info: {ticker: exit_datum} för aktier i EXIT (§B trendbrott). Sedan
+    2026-10-06 FLAGGAS de i stället för att döljas: raden ligger kvar i
+    ranking (sist, med exit_datum/exit_villkor) OCH i exit_lista. Pappers-
+    portföljerna utesluter dem fortfarande själva (de mäter exitregeln).
     """
     exit_info = exit_info or {}
     giltiga = [tk for tk in consensus if "error" not in analyses.get(tk, {})]
@@ -1541,7 +1799,7 @@ def build_ranking(analyses, consensus, history_log=None, exit_info=None):
         nf = netto.get(ticker)
         rs_bonus = rs.get(ticker, {}).get("bonus", 0)
 
-        total, delpoang, värdering_neutral = compute_score_v2(
+        total, delpoang, värdering_neutral, analytiker_neutral = compute_score_v2(
             a, cons, cluster_factor=kf, nettoflode_pe=nf,
             rs_bonus=rs_bonus, sector_medians=sector_medians)
         total_v1, delpoang_v1 = compute_score(a, cons, cluster_factor=kf, nettoflode_pe=nf)
@@ -1554,6 +1812,7 @@ def build_ranking(analyses, consensus, history_log=None, exit_info=None):
             "delpoäng": delpoang,
             "delpoäng_v1": delpoang_v1,
             "vardering_neutral": värdering_neutral,
+            "analytiker_neutral": analytiker_neutral,
             "kluster": kluster.get(ticker),
             "nettoflode_30d_pe": nf,
             "relativ_styrka": rs.get(ticker),
@@ -1563,9 +1822,9 @@ def build_ranking(analyses, consensus, history_log=None, exit_info=None):
             rad["exit_datum"] = exit_info[ticker]
             rad["exit_villkor"] = EXIT_VILLKOR_TEXT
             exit_lista.append(rad)
-        else:
-            ranking.append(rad)
-    ranking.sort(key=lambda r: (not r["trend_ok"], -r["poäng"]))
+        ranking.append(rad)
+    # Stigande trend först, sedan övriga, exit-flaggade sist — inom varje grupp på poäng
+    ranking.sort(key=lambda r: ("exit_datum" in r, not r["trend_ok"], -r["poäng"]))
     exit_lista.sort(key=lambda r: r["exit_datum"])
     return ranking, exit_lista
 
@@ -1573,9 +1832,12 @@ def build_ranking(analyses, consensus, history_log=None, exit_info=None):
 # ----------------------------------------------------------------------
 # Steg 4 — Claude-triggerfilter: bara väsentliga förändringar omanalyseras
 # ----------------------------------------------------------------------
-CLAUDE_MODELL_NY = "claude-opus-4-8"        # grundanalys — aktien saknar text
-CLAUDE_MODELL_OMANALYS = "claude-sonnet-4-6"   # omanalys av befintlig aktie
-MODELL_KORTNAMN = {CLAUDE_MODELL_NY: "opus", CLAUDE_MODELL_OMANALYS: "sonnet"}
+# En modell för allt sedan 2026-10-05 (tidigare Opus 4.8 för grundanalys och
+# Sonnet 4.6 för omanalys). Skillnaden mellan de två jobbtyperna ligger kvar i
+# thinking/max_tokens, se claude_analysis.
+CLAUDE_MODELL_NY = CLAUDE_MODELL_OMANALYS = "claude-sonnet-5-5"
+MODELL_KORTNAMN = {"claude-sonnet-5-5": "sonnet", "claude-sonnet-4-6": "sonnet",
+                   "claude-opus-4-8": "opus"}   # gamla ID:n finns kvar i förbrukningsloggen
 MAX_ANALYS_ALDER_DAGAR = 7
 POANG_TRIGGER_DIFF = 10.0
 KONSENSUS_TRIGGER_DIFF = 1.0
@@ -1584,12 +1846,9 @@ KONSENSUS_TRIGGER_DIFF = 1.0
 # indikatorregim ändrats. Marginalen filtrerar bort stängningar som bara nuddar
 # nivån (ren brus) — se _pris_brot_nivaer / behover_ny_analys.
 NIVA_BROTT_MARGINAL = 0.005  # 0,5 %
-# Output-tak: Sonnet-omanalyser kör UTAN thinking (ren textbudget, ~120 ord
-# räcker med marginal). Opus-grundanalyser behåller adaptive thinking, som
-# äter av samma max_tokens-budget — mer marginal krävs där (se incidenten
-# 2026-07-16 där 2000 utan uppdelning gav tomma svar för två aktier).
-CLAUDE_MAX_TOKENS_OMANALYS = 600
-CLAUDE_MAX_TOKENS_NY = 2000
+# Output-tak för alla analyser (adaptive thinking äter av samma budget — se
+# incidenten 2026-07-16 där 2000 gav tomma svar för två aktier).
+CLAUDE_MAX_TOKENS = 4000   # thinking räknas mot taket även när texten inte returneras
 # Höjs varje gång textstrukturen/systemprompten ändras i grunden (senast:
 # 2026-07-18, domslut → teknisk lägesbeskrivning med trigger/ogiltigt-villkor)
 # så att ALLA befintliga texter omanalyseras en gång automatiskt — se
@@ -1815,8 +2074,8 @@ def claude_analysis(jobb, körningsläge="standard"):
 
     jobb: {ticker: {"data": analysdikt, "model": modell-id, "orsak": str,
     "snapshot": indikator_snapshot}} — modell och orsak väljs av anroparen
-    (§ Claude-triggerfilter): claude-opus-4-8 för "ny på listan"
-    (grundanalys), annars claude-sonnet-4-6 (omanalys av befintlig aktie).
+    (§ Claude-triggerfilter) — samma modell (CLAUDE_MODELL_*) för båda sedan
+    2026-10-05; job["ny"] styr thinking och max_tokens.
     körningsläge: "standard" | "divergens" | "force" — taggas på varje
     tokenförbrukningspost (se logga_forbrukning).
 
@@ -1918,11 +2177,10 @@ def claude_analysis(jobb, körningsläge="standard"):
         data = job["data"]
         modell = job.get("model") or CLAUDE_MODELL_NY
         orsak = job.get("orsak", "?")
-        # Sonnet-omanalyser: ingen thinking (ren textbudget). Opus-grundanalyser
-        # ("ny på listan"): behåller adaptive thinking, med mer max_tokens-marginal.
-        är_ny = modell == CLAUDE_MODELL_NY
-        thinking_param = {"type": "adaptive"} if är_ny else {"type": "disabled"}
-        max_tok = CLAUDE_MAX_TOKENS_NY if är_ny else CLAUDE_MAX_TOKENS_OMANALYS
+        # Adaptive thinking för alla analyser (sedan 2026-10-05) — omanalyser
+        # utan thinking gav självmotsägande nivåer. Thinking räknas mot max_tokens.
+        thinking_param = {"type": "adaptive"}
+        max_tok = CLAUDE_MAX_TOKENS
         print(f"  Claude analyserar {ticker} ({modell}, orsak: {orsak})...")
         try:
             resp = client.messages.create(
@@ -1936,6 +2194,9 @@ def claude_analysis(jobb, körningsläge="standard"):
                 }],
             )
             text = next((b.text for b in resp.content if b.type == "text"), "").strip()
+            if not text:   # refusal eller max_tokens uppätet av thinking — spara ingen tom analys
+                print(f"    Claude gav ingen text för {ticker} (stop_reason: {resp.stop_reason}) — hoppar över.")
+                continue
             rating = "?"
             sammanfattning = None
             # Konsumera ledande header-rader (REKOMMENDATION / SAMMANFATTNING) i
@@ -2201,9 +2462,10 @@ PAPPER_FILE = "pappersportfolj.json"
 # konsensusaktier (nuvarande UI-beteende). Konstant för reproducerbara
 # episoder (§3b Del A) — höj bara medvetet.
 BASTA_KOP_MIN_POANG = 0
+ANALYTIKER_FILE = "analytikerdata.json"   # hämtas av GitHub Actions (--analytikerdata), läses av Render
 GIST_FILES = ("portfolj_historik.json", "senaste_analys.json",
               "bakgrund_topp50.json", "bakgrund_cache.json", FACIT_FILE, PAPPER_FILE,
-              FORBRUKNING_FILE)
+              FORBRUKNING_FILE, ANALYTIKER_FILE)
 
 
 def _gist_headers():
@@ -2321,22 +2583,24 @@ def update_history(portfolios, consensus_tickers, near_tickers=None, exit_status
         new_near = set(near_tickers)
 
         n = len(portfolios)
-        in_krav, kvar_krav = konsensus_trosklar(n)
-        in_pct = round(KONSENSUS_ANDEL_IN * 100)
-        kvar_pct = round(KONSENSUS_ANDEL_KVAR * 100)
+        regelbyte = (" — ny urvalsregel (divergensgrind)"
+                     if prev.get("regel") != KONSENSUS_REGEL else "")
 
         def agare(tk):
             return sum(1 for p in portfolios.values() if tk in p)
 
         for tk in sorted(new_cons - old_cons):
-            detalj = f"klarar {in_pct} %-innivån ({agare(tk)} av {n} portföljer)"
-            if tk in old_near:
-                detalj += " — upp från nära konsensus"
+            detalj = (f"ny kandidat: {agare(tk)} av {n} äger den, "
+                      f"få i bakgrundsgruppen{regelbyte}")
+            if tk in old_near and not regelbyte:
+                detalj += " — upp från nästan-listan"
             log("IN I KONSENSUS", "", tk, detalj)
         for tk in sorted(old_cons - new_cons):
-            detalj = f"under {kvar_pct} %-kvarnivån ({agare(tk)} av {n} portföljer)"
+            detalj = (f"utgår som kandidat ({agare(tk)} av {n} äger den)"
+                      + (regelbyte or (" — för vanlig i bakgrundsgruppen" if agare(tk) >= KANDIDAT_MIN_AGARE
+                                       else " — för få ägare")))
             if tk in new_near:
-                detalj += " — ner till nära konsensus"
+                detalj += ", kvar på nästan-listan"
             log("UT UR KONSENSUS", "", tk, detalj)
 
         # Nära konsensus-övergångar loggas bara om förra ögonblicksbilden
@@ -2346,10 +2610,10 @@ def update_history(portfolios, consensus_tickers, near_tickers=None, exit_status
         if prev.get("regel") == KONSENSUS_REGEL:
             for tk in sorted(new_near - old_near - old_cons):
                 log("IN I NÄRA KONSENSUS", "", tk,
-                    f"klarar kvarnivåns antal ({agare(tk)} av {n} portföljer)")
+                    f"nästan kandidat ({agare(tk)} av {n} äger den, bakgrund strax över taket)")
             for tk in sorted(old_near - new_near - new_cons):
                 log("UT UR NÄRA KONSENSUS", "", tk,
-                    f"under kvarnivån ({agare(tk)} av {n} portföljer)")
+                    f"lämnar nästan-listan ({agare(tk)} av {n} äger den)")
 
         if entries:
             print(f"  {len(entries)} ändringar sedan {prev.get('datum', 'förra körningen')}.")
@@ -2417,7 +2681,7 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
         ws.append(["Rang", "Instrument", "Poäng (0–100)", "Poäng (v1)", "Stigande trend",
                    "Trend (25)", "Momentum (20)", "Analytiker (20)", "Konsensus (25)",
                    "Värdering (10)", "Relativ styrka (pe)", "Föreslagen vikt (%)",
-                   "Claudes rekommendation"])
+                   "Claudes rekommendation", "Etikvarning"])
         for c in ws[ws.max_row]:
             c.font, c.fill = hfont, hfill
         for i, r in enumerate(ranking or [], start=1):
@@ -2428,16 +2692,24 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
                        "JA" if r["trend_ok"] else "NEJ",
                        d.get("Trend"), d.get("Momentum"), d.get("Analytiker"), d.get("Konsensus"),
                        d.get("Värdering"), rs.get("rs_pe"), r.get("foreslagen_vikt_%"),
-                       c_rek.get("rekommendation_visning") or c_rek.get("rekommendation", "")])
+                       c_rek.get("rekommendation_visning") or c_rek.get("rekommendation", ""),
+                       ", ".join(analyses.get(r["ticker"], {}).get("etikvarning") or [])])
             ws.cell(row=ws.max_row, column=5).fill = green if r["trend_ok"] else red
+            if r.get("exit_datum"):
+                ws.cell(row=ws.max_row, column=2).fill = exit_fill
+                ws.cell(row=ws.max_row, column=2).comment = Comment(
+                    f"EXIT sedan {r['exit_datum']}: {r['exit_villkor']}", "System")
             if r.get("vardering_neutral"):
                 ws.cell(row=ws.max_row, column=10).comment = Comment(
                     "Data saknas → neutral (5/10)", "System")
+            if r.get("analytiker_neutral"):
+                ws.cell(row=ws.max_row, column=8).comment = Comment(
+                    "Analytikerdata saknas → neutral (10/20)", "System")
 
         if exit_lista:
             ws.append([])
-            ws.append([f"EXIT (TRENDBROTT) — {len(exit_lista)} st, uteslutna ur Bästa köp "
-                       "(kvar i konsensus, se Konsensus & Analys)"])
+            ws.append([f"EXIT (TRENDBROTT) — {len(exit_lista)} st, flaggade (gulmarkerade ovan), "
+                       "ingår inte i pappersportföljerna"])
             ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
             ws.append(["Instrument", "Exit-datum", "Villkor", "Poäng vid exit"])
             for c in ws[ws.max_row]:
@@ -2540,9 +2812,9 @@ def write_excel(portfolios, consensus, analyses, claude_texts, history_log,
     # Nära konsensus — en portfölj från att kvala in
     if near_consensus:
         ws.append([])
-        _in_krav, _kvar_krav = konsensus_trosklar(len(portfolios))
-        ws.append([f"NÄRA KONSENSUS — {_kvar_krav} av {len(portfolios)} portföljer "
-                   f"(klarar kvarnivån men inte innivån {_in_krav})"])
+        ws.append([f"NÄSTAN KANDIDAT — minst {KANDIDAT_MIN_AGARE} av {len(portfolios)} äger den, "
+                   f"men {KANDIDAT_MAX_BAKGRUND_IN_PCT:g}–{KANDIDAT_NARA_MAX_BAKGRUND_PCT:g} % "
+                   f"av bakgrundsgruppen också"])
         ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
         ws.append(["Instrument", "Ny", "Antal portföljer", "Total vikt (%)", "Snittvikt (%)",
                    "Ägs av", "Ägd längst (dagar)", "Investerarnas snittvinst (%)"])
@@ -2670,9 +2942,14 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     till RESULTS_FILE + portfolj_analys.xlsx. Kastar RuntimeError vid fel
     (så att webbappen kan visa felet i stället för att dö).
 
-    Claude-analysen körs max en gång per dag (kostar API-credits) — har den
-    redan körts idag återanvänds texterna. Nya konsensusaktier analyseras
-    dock alltid. force_claude=True kringgår dagsspärren.
+    Claude-analysen körs i normalfallet max en gång per dag PER AKTIE (kostar
+    API-credits) — har den redan körts idag återanvänds texten. Nya
+    konsensusaktier analyseras alltid. Dessutom omanalyseras en redan
+    idag-analyserad aktie ÄNDÅ, samma dag, om en väsentlig förändring
+    inträffar sedan morgonens text (nivåbrott, RSI-korsning, etc. — se
+    behover_ny_analys) — annars kunde en köptrigger stå kvar självmotsägande
+    mot ett pris som redan passerat den, resten av dagen (fixat 2026-08-04).
+    force_claude=True kringgår dagsspärren helt.
 
     refresh_background=True (--divergens) hämtar om bakgrundsgruppens
     portföljer; annars används befintlig cache utan extra API-anrop.
@@ -2736,23 +3013,28 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     if not portfolios:
         raise RuntimeError("Inga portföljer kunde hämtas via eToro-API:et.")
 
-    # Konsensus (procentuella trösklar med hysteres) + nära konsensus + bubblarnivå
+    # Urval till Bästa köp: divergensgrinden (UTBYGGNAD_divergensgrind.md).
+    # Variabeln/nyckeln heter kvar `consensus` — samma entry-format, så
+    # frontend och allt nedströms fungerar oförändrat. Saknas bakgrundscachen
+    # går grinden inte att räkna → reserv: gamla konsensusgrinden.
     previous_consensus = load_previous_consensus()
-    consensus, near_consensus, bubblar_niva = compute_consensus(
-        portfolios, port_meta, previous_consensus)
-
-    in_krav, kvar_krav = konsensus_trosklar(len(portfolios))
-    print(f"\nKonsensus-aktier (in: {in_krav} av {len(portfolios)}, "
-          f"kvar: {kvar_krav} av {len(portfolios)}): {sorted(consensus)}")
-    print(f"Nära konsensus ({kvar_krav} ägare, under innivån): {len(near_consensus)} st")
-    print(f"Bubblarnivå ({kvar_krav - 1} ägare): {len(bubblar_niva)} st")
-
-    # Bakgrundsgrupp + divergens (vad äger signalgruppen som flocken INTE äger?)
     background = load_background_portfolios(refresh=refresh_background)
+    bubblar_niva = {}   # nivån finns inte i divergensgrinden (nyckeln behålls tom)
+    if background:
+        consensus, near_consensus = compute_kandidater(
+            portfolios, port_meta, background, previous_consensus)
+        in_krav = kvar_krav = KANDIDAT_MIN_AGARE
+        print(f"\nKandidater (minst {KANDIDAT_MIN_AGARE} av {len(portfolios)} äger, högst "
+              f"{KANDIDAT_MAX_BAKGRUND_IN_PCT:g} % av bakgrunden): {sorted(consensus)}")
+        print(f"Nästan kandidat (bakgrund upp till {KANDIDAT_NARA_MAX_BAKGRUND_PCT:g} %): "
+              f"{sorted(near_consensus)}")
+    else:
+        print("\nOBS: bakgrundsgruppen saknas — divergensgrinden kan inte räknas, "
+              "använder gamla konsensusgrinden. Kör --screener och --divergens.")
+        consensus, near_consensus, _ = compute_consensus(portfolios, port_meta, previous_consensus)
+        in_krav, kvar_krav = konsensus_trosklar(len(portfolios))
     divergence = compute_divergence(consensus, portfolios, background)
-    # Bubblare: bubblarnivå-aktier med hög divergens — nära att kvala in,
-    # och flocken äger dem inte
-    divergence_near = compute_divergence(bubblar_niva, portfolios, background)
+    divergence_near = compute_divergence(near_consensus, portfolios, background)
     if divergence:
         rankad = sorted(divergence.items(), key=lambda x: -x[1]["divergens_pp"])
         print("Divergens (signalgrupp − bakgrundsgrupp):")
@@ -2840,6 +3122,17 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
             analyses[ticker] = cached
             print(f"    {ticker}: datakällorna svarade inte — återanvänder analysen från {cached['cache_datum']}"
                   + (f" [{cached['notis']}]" if alder is not None and alder > ANALYS_CACHE_ALDER_VARNING_HANDELSDAGAR else ""))
+    # Analytikerdata från GitHub Actions-gisten (fräschare än förra körningen,
+    # och täcker nya aktier som saknar tidigare körning) — se hamta_analytikerdata.
+    gist_analytiker = {}
+    if os.path.exists(ANALYTIKER_FILE):
+        try:
+            with open(ANALYTIKER_FILE) as f:
+                gist_analytiker = json.load(f).get("data") or {}
+        except (OSError, json.JSONDecodeError):
+            gist_analytiker = {}
+    _fyll_analytikerdata(analyses, gist_analytiker)
+
     for ticker, a in analyses.items():
         if "error" in a or a.get("riktkurs"):
             continue
@@ -2850,6 +3143,7 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
             a["antal_analytiker"] = pa.get("antal_analytiker")
             if a.get("pris"):
                 a["uppsida_%"] = round((pa["riktkurs"] / a["pris"] - 1) * 100, 1)
+            a["analytiker_kalla"] = f"förra körningen {prev.get('tidpunkt', '')[:10]}"
             print(f"    {ticker}: analytikerdata återanvänd från {prev.get('tidpunkt', 'förra körningen')[:10]}")
 
     # Yahoo kan blockera .info/.eps_trend/.calendar separat från historik/pris
@@ -2876,6 +3170,7 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     # instrumentlista som ticker-uppslaget (inga extra API-anrop); None om okänt.
     for ticker, a in analyses.items():
         a["bolagsnamn"] = _name_cache.get(ticker)
+        a["etikvarning"] = etikvarning(ticker, a.get("industry"))
 
     # §B Exitregel (trendbrott): pris < MA200 OCH MA50 < MA200 — beräknas här
     # (kräver bara analyses) men appliceras i update_history/build_ranking nedan
@@ -2945,11 +3240,17 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     prev_datum = prev.get("claude_datum")
     today = _idag().isoformat()
 
+    # Alla kandidater får Claude-text (valfritt antalstak i CLAUDE_MAX_KANDIDATER)
+    # — utom exit-flaggade (de visas i ranking sedan 2026-10-06, men en köp-
+    # analys av en aktie i dödskors är inte värd anropet).
+    claude_urval = {r["ticker"] for r in
+                    [r for r in ranking if "exit_datum" not in r][:CLAUDE_MAX_KANDIDATER or None]}
+
     def _bygg_jobb(tickers, force_alla):
         jobb = {}
         for tk in tickers:
             a = analyses.get(tk, {})
-            if "error" in a:
+            if "error" in a or tk not in claude_urval:
                 continue
             cons = consensus.get(tk, {})
             snapshot = _bygg_indikator_snapshot(
@@ -2968,7 +3269,7 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
                     cons.get("viktad_konsensus"), dv.get("divergens_pp"),
                     tk in exit_info)
                 jobb[tk] = {"data": claude_input, "orsak": orsak, "snapshot": snapshot,
-                           "model": CLAUDE_MODELL_NY if ny else CLAUDE_MODELL_OMANALYS}
+                           "model": CLAUDE_MODELL_NY if ny else CLAUDE_MODELL_OMANALYS, "ny": ny}
         return jobb
 
     claude_texts = {}
@@ -2984,9 +3285,22 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
         elif prev_datum == today and not force_claude:
             claude_texts = {t: c for t, c in prev_claude.items() if t in consensus}
             claude_datum = prev_datum
-            jobb = _bygg_jobb([t for t in analyses if t not in claude_texts], force_alla=False)
+            # Triggerfiltret gäller nu även INOM dagen, inte bara på dagens
+            # första körning — annars kan t.ex. ett nivåbrott (priset klev
+            # över en köptrigger) inträffa efter morgonens körning och texten
+            # står inaktuell (självmotsägande mot det visade priset) resten
+            # av dagen. _bygg_jobb jämför ändå mot morgonens indikator_
+            # snapshot, så bara aktier med en genuin väsentlig förändring
+            # sedan dess omanalyseras — inte alla, varje gång.
+            jobb = _bygg_jobb(list(analyses.keys()), force_alla=False)
             if jobb:
-                print(f"\nClaude-analys körd idag — analyserar {len(jobb)} nya aktier...")
+                nya = [t for t in jobb if t not in claude_texts]
+                omanalyser = [t for t in jobb if t in claude_texts]
+                verb = f"Claude-analys körd idag — {len(nya)} nya aktier"
+                if omanalyser:
+                    detalj = ", ".join(f"{t} ({jobb[t]['orsak']})" for t in omanalyser)
+                    verb += f", {len(omanalyser)} omanalyseras (väsentlig förändring: {detalj})"
+                print(f"\n{verb}...")
                 nya_texter, forbrukning_denna_körning = claude_analysis(jobb, körningsläge)
                 claude_texts.update(nya_texter)
             else:
@@ -3013,6 +3327,10 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
     for c in claude_texts.values():
         gen = c.get("genererad")
         c["analys_alder_dagar"] = (today_d - date.fromisoformat(gen)).days if gen else None
+    # Kandidater utanför Claude-urvalet omanalyseras inte — en text som hunnit
+    # bli för gammal tas bort hellre än att stå kvar med inaktuella nivåer.
+    claude_texts = {t: c for t, c in claude_texts.items()
+                    if t in claude_urval or (c["analys_alder_dagar"] or 0) <= MAX_ANALYS_ALDER_DAGAR}
 
     # Tokenförbrukning: logga dagens anrop + sammanfatta denna körning + veckan
     if with_claude:
@@ -3039,8 +3357,14 @@ def run_analysis(with_claude=True, force_claude=False, refresh_background=False)
         "bubblar_niva": bubblar_niva,
         "konsensus_trosklar": {"in": in_krav, "kvar": kvar_krav,
                                "n": len(portfolios),
-                               "in_pct": round(KONSENSUS_ANDEL_IN * 100),
-                               "kvar_pct": round(KONSENSUS_ANDEL_KVAR * 100)},
+                               "in_pct": round(in_krav / len(portfolios) * 100),
+                               "kvar_pct": round(kvar_krav / len(portfolios) * 100)},
+        "kandidat_trosklar": ({"regel": KONSENSUS_REGEL, "min_agare": KANDIDAT_MIN_AGARE,
+                               "n": len(portfolios),
+                               "max_bakgrund_in_pct": KANDIDAT_MAX_BAKGRUND_IN_PCT,
+                               "max_bakgrund_kvar_pct": KANDIDAT_MAX_BAKGRUND_KVAR_PCT,
+                               "nara_max_bakgrund_pct": KANDIDAT_NARA_MAX_BAKGRUND_PCT}
+                              if background else None),
         "analyses": analyses,
         "claude": claude_texts,
         "claude_datum": claude_datum,
@@ -3098,7 +3422,9 @@ def logga_facit(datum, ranking, divergence, analyses, consensus, claude_texts=No
         dv = (divergence or {}).get(tk, {})
         facit.append({
             "datum": datum,
+            "regel": KONSENSUS_REGEL,
             "ticker": tk,
+            "exit": "exit_datum" in r,
             "poäng": r["poäng"],
             "komponenter": r["delpoäng"],
             "pris": a.get("pris"),
@@ -3129,8 +3455,9 @@ def _normalisera(raw):
 def pappersportfolj_vikter(ranking, claude_texts=None, regim=None, tidigare_ombalanseringar=None):
     """Målvikter för de tre aktiva pappersportföljerna (P3 = SPY, inga vikter).
 
-    Universum = Bästa köp = konsensusaktier med poäng ≥ BASTA_KOP_MIN_POANG
-    (exit-aktier ingår aldrig — build_ranking har redan sorterat ut dem).
+    Universum = Bästa köp = kandidater med poäng ≥ BASTA_KOP_MIN_POANG, utom
+    exit-flaggade (ranking visar dem sedan 2026-10-06, men pappersportföljerna
+    mäter exitregeln och utesluter dem fortfarande).
     Vikter är andelar (summa ≤ 1); resten hålls som 0 %-avkastande kassa.
 
     - likaviktad (P1): 1/N över universumet — mäter urvalets värde.
@@ -3147,7 +3474,7 @@ def pappersportfolj_vikter(ranking, claude_texts=None, regim=None, tidigare_omba
     """
     claude_texts = claude_texts or {}
     universum = [r["ticker"] for r in ranking
-                 if r.get("poäng", 0) >= BASTA_KOP_MIN_POANG]
+                 if r.get("poäng", 0) >= BASTA_KOP_MIN_POANG and "exit_datum" not in r]
 
     nya_i_kassa = []
     if (regim or {}).get("regim") == "RÖD" and tidigare_ombalanseringar:
@@ -3188,7 +3515,7 @@ def logga_pappersportfolj(datum, ranking, claude_texts=None, regim=None):
             hist = []
     hist = [d for d in hist if d.get("datum") != datum]   # ersätt dagens post (idempotent)
     vikter = pappersportfolj_vikter(ranking, claude_texts, regim, hist)
-    post = {"datum": datum, "portfoljer": {k: v for k, v in vikter.items() if k != "nya_i_kassa"}}
+    post = {"datum": datum, "regel": KONSENSUS_REGEL, "portfoljer": {k: v for k, v in vikter.items() if k != "nya_i_kassa"}}
     if vikter["nya_i_kassa"]:
         post["nya_i_kassa"] = vikter["nya_i_kassa"]
     hist.append(post)
@@ -3725,6 +4052,10 @@ def main():
                              "körts någon gång) och kör sedan hela analysen")
     parser.add_argument("--force-claude", action="store_true",
                         help="kör Claude-analysen även om den redan körts idag (drar credits)")
+    parser.add_argument("--analytikerdata", action="store_true",
+                        help=f"hämta analytikerfält (riktkurs, rek, P/E, …) för alla tänkbara "
+                             f"kandidater till {ANALYTIKER_FILE} i gisten — körs dagligen från "
+                             "GitHub Actions eftersom Yahoo blockerar .info på Render. Kör inte analysen")
     parser.add_argument("--utvardera", action="store_true",
                         help="utvärdera poängmodellen mot faktisk forward-avkastning "
                              f"({FACIT_FILE}) — kör inte analysen")
@@ -3734,6 +4065,9 @@ def main():
     try:
         if args.utvardera:
             run_utvardering()
+            return
+        if args.analytikerdata:
+            run_analytikerdata()
             return
         if args.screener:
             if not API_KEY or not USER_KEY:

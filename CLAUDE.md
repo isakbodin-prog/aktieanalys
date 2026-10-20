@@ -15,6 +15,55 @@ Automatiskt hämta och jämföra 5 eToro-investerares portföljer, identifiera
 konsensusinnehav (aktier i ≥3 av 5 portföljer), och berika med teknisk
 analys + analytikerdata till en rankad Excel-rapport.
 
+## URVAL TILL BÄSTA KÖP: DIVERGENSGRIND (sedan 2026-10-05)
+Konsensusgrinden (in 4 av 6) gav bara AMZN/MU/NVDA i fyra månader och är
+ERSATT — allt nedan i dokumentet som beskriver "konsensus ≥3 av 5", "in 4/6,
+kvar 3/6", "nära konsensus" och "bubblarnivå" är historik. Gällande regel
+(compute_kandidater, spec i UTBYGGNAD_divergensgrind.md):
+- KANDIDAT = minst KANDIDAT_MIN_AGARE (2) i signalgruppen OCH högst
+  KANDIDAT_MAX_BAKGRUND_IN_PCT (10 %) av bakgrundsgruppen äger aktien.
+  Hysteres: redan listad aktie ligger kvar upp till 15 %. "Nästan" = 10–20 %.
+- Variabeln/JSON-nyckeln heter kvar `consensus` (samma entry-format + tre
+  nya fält) så frontend och allt nedströms fungerar. Se SCHEMA.md 2026-10-05.
+- Saknas bakgrundscachen går grinden inte att räkna → reserv: gamla
+  compute_consensus. Bakgrunden är alltså nu ett HÅRT beroende för urvalet.
+- Poängens Konsensus-komponent (v2) = divergens 9 + färskhet 6 + snittvikt 5
+  + nettoflöde ±5. v1-poängen är orörd.
+- Claude analyserar ALLA kandidater som inte är exit-flaggade (sedan 2026-10-14;
+  CLAUDE_MAX_KANDIDATER = None — sätt ett tal för att återinföra ett tak).
+- _yahoo_ticker() mappar eToro-suffix till Yahoo (.NV→.AS, .ZU→.SW, .LSB→.LS,
+  femsiffriga .HK). _SAMMA_BOLAG slår ihop bakgrundsägandet för dubbel-
+  noterade bolag (ASML/ASML.NV) — utöka när en ny dubblett dyker upp.
+- Bakgrundsgruppen filtreras skiftlägesokänsligt mot PROFILES ('Michalhla'
+  låg i topp 50 trots att 'michalhla' är signalprofil) → 49 portföljer tills
+  --screener körs om.
+- INTE gjort ur specen: skuggportfölj för gamla grinden i --utvardera, och
+  uppdelning av --utvardera per `regel` (fältet loggas men används inte än).
+
+## CLAUDE-MODELL (sedan 2026-10-05)
+Alla analyser körs på `claude-sonnet-5-5` (CLAUDE_MODELL_NY = CLAUDE_MODELL_
+OMANALYS) — texten längre ner om Opus 4.8 för "ny på listan" och Sonnet 4.6
+för omanalys är historik. Sonnet 5.5 avvisar `thinking: disabled` (400):
+ALLA analyser skickar `{"type": "adaptive"}` med max_tokens 4000 (thinking
+räknas mot taket) — omanalyser utan thinking gav självmotsägande nivåer. Tomt
+svar (refusal/max_tokens) sparas inte som analys. Server-side refusal-fallback
+är INTE påslagen.
+
+## EXITREGELN FLAGGAR, DÖLJER INTE (sedan 2026-10-06)
+Allt nedan som säger att exit-aktier "flyttas från ranking till exit_lista"
+eller "utesluts ur Bästa köp" är historik för VISNINGEN: build_ranking lägger
+numera exit-raden i BÅDE ranking (sist, med exit_datum/exit_villkor) och
+exit_lista. Pappersportföljerna och facit-/episodmätningen mäter däremot
+fortfarande exitregeln som strategi — pappersportfolj_vikter() filtrerar
+bort exit-rader själv, facit-raderna bär fältet `exit`.
+
+## ETIKVARNING (sedan 2026-10-06)
+analyses[tk].etikvarning = kategorier ur ETIK_KATEGORIER (industry-matchning)
++ ETIK_TICKER (manuella tillägg) − ETIK_UNDANTAG (manuella undantag, t.ex.
+RR.L ej vapen). Ren information, ingen poängpåverkan. Nya
+kategorier/bolag läggs till i de två konstanterna; användaren avgör gräns-
+fall (PLTR försvarsmjukvara är t.ex. INTE flaggad).
+
 ## Profiler som bevakas
 thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
 
@@ -115,6 +164,14 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
 - `python3 etoro_analys.py --divergens` — hämtar om bakgrundsgruppens
   portföljer (kräver att --screener körts, annars RuntimeError) till
   bakgrund_cache.json och kör sedan hela analysen.
+- `python3 etoro_analys.py --analytikerdata` — hämtar analytikerfälten (det
+  Yahoo .info/.eps_trend/.calendar ger) för alla aktier med ≥2 ägare i signal-
+  gruppen till analytikerdata.json i gisten. Körs VARDAGAR 00:00 UTC från
+  GitHub Actions (analytikerdata.yml — OBS: GitHub startar schemalagda jobb i
+  det här repot 4–6 h försenat, därför så tidigt) eftersom Yahoo blockerar .info på Render
+  men inte på GitHubs runners. run_analysis fyller saknade fält därifrån FÖRE
+  förra körningens värden (analyses[tk].analytiker_kalla anger källan). Kör
+  inte analysen. Kräver bara GIST_ID/GITHUB_TOKEN.
 - `python3 etoro_analys.py --utvardera` — utvärderar poängmodellen mot
   faktisk forward-avkastning (21/63/126 dgr) ur screener_facit.json
   (loggas automatiskt vid varje analyskörning, gist-synkad). Rapport per
@@ -274,14 +331,19 @@ thomaspj, michalhla, JeppeKirkBonde, triangulacapital, Smudliczek, ingruc
    thinking med mer marginal (max_tokens=2000), eftersom thinking äter av
    samma budget. Trimningen (2026-07-16) sänkte snittförbrukningen från
    ~10 300 till ~1 600 tokens/anrop (85 %) utan kvalitetsförlust.
-   DAGSSPÄRR: körs max 1 gång/dag (claude_datum i senaste_analys.json);
-   samma dag återanvänds texterna, men NYA konsensusaktier analyseras.
-   Kringgå med force_claude=True / CLI-flaggan --force-claude.
+   DAGSSPÄRR: claude_datum i senaste_analys.json. Texterna återanvänds som
+   default samma dag, men det är INTE en blankt "max 1 gång/dag oavsett" —
+   se CLAUDE-TRIGGERFILTER nedan, som (sedan 2026-08-04-fixet) körs på VARJE
+   körning samma dag, inte bara dagens första. Utan det kunde en köptrigger
+   stå kvar självmotsägande mot ett pris som redan passerat den, resten av
+   dagen — precis det nivåbrottsfiltret var till för att förhindra, fast det
+   bara utvärderades på dagens första körning innan fixet. Nya konsensus-
+   aktier analyseras alltid. Kringgå hela dagsspärren med force_claude=True
+   / CLI-flaggan --force-claude.
    HELGVILA: lördag/söndag återanvänds senaste analysen (marknaden
    stängd) och appen hämtar ingen ny data — fredagens data är färsk.
-   CLAUDE-TRIGGERFILTER (inom dagsspärren/helgvilan, ändrar den INTE):
-   behover_ny_analys(ticker, dagens_data, senaste_analys) avgör om en
-   redan analyserad aktie omanalyseras — bara vid väsentlig förändring
+   CLAUDE-TRIGGERFILTER: behover_ny_analys(ticker, dagens_data, senaste_analys)
+   avgör om en redan analyserad aktie omanalyseras — bara vid väsentlig förändring
    sedan claude[tk].indikator_snapshot sparades (RSI korsat 30/70, pris
    korsat MA200, MACD korsat signallinjen, golden/death cross, pris brutit
    igenom en frusen motstånds-/stödnivå som köptriggern/ogiltigt-om byggdes
