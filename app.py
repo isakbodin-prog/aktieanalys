@@ -151,6 +151,26 @@ st.markdown(f"""
   .st-key-fglank button:hover {{ color: {TEXT} !important; }}
   .stock {{ border-top: 1px solid {HAIRLINE}; }}
   .stock:last-child {{ border-bottom: 1px solid {HAIRLINE}; }}
+  /* ---- Etikvarning + EXIT (SCHEMA 2026-10-06) ----
+     Etik-⚠ i SAND, aldrig RUST: det är ren information och får inte läsas som
+     SÄLJ eller EXIT, som båda är röda. Fast bredd om ett tecken så den inte
+     knuffar isär mobilradens kolumner — tickern har egen minbredd. */
+  .etik {{ color: {SAND}; font-family: 'Space Grotesk', sans-serif;
+      font-size: .74em; margin-left: .3em; cursor: help;
+      display: inline-block; width: 1ch; text-align: center; }}
+  /* Exit-raden tonas ned i stället för att färgas röd — poängen är att den
+     inte ska läsas som en kandidat, inte att skrika. Sparklinen är redan röd
+     (trend_ok är falskt), så ytterligare rött hade blivit tjat. */
+  .stock.exit .rad {{ opacity: .58; }}
+  @media (hover: hover) {{ .stock.exit:hover .rad {{ opacity: 1; }} }}
+  .stock.exit .tk {{ text-decoration: line-through;
+      text-decoration-color: {MUTED}; text-decoration-thickness: 1px; }}
+  .exitflagg {{ font-family: 'Space Grotesk', sans-serif; font-size: .66rem;
+      text-transform: uppercase; letter-spacing: .12em; color: {RUST}; }}
+  .exitnot {{ font-family: 'Space Grotesk', sans-serif; font-size: .72rem;
+      color: {RUST}; letter-spacing: .02em; margin-bottom: .9rem; }}
+  .etiknot {{ font-family: 'Space Grotesk', sans-serif; font-size: .72rem;
+      color: {SAND}; letter-spacing: .02em; margin-bottom: .9rem; }}
   .stoggle {{ position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }}
   .rad {{ display: flex; align-items: center; gap: 1rem; padding: .8rem .3rem;
       cursor: pointer; transition: padding-left .28s ease; }}
@@ -478,7 +498,11 @@ st.markdown(f"""
        i utfällningen. */
     .delta-3m, .rad .pris, .rad .delta {{ display: none; }}
     .vikt {{ width: 2.8rem; font-size: .74rem; }}
-    .sparkbox {{ min-width: 38px; max-width: 92px; }}
+    /* 38 -> 24 px: raden hade noll slack kvar (0700.HK och 1810.HK låg exakt
+       på kanten), så etik-⚠ på en lång ticker som RHM.DE sköt sista kolumnen
+       12 px utanför skärmen. Sparklinen är enda elastiska fältet — den får ge
+       efter för de längsta tickrarna i stället för att raden klipps. */
+    .sparkbox {{ min-width: 24px; max-width: 92px; }}
     .spark {{ height: 20px; }}
     .delta {{ width: 3.4rem; font-size: .66rem; }}
     /* Tickern får ALDRIG krympa — med min-width: 0 bryter den mitt i ordet
@@ -590,6 +614,8 @@ def _cell_farg(v):
         return f"color: {SAND}"
     if s in ("Flockbeteende", "–"):
         return f"color: {MUTED}"
+    if s == "⚠":                      # etikvarning — SAND, aldrig RUST (≠ SÄLJ)
+        return f"color: {SAND}"
     return ""
 
 
@@ -822,6 +848,38 @@ def sparkline(ohlc, farg, bredd=120, hojd=26):
             f'stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>')
 
 
+def etik_lista(analys_map, tk):
+    """Etikkategorier för en ticker (SCHEMA: analyses[tk].etikvarning, list[str]).
+
+    Defensivt: fältet finns sedan 2026-10-06 men saknas i äldre JSON-filer, och
+    en tom lista betyder uttryckligen "ingen varning".
+    """
+    return (analys_map.get(tk) or {}).get("etikvarning") or []
+
+
+def etik_markering(kategorier, klass="etik"):
+    """Liten dämpad ⚠ med kategorierna i title. Tom sträng utan kategorier.
+
+    SAND, inte RUST: markeringen är ren information och får inte läsas som
+    SÄLJ eller EXIT, som båda är röda. Bredden hålls till ett tecken så den
+    inte knuffar isär mobilradens kolumner (se .etik i CSS:en).
+    """
+    if not kategorier:
+        return ""
+    titel = html.escape("Etikvarning: " + ", ".join(kategorier), quote=True)
+    return f'<span class="{klass}" title="{titel}" aria-label="{titel}">⚠</span>'
+
+
+def exit_info(rad):
+    """(exit_datum, exit_villkor) om ranking-raden är exit-flaggad, annars None.
+
+    SCHEMA 2026-10-06: exit-rader ligger kvar i `ranking` (sist) och känns igen
+    på att BÅDA nycklarna finns — övriga rader saknar dem helt.
+    """
+    datum, villkor = rad.get("exit_datum"), rad.get("exit_villkor")
+    return (datum, villkor) if datum and villkor else None
+
+
 def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max, analys_map):
     """Bästa köp som redaktionell hover/klick-lista (ren HTML/CSS, inga widgets).
 
@@ -912,21 +970,41 @@ def hero_html(ranking, claude_map, consensus_map, bransch_map, komp_max, analys_
             f = MOSS if (v or 0) > 0 else (RUST if (v or 0) < 0 else MUTED)
             return f'<span class="{klass}" style="color:{f}">{_pct(v)}</span>'
 
+        # Etikvarning + EXIT: båda är ren information som backend redan skriver
+        # men som UI:t hittills inte läste. Exit-raderna låg sist i listan och
+        # såg ut som vanliga kandidater — se SCHEMA 2026-10-06.
+        etik = etik_lista(analys_map, tk)
+        etik_html = etik_markering(etik)
+        exit_d = exit_info(r)
+        rad_klass = "stock exit" if exit_d else "stock"
+        exit_flagga = ('<span class="exitflagg">EXIT</span>' if exit_d else "")
+
+        # I utfällningen skrivs båda ut i klartext — markeringen i raden är
+        # medvetet kort, så detaljerna måste finnas någonstans.
+        extra = ""
+        if exit_d:
+            extra += (f'<div class="exitnot">EXIT sedan {exit_d[0]} · '
+                      f'{html.escape(exit_d[1])}</div>')
+        if etik:
+            extra += (f'<div class="etiknot">⚠ Etikvarning: '
+                      f'{html.escape(", ".join(etik))} — påverkar inte poängen.</div>')
+
         rader.append(
-            f'<div class="stock">'
+            f'<div class="{rad_klass}">'
             f'<input type="checkbox" id="st_{tk}" class="stoggle">'
             f'<label class="rad" for="st_{tk}">'
             f'<span class="rang">{i:02d}</span>{img}'
-            f'<span class="tk">{tk}</span>'
+            f'<span class="tk">{tk}{etik_html}</span>'
             f'<span class="sparkbox">{spark}</span>'
             f'<span class="pris">{kurs_txt}</span>'
             f'{_delta_span(av1, "delta")}'
             f'{_delta_span(av3, "delta delta-3m")}'
             f'<span class="vikt">{_num(r.get("foreslagen_vikt_%"), " %")}</span>'
             f'<span class="poang">{_sv1(poang)}</span>'
-            f'<span class="crek" style="color:{farg}">{crek}</span>'
+            f'<span class="crek" style="color:{farg}">{exit_flagga or crek}</span>'
             f'</label>'
             f'<div class="detalj"><div class="detalj-inner">'
+            f'{extra}'
             f'<div class="nyckeltal">{nyckel_html}</div>'
             f'<div class="delpoang">{dp_html}</div>'
             f'<div class="meta">{meta}</div>'
@@ -1376,7 +1454,11 @@ if view == "Bästa köp":
             'konsensusaktier · Värdering 10 p (forward P/E mot sektormedian, PEG). '
             '<strong>Poäng v1</strong> är förra modellen (utan Värdering/RS/spridning) — kvar '
             'för jämförelse tills --utvardera hunnit kalibrera de nya vikterna. '
-            'Aktier utan stigande trend rankas alltid sist, oavsett poäng.'
+            'Aktier utan stigande trend rankas alltid sist, oavsett poäng. '
+            '<strong>⚠</strong> = bolaget verkar inom fossila bränslen, vapen, tobak '
+            'eller spel. Påverkar inte poängen. '
+            '<strong>EXIT</strong> = dödskors (pris under MA200 och MA50 under MA200). '
+            'Raden ligger kvar sist i listan, nedtonad — inte som en kandidat.'
             '</span></details></div>',
             unsafe_allow_html=True,
         )
@@ -1525,6 +1607,11 @@ if view == "Konsensus":
             rows.append({
                 "Bransch": bransch_ikon(tk, bransch),
                 "Aktie": tk + (" · ny" if tk in nya_kons else ""),
+                # Egen smal kolumn i stället för ⚠ inuti Aktie-cellen:
+                # st.dataframe renderar inte HTML, och cellfärgning gäller hela
+                # cellen — hade markeringen legat i Aktie skulle tickern färgas
+                # sand i stället för bara symbolen.
+                "⚠": "⚠" if etik_lista(analyses, tk) else "",
                 "Stigande trend": trend_label(a),
                 "Portföljer": consensus[tk]["count"],
                 "Total vikt (%)": _total_vikt(consensus[tk]),
@@ -1532,10 +1619,14 @@ if view == "Konsensus":
                 "Claude": claude.get(tk, {}).get("rekommendation", "—"),
             })
         val = st.dataframe(
-            stylad(pd.DataFrame(rows), ["Aktie", "Stigande trend", "Claude"]),
+            stylad(pd.DataFrame(rows), ["Aktie", "⚠", "Stigande trend", "Claude"]),
             use_container_width=True, hide_index=True,
             on_select="rerun", selection_mode="single-row", key="kons_val",
-            column_config={"Bransch": st.column_config.ImageColumn("", width=36)})
+            column_config={"Bransch": st.column_config.ImageColumn("", width=36),
+                           "⚠": st.column_config.TextColumn(
+                               "⚠", width="small",
+                               help="Etikvarning: fossila bränslen, vapen, tobak "
+                                    "eller spel. Påverkar inte poängen.")})
 
         # Detaljkort för den markerade raden — konsensussignal, teknik, innehavstid.
         markerade = val.selection.rows
@@ -1550,6 +1641,14 @@ if view == "Konsensus":
             crek = c.get("rekommendation", "—")
             st.markdown(f"#### {tk} — {info['count']} portföljer · "
                         f"trend {trend_label(a)} · Claude {crek}")
+            # Kategorierna i klartext — symbolen i tabellen säger bara ATT det
+            # finns en varning, inte vilken.
+            _etik = etik_lista(analyses, tk)
+            if _etik:
+                st.markdown(
+                    f'<div class="etiknot">⚠ Etikvarning: '
+                    f'{html.escape(", ".join(_etik))} — påverkar inte poängen.</div>',
+                    unsafe_allow_html=True)
             k1, k2, k3, k4 = st.columns(4)
             k1.metric("Total vikt", _num(_total_vikt(info), " %"))
             k2.metric("Viktad kons.", _num(info.get("viktad_konsensus")))
@@ -1611,8 +1710,12 @@ if view == "Konsensus":
                 ("Riktkurs", _num(a.get("riktkurs"))),
                 ("Uppsida", _num(a.get("uppsida_%"), " %")),
             ]
+        _etik = etik_lista(analyses, tk)
+        if _etik:
+            rader.append(("Etikvarning", ", ".join(_etik)))
         kons_kort.append({
-            "ikon": img, "tk": tk + (" · ny" if tk in nya_kons else ""),
+            "ikon": img,
+            "tk": tk + (" · ny" if tk in nya_kons else "") + etik_markering(_etik),
             "trend": _trend_mark(a), "claude": crek,
             "claudefarg": REK_FARG.get(crek, MUTED), "rader": rader})
     st.markdown(mobilkort_html(kons_kort), unsafe_allow_html=True)
@@ -1816,6 +1919,15 @@ if view == "Claude":
             format_func=lambda t: f"{t} — {(claude.get(t) or {}).get('rekommendation', 'ingen analys')}")
         a = analyses.get(tk, {})
         c = claude.get(tk)
+
+        # Samma klartextrad som i Konsensus detaljkort — detta är också en
+        # detaljvy per aktie, och Claudes text nämner inte etikaspekten.
+        _etik = etik_lista(analyses, tk)
+        if _etik:
+            st.markdown(
+                f'<div class="etiknot">⚠ Etikvarning: '
+                f'{html.escape(", ".join(_etik))} — påverkar inte poängen.</div>',
+                unsafe_allow_html=True)
 
         uppsida = a.get("uppsida_%")
         # Nyckeltal + indikatorer (desktop). Döljs på mobil — ersätts av kompakt rutnät.
