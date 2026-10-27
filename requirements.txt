@@ -6,3 +6,4 @@ streamlit
 anthropic
 plotly
 pytz
+certifi>=2026.10.23   # eMudhra-incidenten 2026-10-19: tre emSign-rötter borttagna
